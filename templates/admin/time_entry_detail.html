@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entry Detail — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <a href="{{ url_for('time_admin.admin_time_entries') }}?token={{ entry.token }}"
+           style="color: var(--blue); font-size: 14px;">&larr; Back to Time Entries</a>
+
+        <h2 style="margin-top: 12px;">Time Entry #{{ entry.id }} — {{ entry.employee_name }}</h2>
+
+        <div class="entry-detail">
+            {# Left column: Map #}
+            <div>
+                <div id="map" class="detail-map"></div>
+                <div style="margin-top: 8px; font-size: 12px; color: var(--gray-500);">
+                    <span style="color: var(--blue);">&#9679;</span> Job Location
+                    <span style="color: var(--green); margin-left: 12px;">&#9679;</span> Clock In
+                    {% if entry.clock_out_lat and entry.clock_out_lng %}
+                    <span style="color: var(--red); margin-left: 12px;">&#9679;</span> Clock Out
+                    {% endif %}
+                </div>
+            </div>
+
+            {# Right column: Details #}
+            <div>
+                <div class="detail-field"><span class="label">Employee</span><span class="value">{{ entry.employee_name }} ({{ entry.emp_id_str }})</span></div>
+                <div class="detail-field"><span class="label">Job</span><span class="value">{{ entry.job_name }}</span></div>
+                <div class="detail-field"><span class="label">Job Address</span><span class="value">{{ entry.job_address }}</span></div>
+                <div class="detail-field"><span class="label">Status</span><span class="value">
+                    {% if entry.status == 'active' %}<span class="badge badge-active">Active</span>
+                    {% elif entry.status == 'completed' %}<span class="badge badge-complete">Completed</span>
+                    {% elif entry.status == 'needs_review' %}<span class="badge badge-needs_review">Needs Review</span>
+                    {% endif %}
+                </span></div>
+
+                <h3 style="margin-top: 20px;">Clock In</h3>
+                <div class="detail-field"><span class="label">Time</span><span class="value">{{ entry.clock_in_time|fmt_datetime }}</span></div>
+                <div class="detail-field"><span class="label">Method</span><span class="value"><span class="badge badge-{{ entry.clock_in_method }}">{{ entry.clock_in_method }}</span></span></div>
+                {% if entry.clock_in_lat %}
+                <div class="detail-field"><span class="label">GPS</span><span class="value">{{ "%.6f"|format(entry.clock_in_lat) }}, {{ "%.6f"|format(entry.clock_in_lng) }}</span></div>
+                {% if entry.clock_in_distance is not none %}
+                <div class="detail-field"><span class="label">Distance to Job</span><span class="value {% if entry.clock_in_distance > 0.5 %}distance-flag{% else %}distance-ok{% endif %}">{{ "%.2f"|format(entry.clock_in_distance) }} mi</span></div>
+                {% endif %}
+                {% endif %}
+
+                <h3 style="margin-top: 20px;">Clock Out</h3>
+                <div class="detail-field"><span class="label">Time</span><span class="value">{{ entry.clock_out_time|fmt_datetime }}</span></div>
+                {% if entry.clock_out_method %}
+                <div class="detail-field"><span class="label">Method</span><span class="value"><span class="badge badge-{{ entry.clock_out_method }}">{{ entry.clock_out_method }}</span></span></div>
+                {% endif %}
+                {% if entry.clock_out_lat %}
+                <div class="detail-field"><span class="label">GPS</span><span class="value">{{ "%.6f"|format(entry.clock_out_lat) }}, {{ "%.6f"|format(entry.clock_out_lng) }}</span></div>
+                {% if entry.clock_out_distance is not none %}
+                <div class="detail-field"><span class="label">Distance to Job</span><span class="value {% if entry.clock_out_distance > 0.5 %}distance-flag{% else %}distance-ok{% endif %}">{{ "%.2f"|format(entry.clock_out_distance) }} mi</span></div>
+                {% endif %}
+                {% endif %}
+
+                <h3 style="margin-top: 20px;">Hours</h3>
+                <div class="detail-field"><span class="label">Total Hours</span><span class="value">{{ entry.total_hours or '—' }}</span></div>
+                {% if entry.manual_time_in or entry.manual_time_out %}
+                <div class="detail-field"><span class="label">Manual In</span><span class="value">{{ entry.manual_time_in|fmt_datetime }}</span></div>
+                <div class="detail-field"><span class="label">Manual Out</span><span class="value">{{ entry.manual_time_out|fmt_datetime }}</span></div>
+                {% endif %}
+
+                {# Admin Notes #}
+                <h3 style="margin-top: 20px;">Admin Notes</h3>
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <textarea id="admin-notes" rows="3">{{ entry.admin_notes or '' }}</textarea>
+                </div>
+                <button type="button" id="save-notes-btn" class="btn btn-blue btn-sm"
+                        data-url="{{ url_for('time_admin.admin_entry_update_notes', entry_id=entry.id) }}">Save Notes</button>
+
+                {# Status Change #}
+                <h3 style="margin-top: 20px;">Change Status</h3>
+                <form method="POST" action="{{ url_for('time_admin.admin_entry_update_status', entry_id=entry.id) }}">
+                    <div class="form-row" style="margin-bottom: 8px;">
+                        <div class="form-group" style="flex: 1;">
+                            <select name="status">
+                                <option value="active" {% if entry.status == 'active' %}selected{% endif %}>Active</option>
+                                <option value="completed" {% if entry.status == 'completed' %}selected{% endif %}>Completed</option>
+                                <option value="needs_review" {% if entry.status == 'needs_review' %}selected{% endif %}>Needs Review</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <label for="status_reason">Reason (required)</label>
+                        <input type="text" id="status_reason" name="reason" required
+                               placeholder="Why is the status being changed?">
+                    </div>
+                    <button type="submit" class="btn btn-blue btn-sm">Update Status</button>
+                </form>
+
+                {# Change Job #}
+                <h3 style="margin-top: 20px;">Change Job</h3>
+                <form method="POST" action="{{ url_for('time_admin.admin_entry_change_job', entry_id=entry.id) }}">
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <label for="change_job_id">New Job</label>
+                        <select id="change_job_id" name="job_id" required>
+                            <option value="">— Select a job —</option>
+                            {% for j in jobs %}
+                            <option value="{{ j.id }}" {% if j.id == entry.job_id %}disabled{% endif %}>{{ j.job_name }}{% if j.id == entry.job_id %} (current){% endif %}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <label for="change_job_reason">Reason (required)</label>
+                        <input type="text" id="change_job_reason" name="reason" required
+                               placeholder="Why is this entry being reassigned?">
+                    </div>
+                    <button type="submit" class="btn btn-blue btn-sm">Change Job</button>
+                </form>
+
+                {# Manual Time Override #}
+                <h3 style="margin-top: 20px;">Manual Time Override</h3>
+                <p style="font-size: 12px; color: var(--gray-500); margin-bottom: 8px;">Edit one or both times. Leave a field blank to keep the current value.</p>
+                <form method="POST" action="{{ url_for('time_admin.admin_entry_manual_times', entry_id=entry.id) }}">
+                    <div class="form-row" style="margin-bottom: 8px;">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="manual_time_in">Clock In Override</label>
+                            <input type="datetime-local" id="manual_time_in" name="manual_time_in"
+                                   value="{{ entry.manual_time_in[:16] if entry.manual_time_in else '' }}">
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="manual_time_out">Clock Out Override</label>
+                            <input type="datetime-local" id="manual_time_out" name="manual_time_out"
+                                   value="{{ entry.manual_time_out[:16] if entry.manual_time_out else '' }}">
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <label for="override_notes">Reason (required)</label>
+                        <textarea id="override_notes" name="admin_notes" rows="2" required
+                                  placeholder="Explain why the time is being manually overridden..."></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-green btn-sm"
+                            onclick="document.getElementById('override_reason').value = document.getElementById('override_notes').value;">Apply Override</button>
+                    <input type="hidden" id="override_reason" name="reason">
+                </form>
+
+                {# Delete Entry — admin/BDB only #}
+                {% if current_user.is_admin or current_user.is_bdb %}
+                <h3 style="margin-top: 20px;">Delete Entry</h3>
+                <form method="POST" action="{{ url_for('time_admin.admin_entry_delete', entry_id=entry.id) }}"
+                      onsubmit="if(!this.reason.value.trim()){alert('A reason is required.');return false;} return confirm('Delete this time entry? This cannot be undone.');">
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <label for="delete_reason">Reason (required)</label>
+                        <input type="text" id="delete_reason" name="reason" required
+                               placeholder="Why is this entry being deleted?">
+                    </div>
+                    <button type="submit" class="btn btn-red btn-sm">Delete Entry</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+
+        {# Audit Log for this entry #}
+        <h2 style="margin-top: 32px;">Audit Log</h2>
+        {% if audit %}
+        <div class="table-wrap">
+            <table class="resizable">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Action</th>
+                        <th>Field</th>
+                        <th>Old Value</th>
+                        <th>New Value</th>
+                        <th>Changed By</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in audit %}
+                    <tr>
+                        <td>{{ log.timestamp|fmt_datetime }}</td>
+                        <td>{{ log.action }}</td>
+                        <td>{{ log.field_changed or '' }}</td>
+                        <td>{{ log.old_value or '' }}</td>
+                        <td>{{ log.new_value or '' }}</td>
+                        <td>{{ log.changed_by or '' }}</td>
+                        <td>{{ log.reason or '' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500);">No audit log entries for this record.</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script>
+    (function() {
+        var jobLat = {{ entry.job_lat or 'null' }};
+        var jobLng = {{ entry.job_lng or 'null' }};
+        var inLat = {{ entry.clock_in_lat or 'null' }};
+        var inLng = {{ entry.clock_in_lng or 'null' }};
+        var outLat = {{ entry.clock_out_lat or 'null' }};
+        var outLng = {{ entry.clock_out_lng or 'null' }};
+
+        var points = [];
+        if (jobLat && jobLng) points.push([jobLat, jobLng]);
+        if (inLat && inLng) points.push([inLat, inLng]);
+        if (outLat && outLng) points.push([outLat, outLng]);
+
+        if (points.length === 0) {
+            document.getElementById('map').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--gray-400);">No GPS coordinates available</div>';
+            return;
+        }
+
+        var map = L.map('map');
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(map);
+
+        if (jobLat && jobLng) {
+            L.circleMarker([jobLat, jobLng], {
+                radius: 10, fillColor: '#2563eb', color: '#1e40af',
+                weight: 2, opacity: 1, fillOpacity: 0.8
+            }).addTo(map).bindPopup('<strong>Job Location</strong><br>' + jobLat.toFixed(6) + ', ' + jobLng.toFixed(6));
+        }
+        if (inLat && inLng) {
+            L.circleMarker([inLat, inLng], {
+                radius: 10, fillColor: '#16a34a', color: '#15803d',
+                weight: 2, opacity: 1, fillOpacity: 0.8
+            }).addTo(map).bindPopup('<strong>Clock In</strong><br>' + inLat.toFixed(6) + ', ' + inLng.toFixed(6));
+        }
+        if (outLat && outLng) {
+            L.circleMarker([outLat, outLng], {
+                radius: 10, fillColor: '#dc2626', color: '#b91c1c',
+                weight: 2, opacity: 1, fillOpacity: 0.8
+            }).addTo(map).bindPopup('<strong>Clock Out</strong><br>' + outLat.toFixed(6) + ', ' + outLng.toFixed(6));
+        }
+
+        if (points.length === 1) {
+            map.setView(points[0], 16);
+        } else {
+            map.fitBounds(points, {padding: [40, 40]});
+        }
+    })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Products & Services — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Products &amp; Services</h2>
+
+        {% if current_user.is_bdb %}
+            {% if tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    <option value="">All Companies</option>
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        {% else %}
+            {% if selected_token %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        {% if selected_token %}
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Add Product / Service</h3>
+            <form method="POST" action="{{ url_for('admin.admin_product_service_create') }}">
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+                <div class="form-row">
+                    <div class="form-group" style="flex: 2;">
+                        <label for="ps-name">Name</label>
+                        <input type="text" id="ps-name" name="name" placeholder="e.g. Framing lumber, Labor - install" required>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="ps-price">Unit Price ($)</label>
+                        <input type="number" id="ps-price" name="unit_price" value="0.00" step="0.01" min="0">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="ps-sort">Sort Order</label>
+                        <input type="number" id="ps-sort" name="sort_order" value="0" step="1">
+                    </div>
+                    <div class="form-group" style="align-self: flex-end;">
+                        <button type="submit" class="btn btn-green">Add</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if products %}
+        <div class="table-wrap">
+            <table class="resizable">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Unit Price</th>
+                        <th>Sort Order</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in products %}
+                    <tr>
+                        <td>
+                            <span id="psname-display-{{ p.id }}">{{ p.name }}</span>
+                            <input type="text" id="psname-input-{{ p.id }}" value="{{ p.name }}"
+                                   style="display: none; width: 100%;">
+                        </td>
+                        <td>
+                            <span id="psprice-display-{{ p.id }}">${{ '{:.2f}'.format(p.unit_price or 0) }}</span>
+                            <input type="number" id="psprice-input-{{ p.id }}" value="{{ '{:.2f}'.format(p.unit_price or 0) }}"
+                                   step="0.01" min="0" style="display: none; width: 100px;">
+                        </td>
+                        <td>
+                            <span id="pssort-display-{{ p.id }}">{{ p.sort_order }}</span>
+                            <input type="number" id="pssort-input-{{ p.id }}" value="{{ p.sort_order }}"
+                                   style="display: none; width: 80px;">
+                        </td>
+                        <td>
+                            {% if p.is_active %}
+                            <span class="badge badge-active">Active</span>
+                            {% else %}
+                            <span class="badge badge-inactive">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td style="display: flex; gap: 6px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-blue btn-sm" id="psedit-btn-{{ p.id }}"
+                                    onclick="togglePsEdit({{ p.id }})">Edit</button>
+                            <button type="button" class="btn btn-green btn-sm" id="pssave-btn-{{ p.id }}"
+                                    style="display: none;"
+                                    onclick="savePs({{ p.id }})">Save</button>
+                            <form method="POST" action="{{ url_for('admin.admin_product_service_toggle', ps_id=p.id) }}" style="display: inline;">
+                                {% if p.is_active %}
+                                <button type="submit" class="btn btn-red btn-sm">Deactivate</button>
+                                {% else %}
+                                <button type="submit" class="btn btn-green btn-sm">Activate</button>
+                                {% endif %}
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500);">No products or services yet.{% if not selected_token %} Select a company above to add items.{% endif %}</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script>
+    function togglePsEdit(id) {
+        var nameDisplay = document.getElementById('psname-display-' + id);
+        var nameInput = document.getElementById('psname-input-' + id);
+        var priceDisplay = document.getElementById('psprice-display-' + id);
+        var priceInput = document.getElementById('psprice-input-' + id);
+        var sortDisplay = document.getElementById('pssort-display-' + id);
+        var sortInput = document.getElementById('pssort-input-' + id);
+        var editBtn = document.getElementById('psedit-btn-' + id);
+        var saveBtn = document.getElementById('pssave-btn-' + id);
+        var editing = nameInput.style.display === 'none';
+        nameDisplay.style.display = editing ? 'none' : '';
+        nameInput.style.display = editing ? '' : 'none';
+        priceDisplay.style.display = editing ? 'none' : '';
+        priceInput.style.display = editing ? '' : 'none';
+        sortDisplay.style.display = editing ? 'none' : '';
+        sortInput.style.display = editing ? '' : 'none';
+        editBtn.style.display = editing ? 'none' : '';
+        saveBtn.style.display = editing ? '' : 'none';
+    }
+
+    function savePs(id) {
+        var name = document.getElementById('psname-input-' + id).value;
+        var unit_price = document.getElementById('psprice-input-' + id).value;
+        var sort_order = document.getElementById('pssort-input-' + id).value;
+        fetch('/admin/products-services/' + id + '/update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: name, unit_price: unit_price, sort_order: sort_order})
+        }).then(function(resp) {
+            if (resp.ok) { window._guardBypass = true; window.location.reload(); }
+            else { alert('Error saving product/service.'); }
+        });
+    }
+    </script>
+</body>
+</html>

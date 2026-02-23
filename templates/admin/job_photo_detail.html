@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Detail — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    {% if photo.latitude and photo.longitude %}
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    {% endif %}
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <a href="{{ url_for('job_photos.admin_job_photos', token=photo.token, job_id=photo.job_id, week=photo.week_folder) }}"
+           style="color: var(--blue); text-decoration: none; font-size: 14px;">&larr; Back to {{ photo.week_folder }}</a>
+
+        <h2 style="margin-top: 12px;">{{ photo.job_name }} — Photo</h2>
+
+        <div class="receipt-detail">
+            <div>
+                <img src="{{ url_for('job_photos.serve_photo', photo_id=photo.id) }}" alt="Job Photo">
+            </div>
+
+            <div class="receipt-info">
+                <p><strong>Job:</strong> {{ photo.job_name }}</p>
+                {% if photo.job_address %}
+                <p><strong>Address:</strong> {{ photo.job_address }}</p>
+                {% endif %}
+                <p><strong>Date/Time:</strong> {{ photo.created_at|fmt_datetime }}</p>
+                <p><strong>Week:</strong> {{ photo.week_folder }}</p>
+                {% if photo.taken_by %}
+                <p><strong>Taken By:</strong> {{ photo.taken_by }}</p>
+                {% endif %}
+
+                <h3>Caption</h3>
+                <div class="transcription">
+                    {% if photo.caption %}
+                    {{ photo.caption }}
+                    {% else %}
+                    <em>No caption.</em>
+                    {% endif %}
+                </div>
+
+                {% if photo.latitude and photo.longitude %}
+                <h3>Location</h3>
+                <div id="map" style="height: 220px; border: 1px solid var(--gray-200); border-radius: var(--radius); margin-bottom: 4px;"></div>
+                <div style="font-size: 12px; color: var(--gray-500); margin-bottom: 12px;">
+                    {{ "%.6f"|format(photo.latitude) }}, {{ "%.6f"|format(photo.longitude) }}
+                </div>
+                {% endif %}
+
+                <h3>Downloads</h3>
+                <div class="download-links">
+                    <a href="{{ url_for('job_photos.serve_photo', photo_id=photo.id) }}" class="btn btn-blue btn-sm" download>Download</a>
+                </div>
+                {% if photo.latitude and photo.longitude %}
+                <p style="font-size: 12px; color: var(--gray-500); margin-top: 6px;">GPS coordinates are embedded in the JPEG EXIF data for Google posting.</p>
+                {% endif %}
+
+                {% if current_user.is_admin or current_user.is_bdb %}
+                <h3 style="margin-top: 20px;">Delete</h3>
+                <form method="POST" action="{{ url_for('job_photos.admin_delete_photo', photo_id=photo.id) }}"
+                      onsubmit="return confirm('Delete this photo? This cannot be undone.');">
+                    <button type="submit" class="btn btn-red btn-sm">Delete</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    {% if photo.latitude and photo.longitude %}
+    <script>
+    (function() {
+        var lat = {{ photo.latitude }};
+        var lng = {{ photo.longitude }};
+        var map = L.map('map').setView([lat, lng], 16);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(map);
+        L.circleMarker([lat, lng], {
+            radius: 10, fillColor: '#dc2626', color: '#b91c1c',
+            weight: 2, opacity: 1, fillOpacity: 0.8
+        }).addTo(map).bindPopup('<strong>Photo Location</strong><br>' + lat.toFixed(6) + ', ' + lng.toFixed(6));
+    })();
+    </script>
+    {% endif %}
+</body>
+</html>

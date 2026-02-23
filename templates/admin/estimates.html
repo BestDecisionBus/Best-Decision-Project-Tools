@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estimates / Projects — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        <h2>Estimates / Projects</h2>
+
+        {% if current_user.is_bdb %}
+            {% if tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        {% endif %}
+
+        {% if selected_token %}
+        <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
+            <form method="GET" style="display: flex; gap: 8px; flex: 1; min-width: 200px; flex-wrap: wrap;">
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+                <input type="text" name="search" placeholder="Search transcriptions or jobs..." value="{{ search }}"
+                       style="flex: 1; min-width: 200px; padding: 8px 12px; border: 1px solid var(--gray-300); border-radius: 6px;">
+                <button type="submit" class="btn btn-blue btn-sm">Search</button>
+                {% if search %}
+                <a href="?token={{ selected_token.token }}" class="btn btn-sm" style="background: var(--gray-400); color: #fff;">Clear</a>
+                {% endif %}
+            </form>
+            <form method="POST" action="/admin/estimates/create">
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+                <button type="submit" class="btn btn-green">+ New Estimate</button>
+            </form>
+        </div>
+
+        {% if estimates %}
+        <div class="table-responsive table-with-tips">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th style="min-width: 110px;"># <span class="help-tip">?<span class="help-tip-text">Est = pending/declined estimate, Proj = accepted/in-progress/completed project</span></span></th>
+                        <th>Job <span class="help-tip">?<span class="help-tip-text">Job site or project name</span></span></th>
+                        <th>Date <span class="help-tip">?<span class="help-tip-text">Date the estimate was created</span></span></th>
+                        <th>Approval <span class="help-tip">?<span class="help-tip-text">Current approval status: Pending, Accepted, In Progress, Completed, or Declined</span></span></th>
+                        <th>Value <span class="help-tip">?<span class="help-tip-text">Total estimate value (contract price to customer)</span></span></th>
+                        <th>Est. Cost <span class="help-tip">?<span class="help-tip-text">Estimated materials + labor cost to complete the job</span></span></th>
+                        <th>Actual Cost <span class="help-tip">?<span class="help-tip-text">Actual materials + labor spent so far</span></span></th>
+                        <th>Collected <span class="help-tip">?<span class="help-tip-text">Total payments received from the customer</span></span></th>
+                        <th>WIP % <span class="help-tip">?<span class="help-tip-text">Work-in-progress completion percentage as entered on the estimate/project</span></span></th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in estimates %}
+                    <tr>
+                        <td style="white-space: nowrap;">{% if e.approval_status not in ('pending', 'declined') %}Proj{% else %}Est{% endif %} #{{ e.estimate_number or e.id }}</td>
+                        <td>{{ e.job_name or '—' }}</td>
+                        <td style="white-space: nowrap;">{{ e.created_at[:10] if e.created_at else '' }}</td>
+                        <td>
+                            {% if e.approval_status == 'accepted' %}
+                            <span class="badge" style="background: #dbeafe; color: #1d4ed8;">Accepted</span>
+                            {% elif e.approval_status == 'in_progress' %}
+                            <span class="badge" style="background: #e0e7ff; color: #3730a3;">In Progress</span>
+                            {% elif e.approval_status == 'completed' %}
+                            <span class="badge badge-active">Completed</span>
+                            {% elif e.approval_status == 'declined' %}
+                            <span class="badge" style="background: #fee2e2; color: #991b1b;">Declined</span>
+                            {% else %}
+                            <span class="badge" style="background: #fef3c7; color: #92400e;">Pending</span>
+                            {% endif %}
+                        </td>
+                        <td style="text-align: right; white-space: nowrap;">
+                            {% if e.estimate_value %}${{ '{:,.2f}'.format(e.estimate_value) }}{% else %}—{% endif %}
+                        </td>
+                        {% set est_cost = (e.est_materials_cost or 0) + (e.est_labor_cost or 0) %}
+                        {% set actual_cost = (e.actual_materials_cost or 0) + (e.actual_labor_cost or 0) %}
+                        <td style="text-align: right; white-space: nowrap;">
+                            {% if est_cost %}${{ '{:,.0f}'.format(est_cost) }}{% else %}—{% endif %}
+                        </td>
+                        <td style="text-align: right; white-space: nowrap;">
+                            {% if actual_cost %}${{ '{:,.0f}'.format(actual_cost) }}{% else %}—{% endif %}
+                        </td>
+                        <td style="text-align: right; white-space: nowrap;">
+                            {% if e.actual_collected %}${{ '{:,.0f}'.format(e.actual_collected) }}{% else %}—{% endif %}
+                        </td>
+                        <td style="text-align: right; white-space: nowrap;">
+                            {% if e.completion_pct %}{{ e.completion_pct|round(0)|int }}%{% else %}—{% endif %}
+                        </td>
+                        <td style="display: flex; gap: 6px;">
+                            <a href="/admin/estimates/{{ e.id }}?token={{ selected_token.token }}" class="btn btn-sm btn-blue">View</a>
+                            <form method="POST" action="/admin/estimates/{{ e.id }}/delete" style="display: inline;" onsubmit="return confirm('Delete this estimate?')">
+                                <button type="submit" class="btn btn-sm btn-red">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500); text-align: center; padding: 32px;">No estimates or projects found.</p>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>

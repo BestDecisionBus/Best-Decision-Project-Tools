@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Photos — {{ token.company_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="capture-container">
+        <div class="capture-header">
+            {% if token.logo_file %}
+            <div class="header-row">
+                <img src="/static/logos/{{ token.logo_file }}" alt="{{ token.company_name }}" class="company-logo">
+                <div class="header-text">
+                    <div class="company-name">{{ token.company_name }}</div>
+                    <h1>Job Photos</h1>
+                </div>
+            </div>
+            {% else %}
+            <div class="company-name">{{ token.company_name }}</div>
+            <h1>Job Photos</h1>
+            {% endif %}
+            <a href="/c/{{ token.token }}" class="back-to-home">Back to Home</a>
+            <a href="/help?token={{ token.token }}" target="_blank" class="help-link">Help</a>
+        </div>
+
+        {# Main capture form #}
+        <div id="capture-form">
+            <div class="form-group">
+                <label for="job-select">Select Job</label>
+                <select id="job-select" required>
+                    <option value="">-- Choose Job --</option>
+                    {% for job in jobs %}
+                    <option value="{{ job.id }}">{{ job.job_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Take a Photo</label>
+                <input type="file" id="photo-input" accept="image/*" capture="environment"
+                       style="display: none;" onchange="onPhotoSelected(this)">
+                <button type="button" class="btn btn-blue" style="width: 100%;" onclick="document.getElementById('photo-input').click()">
+                    Open Camera
+                </button>
+                <input type="file" id="library-input" accept="image/*" multiple
+                       style="display: none;" onchange="onLibraryPhotosSelected(this)">
+                <button type="button" class="btn btn-green" style="width: 100%; margin-top: 8px;" onclick="document.getElementById('library-input').click()">
+                    Upload from Library
+                </button>
+                <span id="gps-indicator" style="font-size: 12px; color: var(--gray-400); display: block; margin-top: 6px;">Getting location...</span>
+            </div>
+
+            <div id="photo-preview" style="display: none; margin-top: 16px;">
+                <img id="preview-img" src="" alt="Preview" style="width: 100%; border-radius: 8px; border: 1px solid var(--gray-200);">
+                <button type="button" class="btn btn-red btn-sm" style="margin-top: 8px;" onclick="retakePhoto()">Retake</button>
+            </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+                <label for="caption">Caption (optional)</label>
+                <textarea id="caption" rows="2" placeholder="e.g. Front entrance progress" style="width: 100%; resize: vertical;"></textarea>
+            </div>
+
+            <button type="button" id="submit-btn" class="btn btn-green" style="width: 100%; margin-top: 12px;" onclick="submitPhoto()">
+                Submit Photo
+            </button>
+        </div>
+
+        {# Batch upload screen #}
+        <div id="batch-screen" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h3 id="batch-count" style="margin: 0;">0 Photos Selected</h3>
+                <button type="button" class="btn btn-red btn-sm" onclick="cancelBatch()">Cancel</button>
+            </div>
+            <div id="batch-list"></div>
+            <div class="batch-progress" id="batch-progress">
+                <div class="batch-progress-bar" id="batch-progress-bar"></div>
+            </div>
+            <button type="button" id="batch-upload-btn" class="btn btn-green" style="width: 100%; margin-top: 12px;" onclick="uploadBatch()">
+                Upload All Photos
+            </button>
+        </div>
+
+        {# Success screen #}
+        <div id="success-screen" style="display: none; text-align: center; margin-top: 32px;">
+            <div style="font-size: 48px; color: var(--green); margin-bottom: 12px;">&#10003;</div>
+            <h3>Photo Uploaded!</h3>
+            <p style="color: var(--gray-500);">Your photo has been saved.</p>
+            <div id="uploaded-preview" style="margin-top: 16px;">
+                <img id="uploaded-img" src="" alt="Uploaded" style="max-width: 300px; border-radius: 8px; border: 1px solid var(--gray-200);">
+            </div>
+            <button type="button" class="btn btn-blue" style="margin-top: 16px;" onclick="resetForm()">Take Another Photo</button>
+        </div>
+
+        {# Error screen #}
+        <div id="error-screen" style="display: none; text-align: center; margin-top: 32px;">
+            <div style="font-size: 48px; color: var(--red); margin-bottom: 12px;">&#10007;</div>
+            <h3>Upload Failed</h3>
+            <p id="error-text" style="color: var(--red);"></p>
+            <button type="button" class="btn btn-blue" style="margin-top: 16px;" onclick="resetForm()">Try Again</button>
+        </div>
+
+        {# Processing indicator #}
+        <div id="processing-screen" style="display: none; text-align: center; margin-top: 32px;">
+            <div style="font-size: 24px; margin-bottom: 12px;">&#9203;</div>
+            <p>Uploading photo...</p>
+        </div>
+
+        <a href="/photo-library?token={{ token.token }}" class="btn" style="display: block; width: 100%; margin-top: 24px; padding: 14px; font-size: 16px; text-align: center; background: var(--purple); color: #fff; border: 2px solid var(--purple); font-weight: 600;">
+            View Photo Library
+        </a>
+        <a href="/job-files?token={{ token.token }}" class="btn" style="display: block; width: 100%; margin-top: 8px; padding: 14px; font-size: 16px; text-align: center; background: var(--purple); color: #fff; border: 2px solid var(--purple); font-weight: 600;">
+            View Files
+        </a>
+    </div>
+    {% include '_footer.html' %}
+
+    <script>
+    var TOKEN = "{{ token.token }}";
+    var photoFile = null;
+    var currentLat = null;
+    var currentLng = null;
+
+    // Request GPS on page load
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            function(pos) {
+                currentLat = pos.coords.latitude;
+                currentLng = pos.coords.longitude;
+                var el = document.getElementById('gps-indicator');
+                if (el) { el.textContent = 'Location captured'; el.style.color = 'var(--green)'; }
+            },
+            function() {
+                var el = document.getElementById('gps-indicator');
+                if (el) { el.textContent = 'Location unavailable'; el.style.color = 'var(--gray-400)'; }
+            },
+            {enableHighAccuracy: true, timeout: 10000}
+        );
+    } else {
+        var el = document.getElementById('gps-indicator');
+        if (el) { el.textContent = 'Location not supported'; el.style.color = 'var(--gray-400)'; }
+    }
+
+    function onPhotoSelected(input) {
+        if (input.files && input.files[0]) {
+            photoFile = input.files[0];
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('preview-img').src = e.target.result;
+                document.getElementById('photo-preview').style.display = '';
+            };
+            reader.readAsDataURL(photoFile);
+        }
+    }
+
+    function retakePhoto() {
+        photoFile = null;
+        document.getElementById('photo-preview').style.display = 'none';
+        document.getElementById('photo-input').value = '';
+    }
+
+    function doUpload(jobId, caption) {
+        document.getElementById('capture-form').style.display = 'none';
+        document.getElementById('processing-screen').style.display = '';
+
+        var formData = new FormData();
+        formData.append('token', TOKEN);
+        formData.append('job_id', jobId);
+        formData.append('image', photoFile);
+        if (caption) formData.append('caption', caption);
+        if (currentLat !== null) formData.append('latitude', currentLat);
+        if (currentLng !== null) formData.append('longitude', currentLng);
+
+        fetch('/api/job-photos/upload', {method: 'POST', body: formData})
+            .then(function(resp) {
+                if (resp.ok) return resp.json();
+                return resp.json().then(function(d) { throw new Error(d.error || 'Upload failed'); });
+            })
+            .then(function(data) {
+                document.getElementById('processing-screen').style.display = 'none';
+                if (data.thumb_url) {
+                    document.getElementById('uploaded-img').src = data.thumb_url;
+                }
+                document.getElementById('success-screen').style.display = '';
+            })
+            .catch(function(err) {
+                document.getElementById('processing-screen').style.display = 'none';
+                document.getElementById('error-text').textContent = err.message;
+                document.getElementById('error-screen').style.display = '';
+            });
+    }
+
+    function submitPhoto() {
+        var jobId = document.getElementById('job-select').value;
+        if (!jobId) { alert('Please select a job.'); return; }
+        if (!photoFile) { alert('Please take a photo first.'); return; }
+        var caption = document.getElementById('caption').value.trim();
+
+        // Try to get fresh GPS before uploading
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                function(pos) {
+                    currentLat = pos.coords.latitude;
+                    currentLng = pos.coords.longitude;
+                    doUpload(jobId, caption);
+                },
+                function() {
+                    // GPS unavailable — upload with whatever we have
+                    doUpload(jobId, caption);
+                },
+                {enableHighAccuracy: true, timeout: 5000}
+            );
+        } else {
+            doUpload(jobId, caption);
+        }
+    }
+
+    function resetForm() {
+        photoFile = null;
+        document.getElementById('photo-input').value = '';
+        document.getElementById('photo-preview').style.display = 'none';
+        document.getElementById('caption').value = '';
+        document.getElementById('capture-form').style.display = '';
+        document.getElementById('success-screen').style.display = 'none';
+        document.getElementById('error-screen').style.display = 'none';
+        document.getElementById('processing-screen').style.display = 'none';
+        document.getElementById('batch-screen').style.display = 'none';
+    }
+
+    // ---- Batch Upload from Library ----
+    var batchPhotos = []; // [{file, objectUrl, caption}]
+
+    function onLibraryPhotosSelected(input) {
+        var jobId = document.getElementById('job-select').value;
+        if (!jobId) {
+            alert('Please select a job first.');
+            input.value = '';
+            return;
+        }
+        if (!input.files || input.files.length === 0) return;
+
+        var files = [];
+        for (var i = 0; i < input.files.length; i++) {
+            files.push(input.files[i]);
+        }
+
+        batchPhotos = [];
+        var loaded = 0;
+        files.forEach(function(file) {
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                batchPhotos.push({
+                    file: file,
+                    dataUrl: e.target.result,
+                    caption: ''
+                });
+                loaded++;
+                if (loaded === files.length) {
+                    renderBatchList();
+                    document.getElementById('capture-form').style.display = 'none';
+                    document.getElementById('batch-screen').style.display = '';
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    function renderBatchList() {
+        var list = document.getElementById('batch-list');
+        list.innerHTML = '';
+        document.getElementById('batch-count').textContent = batchPhotos.length + ' Photo' + (batchPhotos.length !== 1 ? 's' : '') + ' Selected';
+
+        for (var i = 0; i < batchPhotos.length; i++) {
+            var card = document.createElement('div');
+            card.className = 'batch-photo-card';
+            card.id = 'batch-card-' + i;
+            card.innerHTML =
+                '<img class="batch-thumb" src="' + batchPhotos[i].dataUrl + '" alt="Photo ' + (i + 1) + '">' +
+                '<div class="batch-card-body">' +
+                    '<textarea rows="2" placeholder="Caption (optional)" onchange="updateBatchCaption(' + i + ', this.value)" style="width:100%; resize:vertical;">' + (batchPhotos[i].caption || '') + '</textarea>' +
+                '</div>' +
+                '<span class="batch-status" id="batch-status-' + i + '"></span>' +
+                '<button type="button" class="batch-remove" onclick="removeBatchPhoto(' + i + ')" title="Remove">&times;</button>';
+            list.appendChild(card);
+        }
+
+        var uploadBtn = document.getElementById('batch-upload-btn');
+        uploadBtn.disabled = batchPhotos.length === 0;
+        if (batchPhotos.length === 0) {
+            cancelBatch();
+        }
+    }
+
+    function updateBatchCaption(index, value) {
+        if (batchPhotos[index]) {
+            batchPhotos[index].caption = value;
+        }
+    }
+
+    function removeBatchPhoto(index) {
+        batchPhotos.splice(index, 1);
+        renderBatchList();
+    }
+
+    function cancelBatch() {
+        batchPhotos = [];
+        document.getElementById('batch-list').innerHTML = '';
+        document.getElementById('batch-screen').style.display = 'none';
+        document.getElementById('batch-progress').style.display = 'none';
+        document.getElementById('batch-progress-bar').style.width = '0%';
+        document.getElementById('library-input').value = '';
+        document.getElementById('capture-form').style.display = '';
+    }
+
+    function uploadBatch() {
+        var jobId = document.getElementById('job-select').value;
+        if (!jobId) { alert('Please select a job.'); return; }
+        if (batchPhotos.length === 0) return;
+
+        var uploadBtn = document.getElementById('batch-upload-btn');
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = 'Uploading...';
+
+        var progress = document.getElementById('batch-progress');
+        var progressBar = document.getElementById('batch-progress-bar');
+        progress.style.display = '';
+        progressBar.style.width = '0%';
+
+        // Disable remove buttons during upload
+        var removeBtns = document.querySelectorAll('.batch-remove');
+        for (var r = 0; r < removeBtns.length; r++) {
+            removeBtns[r].disabled = true;
+            removeBtns[r].style.opacity = '0.3';
+        }
+
+        var total = batchPhotos.length;
+        var completed = 0;
+        var errors = 0;
+
+        function uploadNext(index) {
+            if (index >= total) {
+                uploadBtn.textContent = 'Done — ' + completed + ' uploaded' + (errors > 0 ? ', ' + errors + ' failed' : '');
+                if (errors === 0) {
+                    // All succeeded — show success after brief pause
+                    setTimeout(function() {
+                        cancelBatch();
+                        document.getElementById('success-screen').style.display = '';
+                    }, 1000);
+                }
+                return;
+            }
+
+            var card = document.getElementById('batch-card-' + index);
+            var status = document.getElementById('batch-status-' + index);
+            if (card) card.className = 'batch-photo-card uploading';
+            if (status) status.textContent = 'Uploading...';
+
+            var formData = new FormData();
+            formData.append('token', TOKEN);
+            formData.append('job_id', jobId);
+            formData.append('image', batchPhotos[index].file);
+            if (batchPhotos[index].caption) formData.append('caption', batchPhotos[index].caption);
+            if (currentLat !== null) formData.append('latitude', currentLat);
+            if (currentLng !== null) formData.append('longitude', currentLng);
+
+            fetch('/api/job-photos/upload', {method: 'POST', body: formData})
+                .then(function(resp) {
+                    if (resp.ok) return resp.json();
+                    return resp.json().then(function(d) { throw new Error(d.error || 'Upload failed'); });
+                })
+                .then(function() {
+                    completed++;
+                    if (card) card.className = 'batch-photo-card done';
+                    if (status) status.textContent = 'Done';
+                })
+                .catch(function(err) {
+                    errors++;
+                    if (card) card.className = 'batch-photo-card error';
+                    if (status) status.textContent = err.message || 'Failed';
+                })
+                .then(function() {
+                    var pct = Math.round(((completed + errors) / total) * 100);
+                    progressBar.style.width = pct + '%';
+                    uploadNext(index + 1);
+                });
+        }
+
+        // Get fresh GPS then start sequential uploads
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                function(pos) {
+                    currentLat = pos.coords.latitude;
+                    currentLng = pos.coords.longitude;
+                    uploadNext(0);
+                },
+                function() { uploadNext(0); },
+                {enableHighAccuracy: true, timeout: 5000}
+            );
+        } else {
+            uploadNext(0);
+        }
+    }
+    </script>
+</body>
+</html>

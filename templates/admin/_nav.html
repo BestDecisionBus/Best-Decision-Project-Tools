@@ -1,0 +1,81 @@
+{% set _token_param = selected_token.token if selected_token is defined and selected_token and selected_token is mapping else (selected_token if selected_token is defined and selected_token is string and selected_token else '') %}
+{% set ep = request.endpoint or '' %}
+{% set _sched_only = current_user.is_scheduler and not current_user.is_bdb %}
+
+{# ---- Group detection ---- #}
+{% set g_dashboard = (ep == 'admin.admin_dashboard') %}
+{% set g_jobs = ('job' in ep or 'photo' in ep or 'estimate' in ep) and not g_dashboard %}
+{% set g_employees = ('employee' in ep or 'schedule' in ep or 'time_entr' in ep or 'export' in ep or 'manual' in ep) %}
+{% set g_receipts = ('receipt' in ep) %}
+{% set g_finance = ('finance' in ep) %}
+{% set g_lists = ('categor' in ep or 'common_task' in ep or 'message_snippet' in ep or 'product' in ep or 'shift_type' in ep) %}
+{% set g_admin = ('audit' in ep or 'token' in ep or 'admin.admin_user' in ep) %}
+{% set g_guide = ('guide' in ep) %}
+
+{# ---- URL helper ---- #}
+{%- macro turl(ep_name) -%}
+{{ url_for(ep_name, token=_token_param) if _token_param else url_for(ep_name) }}
+{%- endmacro -%}
+
+{# ---- Main nav (one row of group tabs) ---- #}
+<nav class="admin-nav">
+    {% if not _sched_only %}
+    <a href="{{ turl('admin.admin_dashboard') }}" {% if g_dashboard %}class="active"{% endif %}>Dashboard</a>
+    <a href="{{ turl('finance.finance_dashboard') }}" {% if g_finance %}class="active"{% endif %}>Finance</a>
+    <a href="{{ turl('estimates.admin_estimates') }}" {% if g_jobs %}class="active"{% endif %}>Jobs</a>
+    <a href="{{ turl('scheduling.admin_schedules') }}" {% if g_employees %}class="active"{% endif %}>Employees</a>
+    <a href="{{ turl('receipt_admin.receipt_dashboard') }}" {% if g_receipts %}class="active"{% endif %}>Receipts</a>
+    <a href="{{ turl('admin.admin_categories') }}" {% if g_lists %}class="active"{% endif %}>Lists</a>
+    {% else %}
+    <a href="{{ turl('time_admin.admin_time_entries') }}" {% if g_employees %}class="active"{% endif %}>Time Clock</a>
+    {% endif %}
+    <a href="{{ turl('time_admin.admin_audit_log') }}" {% if g_admin %}class="active"{% endif %}>Admin</a>
+    {% if not _sched_only %}
+    <a href="{{ turl('time_admin.admin_guide') }}" {% if g_guide %}class="active"{% endif %}>Guide</a>
+    {% endif %}
+    <span class="spacer"></span>
+    <span class="user-info">{{ current_user.username }} <span class="badge badge-active" style="font-size: 10px;">{{ current_user.role }}</span></span>
+    <a href="{{ url_for('logout') }}">Logout</a>
+</nav>
+
+{# ---- Sub-navigation (second row, shown for groups with multiple items) ---- #}
+{% if g_jobs and not _sched_only %}
+<nav class="admin-subnav">
+    <a href="{{ turl('estimates.admin_estimates') }}" {% if 'estimate' in ep %}class="active"{% endif %}>Estimates / Projects</a>
+    <a href="{{ turl('job_photos.admin_job_photos') }}" {% if 'photo' in ep %}class="active"{% endif %}>Job Photos / Files</a>
+    <a href="{{ turl('time_admin.admin_jobs') }}" {% if 'job' in ep and 'photo' not in ep and 'estimate' not in ep %}class="active"{% endif %}>Jobs</a>
+</nav>
+{% elif g_employees %}
+<nav class="admin-subnav">
+    <a href="{{ turl('scheduling.admin_schedules') }}" {% if 'schedule' in ep %}class="active"{% endif %}>Schedules</a>
+    <a href="{{ turl('time_admin.admin_time_entries') }}" {% if 'time_entr' in ep or 'manual' in ep %}class="active"{% endif %}>Time Entries</a>
+    {% if not _sched_only %}
+    <a href="{{ turl('time_admin.admin_export') }}" {% if 'export' in ep %}class="active"{% endif %}>Payroll Export</a>
+    <a href="{{ turl('time_admin.admin_employees') }}" {% if 'employee' in ep %}class="active"{% endif %}>Employees</a>
+    {% endif %}
+</nav>
+{% elif g_lists and not _sched_only %}
+<nav class="admin-subnav">
+    <a href="{{ turl('admin.admin_categories') }}" {% if 'categor' in ep %}class="active"{% endif %}>Expense Categories</a>
+    <a href="{{ turl('admin.admin_common_tasks') }}" {% if 'common_task' in ep %}class="active"{% endif %}>Scheduled Tasks</a>
+    <a href="{{ turl('admin.admin_message_snippets') }}" {% if 'message_snippet' in ep %}class="active"{% endif %}>Message Snippets</a>
+    <a href="{{ turl('admin.admin_products_services') }}" {% if 'product' in ep %}class="active"{% endif %}>Products &amp; Services</a>
+    <a href="{{ turl('admin.admin_shift_types') }}" {% if 'shift_type' in ep %}class="active"{% endif %}>Shift Types</a>
+</nav>
+{% elif g_admin %}
+<nav class="admin-subnav">
+    <a href="{{ turl('time_admin.admin_audit_log') }}" {% if 'audit' in ep %}class="active"{% endif %}>Audit Log</a>
+    {% if current_user.is_bdb %}
+    <a href="{{ url_for('admin.admin_tokens') }}" {% if 'token' in ep %}class="active"{% endif %}>Tokens</a>
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('admin.admin_users') }}" {% if 'admin.admin_user' in ep %}class="active"{% endif %}>Users</a>
+    {% endif %}
+    {% endif %}
+</nav>
+{% endif %}
+
+{# ---- Company logo (floated right, appears beside page title) ---- #}
+{% if selected_token is defined and selected_token and selected_token is mapping and selected_token.logo_file %}
+<img src="/static/logos/{{ selected_token.logo_file }}" alt="{{ selected_token.company_name }}"
+     class="admin-company-logo">
+{% endif %}

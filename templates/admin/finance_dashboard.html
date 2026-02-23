@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CFO Dashboard — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        <h2>CFO Dashboard</h2>
+
+        {% if current_user.is_bdb %}
+            {% if tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        {% endif %}
+
+        {% if selected_token and labor_stats %}
+
+        {# ── Row 1: Company Targets (editable) ── #}
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <div class="form-row" style="align-items: flex-end;">
+                <div class="form-group" style="flex: 0 0 auto; min-width: 180px;">
+                    <label for="income-target">Income Target % <span class="help-tip">?<span class="help-tip-text">Your target net income as a percentage of earned revenue</span></span></label>
+                    <input type="number" id="income-target" class="target-input" step="0.1" min="0" max="100"
+                           value="{{ income_target_pct }}" onchange="saveTargets()">
+                </div>
+                <div class="form-group" style="flex: 0 0 auto; min-width: 180px;">
+                    <label for="monthly-overhead">Monthly Overhead $ <span class="help-tip">?<span class="help-tip-text">Fixed monthly costs: rent, insurance, office staff, truck payments, etc.</span></span></label>
+                    <input type="number" id="monthly-overhead" class="target-input" step="1" min="0"
+                           value="{{ monthly_overhead|int }}" onchange="saveTargets()" style="text-align: right;">
+                </div>
+                <div class="form-group" style="flex: 0 0 auto; min-width: 180px;">
+                    <label for="cash-on-hand">Cash on Hand $ <span class="help-tip">?<span class="help-tip-text">Total liquid cash across all bank accounts (checking, savings, money market)</span></span></label>
+                    <input type="number" id="cash-on-hand" class="target-input" step="1" min="0"
+                           value="{{ cash_on_hand|int }}" onchange="saveTargets()" style="text-align: right;">
+                </div>
+                {% if kpis %}
+                <div style="display: flex; gap: 20px; align-items: flex-end; padding-bottom: 4px; margin-left: auto;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 12px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; margin-bottom: 4px;">Overhead % <span class="help-tip">?<span class="help-tip-text">Annualized monthly overhead as a percentage of earned revenue: (monthly × 12) ÷ earned revenue</span></span></div>
+                        <div style="font-size: 15px; font-weight: 700; color: var(--gray-800);">{{ overhead_pct }}%</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 12px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; margin-bottom: 4px;">Margin Target <span class="help-tip">?<span class="help-tip-text">Overhead % + Income Target %. The minimum margin needed to cover overhead and hit your income goal</span></span></div>
+                        <div style="font-size: 15px; font-weight: 700; color: var(--gray-800);">{{ kpis.margin_target|default(0) }}%</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 12px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; margin-bottom: 4px;">Markup Required <span class="help-tip">?<span class="help-tip-text">Cost markup needed to achieve your margin target. Markup = margin ÷ (1 − margin)</span></span></div>
+                        <div style="font-size: 15px; font-weight: 700; color: var(--gray-800);">{{ kpis.markup_required|default(0) }}%</div>
+                    </div>
+                </div>
+                {% endif %}
+                <div id="target-status" style="font-size: 13px; color: var(--gray-400); padding-bottom: 2px;"></div>
+            </div>
+        </div>
+
+        {# ── Row 2: Executive KPI Cards ── #}
+        {% if kpis %}
+        <div class="kpi-grid">
+            <div class="stat-card stat-blue">
+                <div class="stat-label">Pipeline Value <span class="help-tip">?<span class="help-tip-text">Total value of estimates still pending approval</span></span></div>
+                <div class="stat-value">${{ '{:,.0f}'.format(kpis.pipeline_value) }}</div>
+                <div class="stat-sub">Pending estimates</div>
+            </div>
+            <div class="stat-card stat-blue">
+                <div class="stat-label">Contracted Revenue <span class="help-tip">?<span class="help-tip-text">Total value of accepted + in-progress estimates</span></span></div>
+                <div class="stat-value">${{ '{:,.0f}'.format(kpis.contracted_revenue) }}</div>
+                <div class="stat-sub">Accepted + in progress</div>
+            </div>
+            <div class="stat-card stat-blue">
+                <div class="stat-label">Cash Collected <span class="help-tip">?<span class="help-tip-text">Total payments received across all projects</span></span></div>
+                <div class="stat-value">${{ '{:,.0f}'.format(kpis.revenue_collected) }}</div>
+                <div class="stat-sub">Total received</div>
+            </div>
+            <div class="stat-card stat-blue">
+                <div class="stat-label">Earned Revenue <span class="help-tip">?<span class="help-tip-text">Revenue recognized based on % of work completed: budget × completion %</span></span></div>
+                <div class="stat-value">${{ '{:,.0f}'.format(kpis.earned_revenue) }}</div>
+                <div class="stat-sub">Based on % complete</div>
+            </div>
+            <div class="stat-card{% if kpis.unearned_liability > 0 %} stat-alert{% endif %}">
+                <div class="stat-label">Unearned Liability <span class="help-tip">?<span class="help-tip-text">Cash collected ahead of work completed — a liability until earned</span></span></div>
+                <div class="stat-value">${{ '{:,.0f}'.format(kpis.unearned_liability) }}</div>
+                <div class="stat-sub">Collected but not yet earned</div>
+            </div>
+            <div class="stat-card stat-blue">
+                <div class="stat-label">Total Costs <span class="help-tip">?<span class="help-tip-text">Actual materials + labor costs incurred across all projects</span></span></div>
+                <div class="stat-value">${{ '{:,.0f}'.format(kpis.total_actual_costs) }}</div>
+                <div class="stat-sub">Materials + labor</div>
+            </div>
+            <div class="stat-card {{ 'stat-green' if kpis.net_income >= 0 else 'stat-red' }}">
+                <div class="stat-label">Net Income <span class="help-tip">?<span class="help-tip-text">Earned revenue − total costs − overhead allocation</span></span></div>
+                <div class="stat-value" style="color: {{ 'var(--green)' if kpis.net_income >= 0 else 'var(--red)' }};">${{ '{:,.0f}'.format(kpis.net_income) }}</div>
+                <div class="stat-sub">Earned − costs − overhead</div>
+            </div>
+            <div class="stat-card {{ 'stat-green' if kpis.net_income_pct >= kpis.income_target_pct else 'stat-red' }}">
+                <div class="stat-label">Net Income % <span class="help-tip">?<span class="help-tip-text">Net income as a percentage of earned revenue</span></span></div>
+                <div class="stat-value" style="color: {{ 'var(--green)' if kpis.net_income_pct >= kpis.income_target_pct else 'var(--red)' }};">{{ kpis.net_income_pct }}%</div>
+                <div class="stat-sub">{{ kpis.net_income_pct }}% / {{ kpis.income_target_pct }}% target</div>
+            </div>
+            <div class="stat-card {% if kpis.days_cash_on_hand >= 60 %}stat-green{% elif kpis.days_cash_on_hand < 30 %}stat-red{% else %}stat-blue{% endif %}">
+                <div class="stat-label">Days Cash on Hand <span class="help-tip">?<span class="help-tip-text">Cash on Hand ÷ daily overhead. How long you can cover fixed costs with zero revenue</span></span></div>
+                <div class="stat-value" style="color: {% if kpis.days_cash_on_hand >= 60 %}var(--green){% elif kpis.days_cash_on_hand >= 30 %}#d97706{% else %}var(--red){% endif %};">{{ kpis.days_cash_on_hand }}</div>
+                <div class="stat-sub">days</div>
+            </div>
+            <div class="stat-card {{ 'stat-green' if kpis.overbilling >= 0 else 'stat-red' }}">
+                <div class="stat-label">Billing Position <span class="help-tip">?<span class="help-tip-text">Cash collected minus earned revenue. Positive = overbilled (liability). Negative = underbilled (uninvoiced work)</span></span></div>
+                <div class="stat-value" style="color: {{ 'var(--green)' if kpis.overbilling >= 0 else 'var(--red)' }};">{{ 'Overbilled' if kpis.overbilling >= 0 else 'Underbilled' }}</div>
+                <div class="stat-sub">${{ '{:,.0f}'.format(kpis.overbilling|abs) }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+        {# ── Row 3: Health Gauges ── #}
+        {% if totals %}
+        <div style="display: flex; gap: 40px; justify-content: center; margin-bottom: 32px; flex-wrap: wrap;">
+            {# Overall Margin Gauge (all projects, no pending estimates) #}
+            {# -50%→0° (red), 30%→60° (orange), 35%→120° (green), 60%+→180° #}
+            {% set m_pct = totals.margin_pct %}
+            {% if m_pct <= -50 %}{% set m_angle = 0 %}
+            {% elif m_pct < 30 %}{% set m_angle = ((m_pct + 50) / 80 * 60)|int %}
+            {% elif m_pct <= 35 %}{% set m_angle = (60 + (m_pct - 30) / 5 * 60)|int %}
+            {% elif m_pct <= 60 %}{% set m_angle = (120 + (m_pct - 35) / 25 * 60)|int %}
+            {% else %}{% set m_angle = 180 %}
+            {% endif %}
+            <div class="gauge-wrap">
+                <div class="gauge">
+                    <div class="gauge-bg"></div>
+                    <div class="gauge-needle" style="--gauge-angle: {{ m_angle }}deg;"></div>
+                    <div class="gauge-cover"></div>
+                </div>
+                <div class="gauge-value" style="color: {% if m_pct >= 35 %}var(--green){% elif m_pct >= 30 %}#d97706{% else %}var(--red){% endif %};">{{ m_pct }}%</div>
+                <div class="gauge-label">Overall Margin <span class="help-tip">?<span class="help-tip-text">(Earned revenue − total costs) ÷ earned revenue. All projects, no pending estimates</span></span></div>
+            </div>
+
+            {# WIP Income vs Completion: ratio 1.0 = center (90°), >1 = ahead (green/right), <1 = behind (red/left) #}
+            {# 0.5→0°, 0.75→45°, 1.0→90°, 1.25→135°, 1.5+→180° #}
+            {% set wi = totals.wip_income_ratio %}
+            {% if wi <= 0.5 %}{% set wi_angle = 0 %}
+            {% elif wi >= 1.5 %}{% set wi_angle = 180 %}
+            {% else %}{% set wi_angle = ((wi - 0.5) / 1.0 * 180)|int %}
+            {% endif %}
+            {% set wi_pct = ((wi - 1.0) * 100)|round(0)|int %}
+            <div class="gauge-wrap">
+                <div class="gauge">
+                    <div class="gauge-bg"></div>
+                    <div class="gauge-needle" style="--gauge-angle: {{ wi_angle }}deg;"></div>
+                    <div class="gauge-cover"></div>
+                </div>
+                <div class="gauge-value" style="color: {% if wi >= 1.1 %}var(--green){% elif wi >= 0.9 %}#d97706{% else %}var(--red){% endif %};">${{ '{:,.0f}'.format(totals.wip_actual_income) }}</div>
+                <div class="gauge-sub" style="font-size: 11px; color: var(--gray-400);">${{ '{:,.0f}'.format(totals.wip_expected_income) }} expected</div>
+                <div class="gauge-label">WIP Income vs Progress <span class="help-tip">?<span class="help-tip-text">Compares cash collected to what should be collected based on % complete. Center = on track</span></span></div>
+            </div>
+
+            {# WIP Expenses vs Completion (inverted): ratio 1.0 = center (90°), <1 = under budget (green/right), >1 = over (red/left) #}
+            {# 1.5→0°, 1.25→45°, 1.0→90°, 0.75→135°, 0.5→180° #}
+            {% set we = totals.wip_expense_ratio %}
+            {% if we >= 1.5 %}{% set we_angle = 0 %}
+            {% elif we <= 0.5 %}{% set we_angle = 180 %}
+            {% else %}{% set we_angle = ((1.5 - we) / 1.0 * 180)|int %}
+            {% endif %}
+            {% set we_pct = ((we - 1.0) * 100)|round(0)|int %}
+            <div class="gauge-wrap">
+                <div class="gauge">
+                    <div class="gauge-bg"></div>
+                    <div class="gauge-needle" style="--gauge-angle: {{ we_angle }}deg;"></div>
+                    <div class="gauge-cover"></div>
+                </div>
+                <div class="gauge-value" style="color: {% if we <= 0.9 %}var(--green){% elif we <= 1.1 %}#d97706{% else %}var(--red){% endif %};">${{ '{:,.0f}'.format(totals.wip_actual_cost) }}</div>
+                <div class="gauge-sub" style="font-size: 11px; color: var(--gray-400);">${{ '{:,.0f}'.format(totals.wip_expected_cost) }} expected</div>
+                <div class="gauge-label">WIP Costs vs Progress <span class="help-tip">?<span class="help-tip-text">Compares actual costs to expected costs based on % complete. Center = on track</span></span></div>
+            </div>
+
+            {# Budget Consumption Gauge (inverted): 0%→180° (green), 80%→120°, 100%→60°, 120%+→0° (red) #}
+            {% set b_pct = totals.budget_pct %}
+            {% if b_pct <= 0 %}{% set b_angle = 180 %}
+            {% elif b_pct <= 80 %}{% set b_angle = (180 - b_pct / 80 * 60)|int %}
+            {% elif b_pct <= 100 %}{% set b_angle = (120 - (b_pct - 80) / 20 * 60)|int %}
+            {% elif b_pct <= 120 %}{% set b_angle = (60 - (b_pct - 100) / 20 * 60)|int %}
+            {% else %}{% set b_angle = 0 %}
+            {% endif %}
+            <div class="gauge-wrap">
+                <div class="gauge">
+                    <div class="gauge-bg"></div>
+                    <div class="gauge-needle" style="--gauge-angle: {{ b_angle }}deg;"></div>
+                    <div class="gauge-cover"></div>
+                </div>
+                <div class="gauge-value" style="color: {% if b_pct <= 80 %}var(--green){% elif b_pct <= 100 %}#d97706{% else %}var(--red){% endif %};">{{ b_pct }}%</div>
+                <div class="gauge-label">Budget Consumption <span class="help-tip">?<span class="help-tip-text">Actual costs as % of estimated costs across all projects</span></span></div>
+            </div>
+
+            {# Collection Rate Gauge: 0%→0° (red), 100%→180° (green) — linear #}
+            {% if kpis %}
+            {% set c_pct = kpis.collection_rate %}
+            {% if c_pct <= 0 %}{% set c_angle = 0 %}
+            {% elif c_pct >= 100 %}{% set c_angle = 180 %}
+            {% else %}{% set c_angle = (c_pct / 100 * 180)|int %}
+            {% endif %}
+            <div class="gauge-wrap">
+                <div class="gauge">
+                    <div class="gauge-bg"></div>
+                    <div class="gauge-needle" style="--gauge-angle: {{ c_angle }}deg;"></div>
+                    <div class="gauge-cover"></div>
+                </div>
+                <div class="gauge-value" style="color: {% if c_pct >= 67 %}var(--green){% elif c_pct >= 33 %}#d97706{% else %}var(--red){% endif %};">{{ c_pct }}%</div>
+                <div class="gauge-label">Collection Rate <span class="help-tip">?<span class="help-tip-text">Cash collected as % of total contracted revenue</span></span></div>
+            </div>
+
+            {# Backlog Months Gauge: 0→0° (red), 3→60° (orange), 6→120° (green), 12+→180° #}
+            {% set bl = kpis.backlog_months %}
+            {% if bl <= 0 %}{% set bl_angle = 0 %}
+            {% elif bl <= 3 %}{% set bl_angle = (bl / 3 * 60)|int %}
+            {% elif bl <= 6 %}{% set bl_angle = (60 + (bl - 3) / 3 * 60)|int %}
+            {% elif bl <= 12 %}{% set bl_angle = (120 + (bl - 6) / 6 * 60)|int %}
+            {% else %}{% set bl_angle = 180 %}
+            {% endif %}
+            <div class="gauge-wrap">
+                <div class="gauge">
+                    <div class="gauge-bg"></div>
+                    <div class="gauge-needle" style="--gauge-angle: {{ bl_angle }}deg;"></div>
+                    <div class="gauge-cover"></div>
+                </div>
+                <div class="gauge-value" style="color: {% if bl >= 6 %}var(--green){% elif bl >= 3 %}#d97706{% else %}var(--red){% endif %};">{{ bl }}</div>
+                <div class="gauge-label">Backlog Months <span class="help-tip">?<span class="help-tip-text">Contracted revenue ÷ monthly overhead. Months of work lined up to cover fixed costs. Below 3 = sell more. Above 6-8 = check capacity</span></span></div>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {# ── Row 4: Estimate Pipeline (YTD) ── #}
+        {% if estimate_stats %}
+        <h3 style="margin-bottom: 12px;">Estimate Pipeline — YTD</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 32px;">
+            <div class="stat-card stat-blue">
+                <div class="stat-label">Pending</div>
+                <div class="stat-value">{{ estimate_stats.pending.count }}</div>
+                <div class="stat-sub">${{ '{:,.0f}'.format(estimate_stats.pending.total) }}</div>
+            </div>
+            <div class="stat-card stat-blue">
+                <div class="stat-label">Accepted</div>
+                <div class="stat-value">{{ estimate_stats.accepted.count }}</div>
+                <div class="stat-sub">${{ '{:,.0f}'.format(estimate_stats.accepted.total) }}</div>
+            </div>
+            <div class="stat-card stat-blue">
+                <div class="stat-label">In Progress</div>
+                <div class="stat-value">{{ estimate_stats.in_progress.count }}</div>
+                <div class="stat-sub">${{ '{:,.0f}'.format(estimate_stats.in_progress.total) }}</div>
+            </div>
+            <div class="stat-card stat-blue">
+                <div class="stat-label">Completed</div>
+                <div class="stat-value">{{ estimate_stats.completed.count }}</div>
+                <div class="stat-sub">${{ '{:,.0f}'.format(estimate_stats.completed.total) }}</div>
+            </div>
+            <div class="stat-card stat-red">
+                <div class="stat-label">Declined</div>
+                <div class="stat-value" style="color: #dc2626;">{{ estimate_stats.declined.count }}</div>
+                <div class="stat-sub">${{ '{:,.0f}'.format(estimate_stats.declined.total) }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+        {# ── Row 5: Active Projects Table (enhanced) ── #}
+        {% if active_jobs %}
+        <h3 style="margin-bottom: 12px;">Active Projects</h3>
+        <div class="table-responsive table-with-tips" style="margin-bottom: 32px;">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Job <span class="help-tip">?<span class="help-tip-text">Project or job site name</span></span></th>
+                        <th style="text-align: right;">Budget <span class="help-tip">?<span class="help-tip-text">Total estimate value (contract price to customer)</span></span></th>
+                        <th style="text-align: right;">Est. Cost <span class="help-tip">?<span class="help-tip-text">Estimated materials + labor cost to complete the job</span></span></th>
+                        <th style="text-align: right;">Actual Cost <span class="help-tip">?<span class="help-tip-text">Actual materials + labor spent so far</span></span></th>
+                        <th style="text-align: right;">Collected <span class="help-tip">?<span class="help-tip-text">Total payments received from the customer</span></span></th>
+                        <th style="text-align: right;">Earned <span class="help-tip">?<span class="help-tip-text">Revenue recognized based on completion % (Budget x Completion %)</span></span></th>
+                        <th style="text-align: right;">Budget % <span class="help-tip">?<span class="help-tip-text">Actual cost as % of estimated cost. Over 100% = over budget</span></span></th>
+                        <th style="text-align: right;">WIP % <span class="help-tip">?<span class="help-tip-text">Work-in-progress completion percentage as entered on the estimate/project</span></span></th>
+                        <th style="text-align: center;">Completion <span class="help-tip">?<span class="help-tip-text">Percentage of work completed on this project</span></span></th>
+                        <th style="text-align: center;">Health <span class="help-tip">?<span class="help-tip-text">Green = margin above target. Yellow = close. Red = below (overhead % + income target %)</span></span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for j in active_jobs %}
+                    {% set j_margin_pct = j.actual_margin_pct %}
+                    {% set health_threshold = overhead_pct + income_target_pct %}
+                    <tr>
+                        <td>{{ j.job_name }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(j.budget) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(j.est_total_cost) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(j.actual_total_cost) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(j.actual_collected) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(j.earned_revenue) }}</td>
+                        <td style="text-align: right;">{{ j.budget_pct }}%</td>
+                        <td style="text-align: right;">{% if j.completion_pct %}{{ j.completion_pct|round(0)|int }}%{% else %}—{% endif %}</td>
+                        <td style="text-align: center; min-width: 80px;">
+                            <div class="progress-bar-mini">
+                                <div class="progress-bar-fill" style="width: {{ j.completion_pct }}%;"></div>
+                            </div>
+                            <span style="font-size: 11px; color: var(--gray-500);">{{ j.completion_pct }}%</span>
+                        </td>
+                        <td style="text-align: center;">
+                            {% if j_margin_pct < health_threshold %}
+                            <span class="health-dot health-red"></span>
+                            {% elif j_margin_pct < health_threshold + 10 %}
+                            <span class="health-dot health-yellow"></span>
+                            {% else %}
+                            <span class="health-dot health-green"></span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr style="font-weight: 700; border-top: 2px solid var(--gray-300);">
+                        <td>Totals</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(active_jobs|sum(attribute='budget')) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(active_jobs|sum(attribute='est_total_cost')) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(active_jobs|sum(attribute='actual_total_cost')) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(active_jobs|sum(attribute='actual_collected')) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(active_jobs|sum(attribute='earned_revenue')) }}</td>
+                        <td style="text-align: right;">—</td>
+                        <td style="text-align: right;">—</td>
+                        <td></td>
+                        <td></td>
+                    </tr>
+                    {% if kpis and kpis.required_revenue > 0 %}
+                    <tr style="border-top: 1px solid var(--gray-200);">
+                        <td colspan="5" style="font-weight: 600; color: var(--gray-600);">Required Revenue to Hit {{ income_target_pct }}% Income Target</td>
+                        <td style="text-align: right; font-weight: 700; color: var(--blue);">${{ '{:,.0f}'.format(kpis.required_revenue) }}</td>
+                        <td colspan="4"></td>
+                    </tr>
+                    {% endif %}
+                </tfoot>
+            </table>
+        </div>
+        {% endif %}
+
+        {# ── Row 6: Payroll & Labor (condensed) ── #}
+        <h3 style="margin-bottom: 12px;">Payroll & Labor</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px;">
+            <div class="stat-card stat-blue">
+                <div class="stat-label">This Week</div>
+                <div class="stat-value">${{ '{:,.2f}'.format(labor_stats.weekly.total_cost) }}</div>
+                <div class="stat-sub">{{ labor_stats.weekly.total_hours }} hrs — ${{ '{:,.2f}'.format(labor_stats.weekly.base_pay) }} base + ${{ '{:,.2f}'.format(labor_stats.weekly.burden) }} burden</div>
+            </div>
+            <div class="stat-card stat-blue">
+                <div class="stat-label">YTD</div>
+                <div class="stat-value">${{ '{:,.2f}'.format(labor_stats.ytd.total_cost) }}</div>
+                <div class="stat-sub">{{ labor_stats.ytd.total_hours }} hrs — ${{ '{:,.2f}'.format(labor_stats.ytd.base_pay) }} base + ${{ '{:,.2f}'.format(labor_stats.ytd.burden) }} burden</div>
+            </div>
+        </div>
+
+        {# ── Row 7: Completed Projects ── #}
+        {% if completed_jobs %}
+        <h3 style="margin-bottom: 12px;">Completed Projects</h3>
+        <div class="table-responsive" style="margin-bottom: 32px;">
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>Job</th>
+                        <th style="text-align: right;">Budget</th>
+                        <th style="text-align: right;">Final Cost</th>
+                        <th style="text-align: right;">Collected</th>
+                        <th style="text-align: right;">Final Margin</th>
+                        <th style="text-align: right;">Margin %</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for j in completed_jobs %}
+                    <tr>
+                        <td>{{ j.job_name }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(j.budget) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(j.actual_total_cost) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(j.actual_collected) }}</td>
+                        <td style="text-align: right; color: {{ 'var(--green)' if j.actual_margin >= 0 else 'var(--red)' }};">${{ '{:,.0f}'.format(j.actual_margin) }}</td>
+                        <td style="text-align: right; color: {{ 'var(--green)' if j.actual_margin_pct >= 0 else 'var(--red)' }};">{{ j.actual_margin_pct }}%</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if completed_jobs|length > 1 %}
+                <tfoot>
+                    <tr style="font-weight: 700; border-top: 2px solid var(--gray-300);">
+                        <td>Totals</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(completed_jobs|sum(attribute='budget')) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(completed_jobs|sum(attribute='actual_total_cost')) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(completed_jobs|sum(attribute='actual_collected')) }}</td>
+                        <td style="text-align: right;">${{ '{:,.0f}'.format(completed_jobs|sum(attribute='actual_margin')) }}</td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+        {% endif %}
+
+        {% elif not selected_token %}
+        <p style="color: var(--gray-500); text-align: center; padding: 32px;">Select a company to view financial data.</p>
+        {% else %}
+        <p style="color: var(--gray-500); text-align: center; padding: 32px;">No financial data available yet.</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    {% if selected_token %}
+    <script>
+    function saveTargets() {
+        var income = document.getElementById('income-target').value;
+        var monthlyOh = document.getElementById('monthly-overhead').value;
+        var cashOh = document.getElementById('cash-on-hand').value;
+        var status = document.getElementById('target-status');
+        status.textContent = 'Saving...';
+        status.style.color = 'var(--gray-400)';
+        fetch('/admin/finance/update-targets', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                token: '{{ selected_token.token }}',
+                income_target_pct: parseFloat(income) || 0,
+                monthly_overhead: Math.round(parseFloat(monthlyOh) || 0),
+                cash_on_hand: Math.round(parseFloat(cashOh) || 0)
+            })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                window._guardBypass = true; window.location.reload();
+            } else {
+                status.textContent = data.error || 'Error';
+                status.style.color = 'var(--red)';
+                setTimeout(function() { status.textContent = ''; }, 3000);
+            }
+        })
+        .catch(function() {
+            status.textContent = 'Network error';
+            status.style.color = 'var(--red)';
+            setTimeout(function() { status.textContent = ''; }, 3000);
+        });
+    }
+    </script>
+    {% endif %}
+</body>
+</html>

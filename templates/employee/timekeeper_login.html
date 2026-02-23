@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employee Login — {{ token.company_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="login-container">
+        {% if token.logo_file %}
+        <div style="text-align: center; margin-bottom: 16px;">
+            <img src="/static/logos/{{ token.logo_file }}" alt="{{ token.company_name }}" style="max-width: 120px; max-height: 60px;">
+        </div>
+        {% endif %}
+        <h1>{{ token.company_name }}</h1>
+        <p style="text-align: center; color: var(--gray-500); font-size: 14px; margin-bottom: 20px;">Employee Login</p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('timekeeper.timekeeper_login', token=token.token) }}">
+            <input type="hidden" name="token" value="{{ token.token }}">
+            <div class="form-group">
+                <label for="username">Username <span style="font-weight: 400; font-size: 12px; color: var(--gray-400);">(case sensitive)</span></label>
+                <input type="text" id="username" name="username" required autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password">
+            </div>
+            <button type="submit" class="btn btn-green" style="width:100%">Log In</button>
+        </form>
+    </div>
+    {% include '_footer.html' %}
+</body>
+</html>

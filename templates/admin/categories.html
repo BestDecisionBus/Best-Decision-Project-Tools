@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Expense Categories — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Expense Categories</h2>
+
+        {% if current_user.is_bdb %}
+            {% if tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    <option value="">All Companies</option>
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        {% else %}
+            {% if selected_token %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        {% if selected_token %}
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Add Category</h3>
+            <form method="POST" action="{{ url_for('admin.admin_category_create') }}">
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+                <div class="form-row">
+                    <div class="form-group" style="flex: 2;">
+                        <label for="cat-name">Category Name</label>
+                        <input type="text" id="cat-name" name="name" placeholder="Materials" required>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="cat-sort">Sort Order</label>
+                        <input type="number" id="cat-sort" name="sort_order" value="0" step="1">
+                    </div>
+                    <div class="form-group" style="align-self: flex-end;">
+                        <button type="submit" class="btn btn-green">Add Category</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if categories %}
+        <div class="table-wrap">
+            <table class="resizable">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Sort Order</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cat in categories %}
+                    <tr>
+                        <td>
+                            <span id="catname-display-{{ cat.id }}">{{ cat.name }}</span>
+                            <input type="text" id="catname-input-{{ cat.id }}" value="{{ cat.name }}"
+                                   style="display: none; width: 100%;">
+                        </td>
+                        <td>
+                            <span id="catsort-display-{{ cat.id }}">{{ cat.sort_order }}</span>
+                            <input type="number" id="catsort-input-{{ cat.id }}" value="{{ cat.sort_order }}"
+                                   style="display: none; width: 80px;">
+                        </td>
+                        <td>
+                            {% if cat.is_active %}
+                            <span class="badge badge-active">Active</span>
+                            {% else %}
+                            <span class="badge badge-inactive">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td style="display: flex; gap: 6px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-blue btn-sm" id="catedit-btn-{{ cat.id }}"
+                                    onclick="toggleCategoryEdit({{ cat.id }})">Edit</button>
+                            <button type="button" class="btn btn-green btn-sm" id="catsave-btn-{{ cat.id }}"
+                                    style="display: none;"
+                                    onclick="saveCategory({{ cat.id }})">Save</button>
+                            <form method="POST" action="{{ url_for('admin.admin_category_toggle', cat_id=cat.id) }}" style="display: inline;">
+                                {% if cat.is_active %}
+                                <button type="submit" class="btn btn-red btn-sm">Deactivate</button>
+                                {% else %}
+                                <button type="submit" class="btn btn-green btn-sm">Activate</button>
+                                {% endif %}
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500);">No categories yet.{% if not selected_token %} Select a company above to add categories.{% endif %}</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script>
+    function toggleCategoryEdit(id) {
+        var nameDisplay = document.getElementById('catname-display-' + id);
+        var nameInput = document.getElementById('catname-input-' + id);
+        var sortDisplay = document.getElementById('catsort-display-' + id);
+        var sortInput = document.getElementById('catsort-input-' + id);
+        var editBtn = document.getElementById('catedit-btn-' + id);
+        var saveBtn = document.getElementById('catsave-btn-' + id);
+        var editing = nameInput.style.display === 'none';
+        nameDisplay.style.display = editing ? 'none' : '';
+        nameInput.style.display = editing ? '' : 'none';
+        sortDisplay.style.display = editing ? 'none' : '';
+        sortInput.style.display = editing ? '' : 'none';
+        editBtn.style.display = editing ? 'none' : '';
+        saveBtn.style.display = editing ? '' : 'none';
+    }
+
+    function saveCategory(id) {
+        var name = document.getElementById('catname-input-' + id).value;
+        var sort_order = document.getElementById('catsort-input-' + id).value;
+        fetch('/admin/categories/' + id + '/update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: name, sort_order: sort_order})
+        }).then(function(resp) {
+            if (resp.ok) { window._guardBypass = true; window.location.reload(); }
+            else { alert('Error saving category.'); }
+        });
+    }
+    </script>
+</body>
+</html>

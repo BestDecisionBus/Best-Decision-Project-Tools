@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browse Receipts — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 style="margin: 0;">Browse Receipts</h2>
+            <a href="{{ url_for('receipt_admin.receipt_dashboard') }}" class="btn btn-blue">Recent Submissions</a>
+        </div>
+
+        {# Breadcrumb #}
+        <div class="breadcrumb">
+            <a href="{{ url_for('receipt_admin.receipt_browse') }}">Browse</a>
+            {% if selected_token %}
+            <span class="breadcrumb-sep">/</span>
+            <a href="{{ url_for('receipt_admin.receipt_browse_token', token_str=selected_token.token) }}">{{ selected_token.company_name }}</a>
+            {% endif %}
+            {% if selected_month %}
+            <span class="breadcrumb-sep">/</span>
+            <span>{{ selected_month }}</span>
+            {% endif %}
+        </div>
+
+        {# Step 1: Company pills #}
+        <div class="browse-nav">
+            {% for t in tokens %}
+            <a href="{{ url_for('receipt_admin.receipt_browse_token', token_str=t.token) }}"
+               {% if selected_token and selected_token.token == t.token %}class="active"{% endif %}>
+                {{ t.company_name }}
+            </a>
+            {% endfor %}
+        </div>
+
+        {% if selected_token %}
+            {# Step 2: Month folders #}
+            {% if months %}
+            <div class="browse-nav">
+                {% for m in months %}
+                <a href="{{ url_for('receipt_admin.receipt_browse_month', token_str=selected_token.token, month=m.month_folder) }}"
+                   {% if selected_month == m.month_folder %}class="active"{% endif %}>
+                    {{ m.month_folder }} ({{ m.count }})
+                </a>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {# Step 3: Submissions for selected month #}
+            {% if selected_month and submissions is not none %}
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                    <h3>{{ selected_token.company_name }} — {{ selected_month }}</h3>
+                    <a href="{{ url_for('receipt_admin.receipt_download_zip', token_str=selected_token.token, month=selected_month) }}"
+                       class="btn btn-blue btn-sm">Download ZIP</a>
+                </div>
+
+                {% if submissions %}
+                <div class="table-wrap">
+                    <table class="resizable sortable">
+                        <thead>
+                            <tr>
+                                <th>Processed</th>
+                                <th>Date/Time</th>
+                                <th>Job Name</th>
+                                <th>Vendor</th>
+                                <th>$</th>
+                                <th>Status</th>
+                                <th data-no-sort></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for sub in submissions %}
+                            <tr class="{{ 'row-processed' if sub.processed else '' }}">
+                                <td class="td-checkbox">
+                                    <input type="checkbox" class="processed-checkbox" data-id="{{ sub.id }}"
+                                           {{ 'checked' if sub.processed else '' }}>
+                                </td>
+                                <td>{{ sub.timestamp|fmt_datetime }}</td>
+                                <td>{{ sub.job_name or '' }}</td>
+                                <td>{{ sub.vendor or '' }}</td>
+                                <td>{% if sub.total_amount %}${{ '{:,.2f}'.format(sub.total_amount) }}{% endif %}</td>
+                                <td><span class="badge badge-{{ sub.status }}">{{ sub.status }}</span></td>
+                                <td style="display: flex; gap: 6px;">
+                                    <a href="{{ url_for('receipt_admin.receipt_detail', submission_id=sub.id) }}" class="btn btn-blue btn-sm">View</a>
+                                    <button class="btn btn-red btn-sm delete-submission" data-id="{{ sub.id }}">Delete</button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p style="color: var(--gray-500);">No receipts for this month.</p>
+                {% endif %}
+            {% elif not months %}
+            <p style="color: var(--gray-500);">No submissions for this company yet.</p>
+            {% endif %}
+
+        {% else %}
+        <p style="color: var(--gray-500);">Select a company above to browse their receipts.</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>

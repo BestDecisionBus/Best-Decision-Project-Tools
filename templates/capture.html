@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipt Capture — {{ company_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="capture-container">
+        <div class="capture-header">
+            {% if logo_url %}
+            <div class="header-row">
+                <img src="{{ logo_url }}" alt="{{ company_name }}" class="company-logo">
+                <div class="header-text">
+                    <div class="company-name">{{ company_name }}</div>
+                    <h1>Receipt Capture</h1>
+                </div>
+            </div>
+            {% else %}
+            <div class="company-name">{{ company_name }}</div>
+            <h1>Receipt Capture</h1>
+            {% endif %}
+            <a href="/c/{{ token }}" class="back-to-home">Back to Home</a>
+            <a href="/help?token={{ token }}" target="_blank" class="help-link">Help</a>
+        </div>
+
+        {# Step 1: Camera / Photo #}
+        <div id="step-photo" class="capture-step">
+            <div class="form-group">
+                <label>Take a Photo of the Receipt</label>
+                <input type="file" id="photo-input" accept="image/*" capture="environment"
+                       style="display: none;" onchange="onPhotoSelected(this)">
+                <button type="button" class="btn btn-blue" style="width: 100%;" onclick="document.getElementById('photo-input').click()">
+                    Open Camera
+                </button>
+                <input type="file" id="library-input" accept="image/*"
+                       style="display: none;" onchange="onLibraryPhotoSelected(this)">
+                <button type="button" class="btn btn-green" style="width: 100%; margin-top: 8px;" onclick="document.getElementById('library-input').click()">
+                    Upload from Library
+                </button>
+            </div>
+            <div id="photo-preview" style="display: none; margin-top: 16px;">
+                <img id="preview-img" src="" alt="Preview" style="width: 100%; border-radius: 8px; border: 1px solid var(--gray-200);">
+                <div style="display: flex; gap: 8px; margin-top: 12px;">
+                    <button type="button" class="btn btn-green" style="flex: 1;" onclick="photoConfirmed()">Looks Good</button>
+                    <button type="button" class="btn btn-red" style="flex: 1;" onclick="retakePhoto()">Retake</button>
+                </div>
+            </div>
+        </div>
+
+        {# Step 2: Job & Category Selection (NEW) #}
+        <div id="step-details" class="capture-step" style="display: none;">
+            <h3>Receipt Details</h3>
+            <div class="form-group">
+                <label for="job-select">Job (required)</label>
+                <select id="job-select" required>
+                    <option value="">-- Select Job --</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="cat1-select">Category 1 (optional)</label>
+                <select id="cat1-select">
+                    <option value="">-- None --</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="cat2-select">Category 2 (optional)</label>
+                <select id="cat2-select">
+                    <option value="">-- None --</option>
+                </select>
+            </div>
+            <button type="button" class="btn btn-green" style="width: 100%;" onclick="detailsConfirmed()">Continue</button>
+        </div>
+
+        {# Step 3: Voice Memo #}
+        <div id="step-memo" class="capture-step" style="display: none;">
+            <h3 style="text-align: center;">Voice Memo</h3>
+            <div style="background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px;">
+                <p style="color: var(--gray-600); font-size: 14px; margin: 0 0 10px 0; line-height: 1.5; text-align: justify;">
+                    Please <strong>SPEAK CLEARLY</strong>: the job this is for, what trade, the credit card or bank account used,
+                    amounts for category splits, and any other information missing from the receipt.
+                </p>
+                <p style="color: var(--gray-600); font-size: 14px; margin: 0; line-height: 1.5; text-align: justify;">
+                    <strong>CONTACTLESS PAYMENTS</strong> (tap to pay,
+                    Apple Pay, Google Pay) — you must specify the bank or credit card account the card is tied to.
+                </p>
+            </div>
+            <div id="recording-ui" style="display: flex; flex-direction: column; align-items: center;">
+                <button type="button" id="record-btn" class="btn-record" onclick="toggleRecording()">
+                    Start Recording
+                </button>
+                <div id="recording-indicator" style="display: none; text-align: center; margin-top: 12px;">
+                    <div style="display: inline-flex; align-items: center; gap: 8px;">
+                        <div style="width: 12px; height: 12px; background: var(--red); border-radius: 50%; animation: pulse 1s infinite;"></div>
+                        <span style="color: var(--red); font-weight: 600;">Recording...</span>
+                    </div>
+                    <p id="recording-time" style="font-size: 24px; font-weight: 600; margin-top: 8px;">0:00</p>
+                </div>
+            </div>
+            <div id="playback-ui" style="display: none; margin-top: 16px;">
+                <audio id="audio-playback" controls style="width: 100%;"></audio>
+                <div style="display: flex; gap: 8px; margin-top: 12px;">
+                    <button type="button" class="btn btn-green" style="flex: 1;" onclick="submitCapture()">Submit</button>
+                    <button type="button" class="btn btn-red" style="flex: 1;" onclick="reRecord()">Re-record</button>
+                </div>
+            </div>
+        </div>
+
+        {# Step 4: Processing / Result #}
+        <div id="step-result" class="capture-step" style="display: none;">
+            <div id="processing-message" style="text-align: center;">
+                <div style="font-size: 24px; margin-bottom: 12px;">&#9203;</div>
+                <p>Processing your receipt...</p>
+            </div>
+            <div id="success-message" style="display: none; text-align: center;">
+                <div style="font-size: 48px; margin-bottom: 12px; color: var(--green);">&#10003;</div>
+                <h3>Receipt Submitted!</h3>
+                <p style="color: var(--gray-500);">Your receipt has been uploaded and is being processed.</p>
+                <button type="button" class="btn btn-blue" style="margin-top: 16px;" onclick="resetCapture()">Capture Another</button>
+            </div>
+            <div id="error-message" style="display: none; text-align: center;">
+                <div style="font-size: 48px; margin-bottom: 12px; color: var(--red);">&#10007;</div>
+                <h3>Upload Failed</h3>
+                <p id="error-text" style="color: var(--red);"></p>
+                <button type="button" class="btn btn-blue" style="margin-top: 16px;" onclick="resetCapture()">Try Again</button>
+            </div>
+        </div>
+
+        <a href="/receipt-library?token={{ token }}" class="btn" style="display: block; width: 100%; margin-top: 24px; padding: 14px; font-size: 16px; text-align: center; background: var(--purple); color: #fff; border: 2px solid var(--purple); font-weight: 600;">
+            View Receipt Library
+        </a>
+    </div>
+    {% include '_footer.html' %}
+
+    <style>
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+    }
+    </style>
+
+    <script>
+    var TOKEN = "{{ token }}";
+    var photoFile = null;
+    var audioBlob = null;
+    var mediaRecorder = null;
+    var audioChunks = [];
+    var recordingTimer = null;
+    var recordingSeconds = 0;
+    var recorderMimeType = '';
+
+    // Detect best supported audio MIME type (iOS Safari doesn't support webm)
+    function getSupportedMimeType() {
+        var types = ['audio/webm', 'audio/mp4', 'audio/ogg', 'audio/wav', ''];
+        for (var i = 0; i < types.length; i++) {
+            if (types[i] === '' || MediaRecorder.isTypeSupported(types[i])) {
+                return types[i];
+            }
+        }
+        return '';
+    }
+
+    // Populate dropdowns
+    function loadDropdowns() {
+        fetch('/api/jobs?token=' + TOKEN)
+            .then(function(r) { return r.json(); })
+            .then(function(jobs) {
+                var sel = document.getElementById('job-select');
+                jobs.forEach(function(j) {
+                    var opt = document.createElement('option');
+                    opt.value = j.id;
+                    opt.textContent = j.name;
+                    sel.appendChild(opt);
+                });
+            });
+
+        fetch('/api/categories?token=' + TOKEN)
+            .then(function(r) { return r.json(); })
+            .then(function(cats) {
+                var sel1 = document.getElementById('cat1-select');
+                var sel2 = document.getElementById('cat2-select');
+                cats.forEach(function(c) {
+                    var opt1 = document.createElement('option');
+                    opt1.value = c.id;
+                    opt1.textContent = c.name;
+                    sel1.appendChild(opt1);
+
+                    var opt2 = document.createElement('option');
+                    opt2.value = c.id;
+                    opt2.textContent = c.name;
+                    sel2.appendChild(opt2);
+                });
+            });
+    }
+    loadDropdowns();
+
+    // Step 1: Photo
+    function onPhotoSelected(input) {
+        if (input.files && input.files[0]) {
+            photoFile = input.files[0];
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('preview-img').src = e.target.result;
+                document.getElementById('photo-preview').style.display = '';
+            };
+            reader.readAsDataURL(photoFile);
+        }
+    }
+
+    function onLibraryPhotoSelected(input) {
+        if (input.files && input.files[0]) {
+            photoFile = input.files[0];
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('preview-img').src = e.target.result;
+                document.getElementById('photo-preview').style.display = '';
+            };
+            reader.readAsDataURL(photoFile);
+        }
+    }
+
+    function retakePhoto() {
+        photoFile = null;
+        document.getElementById('photo-preview').style.display = 'none';
+        document.getElementById('photo-input').value = '';
+        document.getElementById('library-input').value = '';
+    }
+
+    function photoConfirmed() {
+        document.getElementById('step-photo').style.display = 'none';
+        document.getElementById('step-details').style.display = '';
+    }
+
+    // Step 2: Details
+    function detailsConfirmed() {
+        var jobId = document.getElementById('job-select').value;
+        if (!jobId) {
+            alert('Please select a job.');
+            return;
+        }
+        document.getElementById('step-details').style.display = 'none';
+        document.getElementById('step-memo').style.display = '';
+    }
+
+    // Step 3: Voice Memo
+    function toggleRecording() {
+        var btn = document.getElementById('record-btn');
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+            btn.textContent = 'Start Recording';
+            btn.classList.remove('recording');
+            document.getElementById('recording-indicator').style.display = 'none';
+            clearInterval(recordingTimer);
+            return;
+        }
+
+        audioChunks = [];
+        recordingSeconds = 0;
+        navigator.mediaDevices.getUserMedia({audio: true}).then(function(stream) {
+            recorderMimeType = getSupportedMimeType();
+            var options = recorderMimeType ? {mimeType: recorderMimeType} : {};
+            mediaRecorder = new MediaRecorder(stream, options);
+            mediaRecorder.ondataavailable = function(e) {
+                if (e.data.size > 0) audioChunks.push(e.data);
+            };
+            mediaRecorder.onstop = function() {
+                stream.getTracks().forEach(function(t) { t.stop(); });
+                var blobType = recorderMimeType || (mediaRecorder.mimeType || 'audio/webm');
+                audioBlob = new Blob(audioChunks, {type: blobType});
+                var url = URL.createObjectURL(audioBlob);
+                document.getElementById('audio-playback').src = url;
+                document.getElementById('recording-ui').style.display = 'none';
+                document.getElementById('playback-ui').style.display = '';
+            };
+            mediaRecorder.start();
+            btn.textContent = 'Stop Recording';
+            btn.classList.add('recording');
+            document.getElementById('recording-indicator').style.display = '';
+
+            recordingTimer = setInterval(function() {
+                recordingSeconds++;
+                var min = Math.floor(recordingSeconds / 60);
+                var sec = recordingSeconds % 60;
+                document.getElementById('recording-time').textContent = min + ':' + (sec < 10 ? '0' : '') + sec;
+            }, 1000);
+        }).catch(function(err) {
+            alert('Microphone access is required for voice memos. Please allow microphone access and try again.');
+        });
+    }
+
+    function reRecord() {
+        audioBlob = null;
+        document.getElementById('playback-ui').style.display = 'none';
+        document.getElementById('recording-ui').style.display = '';
+        var btn = document.getElementById('record-btn');
+        btn.textContent = 'Start Recording';
+        btn.classList.remove('recording');
+    }
+
+    // Step 4: Submit
+    function submitCapture() {
+        if (!photoFile || !audioBlob) {
+            alert('Photo and voice memo are required.');
+            return;
+        }
+
+        document.getElementById('step-memo').style.display = 'none';
+        document.getElementById('step-result').style.display = '';
+
+        var formData = new FormData();
+        formData.append('token', TOKEN);
+        formData.append('image', photoFile);
+        var audioExt = 'webm';
+        if (audioBlob.type.indexOf('mp4') !== -1) audioExt = 'mp4';
+        else if (audioBlob.type.indexOf('ogg') !== -1) audioExt = 'ogg';
+        else if (audioBlob.type.indexOf('wav') !== -1) audioExt = 'wav';
+        formData.append('audio', audioBlob, 'memo.' + audioExt);
+
+        var jobId = document.getElementById('job-select').value;
+        var cat1Id = document.getElementById('cat1-select').value;
+        var cat2Id = document.getElementById('cat2-select').value;
+        if (jobId) formData.append('job_id', jobId);
+        if (cat1Id) formData.append('category_1_id', cat1Id);
+        if (cat2Id) formData.append('category_2_id', cat2Id);
+
+        fetch('/api/upload', {method: 'POST', body: formData})
+            .then(function(resp) {
+                if (resp.ok) {
+                    document.getElementById('processing-message').style.display = 'none';
+                    document.getElementById('success-message').style.display = '';
+                } else {
+                    return resp.json().then(function(d) { throw new Error(d.error || 'Upload failed'); });
+                }
+            })
+            .catch(function(err) {
+                document.getElementById('processing-message').style.display = 'none';
+                document.getElementById('error-text').textContent = err.message;
+                document.getElementById('error-message').style.display = '';
+            });
+    }
+
+    function resetCapture() {
+        photoFile = null;
+        audioBlob = null;
+        document.getElementById('photo-input').value = '';
+        document.getElementById('library-input').value = '';
+        document.getElementById('photo-preview').style.display = 'none';
+        document.getElementById('step-photo').style.display = '';
+        document.getElementById('step-details').style.display = 'none';
+        document.getElementById('step-memo').style.display = 'none';
+        document.getElementById('step-result').style.display = 'none';
+        document.getElementById('processing-message').style.display = '';
+        document.getElementById('success-message').style.display = 'none';
+        document.getElementById('error-message').style.display = 'none';
+        document.getElementById('playback-ui').style.display = 'none';
+        document.getElementById('recording-ui').style.display = '';
+        document.getElementById('record-btn').textContent = 'Start Recording';
+        document.getElementById('job-select').value = '';
+        document.getElementById('cat1-select').value = '';
+        document.getElementById('cat2-select').value = '';
+    }
+    </script>
+</body>
+</html>

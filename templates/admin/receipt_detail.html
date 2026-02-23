@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipt Detail — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <a href="{{ url_for('receipt_admin.receipt_browse_month', token_str=sub.token, month=sub.month_folder) }}"
+           style="color: var(--blue); text-decoration: none; font-size: 14px;">&larr; Back to {{ sub.month_folder }}</a>
+
+        <h2 style="margin-top: 12px;">{{ sub.company_name }} — {{ sub.timestamp|fmt_datetime }}</h2>
+
+        <div class="receipt-detail">
+            <div>
+                <img src="{{ url_for('receipt_admin.receipt_image', submission_id=sub.id) }}" alt="Receipt image">
+            </div>
+            <div class="receipt-info">
+                <p><strong>Token:</strong> <code>{{ sub.token }}</code></p>
+                <p><strong>Date:</strong> {{ sub.timestamp|fmt_datetime }}</p>
+                <p><strong>Status:</strong>
+                    {% if sub.status == 'complete' %}
+                    <span class="badge badge-complete">Complete</span>
+                    {% elif sub.status == 'processing' or sub.status == 'transcribing' %}
+                    <span class="badge badge-processing">Processing</span>
+                    {% elif sub.status == 'error' %}
+                    <span class="badge badge-inactive">Error</span>
+                    {% else %}
+                    <span class="badge badge-inactive">{{ sub.status }}</span>
+                    {% endif %}
+                </p>
+                <p><strong>IP:</strong> {{ sub.submitted_ip or '—' }}</p>
+
+                <div style="margin-top: 8px;">
+                    <label style="font-size: 13px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 4px;">Job</label>
+                    <select id="receipt-job" style="width: 100%; padding: 8px 12px; font-size: 14px; border: 1px solid var(--gray-300); border-radius: 6px;">
+                        <option value="">-- No job --</option>
+                        {% for j in all_jobs %}
+                        <option value="{{ j.id }}" {{ 'selected' if sub.job_id == j.id else '' }}>{{ j.job_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="processed-toggle">
+                    <label>
+                        <input type="checkbox" class="processed-checkbox" data-id="{{ sub.id }}"
+                               {{ 'checked' if sub.processed else '' }}>
+                        <strong>Processed</strong>
+                    </label>
+                </div>
+
+                {# ---- Vendor ---- #}
+                <div style="margin-top: 16px;">
+                    <label style="font-size: 13px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 4px;">Vendor</label>
+                    <input type="text" id="receipt-vendor" value="{{ sub.vendor or '' }}"
+                           placeholder="Enter vendor name"
+                           style="width: 100%; padding: 8px 12px; font-size: 14px; border: 1px solid var(--gray-300); border-radius: 6px;">
+                </div>
+
+                {# ---- Categories with amounts ---- #}
+                <div style="margin-top: 16px;">
+                    <label style="font-size: 13px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 8px;">Categories</label>
+                    <table id="cat-table" style="width: 100%; font-size: 13px; margin-bottom: 8px;">
+                        <thead>
+                            <tr>
+                                <th style="text-align: left; padding: 6px 8px;">Category</th>
+                                <th style="text-align: right; padding: 6px 8px; width: 120px;">Amount ($)</th>
+                                <th style="width: 36px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="cat-body">
+                            {% for sc in sub_categories %}
+                            <tr data-cat-id="{{ sc.category_id }}">
+                                <td style="padding: 4px 8px;">
+                                    <select class="cat-select-inline" onchange="catChanged(this)"
+                                            style="width: 100%; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 4px; font-size: 13px;">
+                                        {% for cat in all_categories %}
+                                        <option value="{{ cat.id }}" {{ 'selected' if cat.id == sc.category_id else '' }}>{{ cat.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </td>
+                                <td style="padding: 4px 8px; text-align: right;">
+                                    <input type="number" class="cat-amount" value="{{ '%.2f'|format(sc.amount) }}" min="0" step="0.01"
+                                           style="width: 100%; text-align: right; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 4px; font-size: 13px;">
+                                </td>
+                                <td style="text-align: center;">
+                                    <button type="button" onclick="removeCat(this)" style="background: none; border: none; color: var(--red); cursor: pointer; font-size: 16px; padding: 2px 6px;">&times;</button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-weight: 600; font-size: 14px; border-top: 2px solid var(--gray-200);">
+                        <span>Total</span>
+                        <span id="cat-total">$0.00</span>
+                    </div>
+
+                    <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center;">
+                        <select id="cat-select" style="flex: 1; padding: 6px 10px; font-size: 13px; border: 1px solid var(--gray-300); border-radius: 6px;">
+                            <option value="">-- Add category --</option>
+                            {% for cat in all_categories %}
+                            <option value="{{ cat.id }}" data-name="{{ cat.name }}">{{ cat.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="button" onclick="addCategory()" class="btn btn-blue btn-sm">Add</button>
+                    </div>
+                </div>
+
+                {# ---- Save button ---- #}
+                <div style="margin-top: 16px; display: flex; align-items: center; gap: 12px;">
+                    <button type="button" id="save-receipt-btn" onclick="saveReceipt()" class="btn btn-green">Save Changes</button>
+                    <span id="save-status" style="font-size: 13px; color: var(--gray-500);"></span>
+                </div>
+
+                <h3 style="margin-top: 20px;">Transcription</h3>
+                <div class="transcription">
+                    {% if sub.transcription %}
+                    {{ sub.transcription }}
+                    {% else %}
+                    <em>No transcription available.</em>
+                    {% endif %}
+                </div>
+
+                <h3>Downloads</h3>
+                <div class="download-links">
+                    {% if sub.pdf_file %}
+                    <a href="{{ url_for('receipt_admin.receipt_download', submission_id=sub.id, filetype='pdf') }}" class="btn btn-green btn-sm" download>PDF (Image + Text)</a>
+                    {% endif %}
+                    <a href="{{ url_for('receipt_admin.receipt_download', submission_id=sub.id, filetype='image') }}" class="btn btn-blue btn-sm" download>Image</a>
+                    <a href="{{ url_for('receipt_admin.receipt_download', submission_id=sub.id, filetype='audio') }}" class="btn btn-blue btn-sm" download>Audio</a>
+                </div>
+
+                <h3 style="margin-top: 20px;">Delete</h3>
+                <form method="POST" action="{{ url_for('receipt_admin.receipt_delete', submission_id=sub.id) }}"
+                      onsubmit="return confirm('Delete this receipt? This cannot be undone.');">
+                    <button type="submit" class="btn btn-red btn-sm">Delete Receipt</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script>
+    (function () {
+        // All categories available for this company (used to build dropdowns)
+        var ALL_CATS = [
+            {% for cat in all_categories %}
+            { id: {{ cat.id }}, name: {{ cat.name|tojson }} }{{ "," if not loop.last else "" }}
+            {% endfor %}
+        ];
+
+        function buildCatSelect(selectedId) {
+            var html = '';
+            ALL_CATS.forEach(function (c) {
+                html += '<option value="' + c.id + '"' + (c.id === selectedId ? ' selected' : '') + '>' + c.name + '</option>';
+            });
+            return '<select class="cat-select-inline" onchange="catChanged(this)" ' +
+                   'style="width: 100%; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 4px; font-size: 13px;">' +
+                   html + '</select>';
+        }
+
+        function calcCatTotal() {
+            var total = 0;
+            document.querySelectorAll("#cat-body .cat-amount").forEach(function (inp) {
+                total += parseFloat(inp.value) || 0;
+            });
+            document.getElementById("cat-total").textContent = "$" + total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        }
+        calcCatTotal();
+
+        // Recalculate on amount change
+        document.getElementById("cat-body").addEventListener("input", calcCatTotal);
+
+        window.catChanged = function (sel) {
+            // Update data-cat-id on the row when dropdown changes
+            var tr = sel.closest("tr");
+            var newId = sel.value;
+            // Check for duplicates
+            var existing = document.querySelectorAll('#cat-body tr');
+            var dupeCount = 0;
+            existing.forEach(function (row) {
+                if (row !== tr && row.querySelector(".cat-select-inline") && row.querySelector(".cat-select-inline").value === newId) {
+                    dupeCount++;
+                }
+            });
+            if (dupeCount > 0) {
+                alert("That category is already assigned to another row.");
+                sel.value = tr.getAttribute("data-cat-id"); // revert
+                return;
+            }
+            tr.setAttribute("data-cat-id", newId);
+        };
+
+        window.addCategory = function () {
+            var sel = document.getElementById("cat-select");
+            var catId = sel.value;
+            if (!catId) return;
+
+            // Prevent duplicates
+            var dupe = false;
+            document.querySelectorAll("#cat-body tr .cat-select-inline").forEach(function (s) {
+                if (s.value === catId) dupe = true;
+            });
+            if (dupe) {
+                alert("Category already added.");
+                return;
+            }
+
+            var tr = document.createElement("tr");
+            tr.setAttribute("data-cat-id", catId);
+            tr.innerHTML =
+                '<td style="padding: 4px 8px;">' + buildCatSelect(parseInt(catId)) + '</td>' +
+                '<td style="padding: 4px 8px; text-align: right;">' +
+                    '<input type="number" class="cat-amount" value="0.00" min="0" step="0.01" ' +
+                    'style="width: 100%; text-align: right; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 4px; font-size: 13px;">' +
+                '</td>' +
+                '<td style="text-align: center;">' +
+                    '<button type="button" onclick="removeCat(this)" style="background: none; border: none; color: var(--red); cursor: pointer; font-size: 16px; padding: 2px 6px;">&times;</button>' +
+                '</td>';
+            document.getElementById("cat-body").appendChild(tr);
+            sel.value = "";
+            calcCatTotal();
+        };
+
+        window.removeCat = function (btn) {
+            btn.closest("tr").remove();
+            calcCatTotal();
+        };
+
+        window.saveReceipt = function (cb) {
+            var vendor = document.getElementById("receipt-vendor").value.trim();
+            var jobSel = document.getElementById("receipt-job");
+            var jobId = jobSel.value ? parseInt(jobSel.value) : null;
+            var categories = [];
+            document.querySelectorAll("#cat-body tr").forEach(function (tr) {
+                var catSel = tr.querySelector(".cat-select-inline");
+                categories.push({
+                    category_id: parseInt(catSel ? catSel.value : tr.getAttribute("data-cat-id")),
+                    amount: parseFloat(tr.querySelector(".cat-amount").value) || 0
+                });
+            });
+
+            var statusEl = document.getElementById("save-status");
+            var btn = document.getElementById("save-receipt-btn");
+            btn.disabled = true;
+            btn.textContent = "Saving...";
+            statusEl.textContent = "";
+
+            fetch("{{ url_for('receipt_admin.receipt_update', submission_id=sub.id) }}", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                body: JSON.stringify({ vendor: vendor, job_id: jobId, categories: categories })
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.ok) {
+                    btn.textContent = "Saved!";
+                    btn.style.background = "#16a34a";
+                    if (window._markClean) window._markClean();
+                    if (cb) cb(true);
+                    setTimeout(function () {
+                        btn.textContent = "Save Changes";
+                        btn.style.background = "";
+                        btn.disabled = false;
+                    }, 1500);
+                } else {
+                    statusEl.textContent = "Save failed.";
+                    btn.textContent = "Save Changes";
+                    btn.disabled = false;
+                    if (cb) cb(false);
+                }
+            })
+            .catch(function () {
+                statusEl.textContent = "Save failed.";
+                btn.textContent = "Save Changes";
+                btn.disabled = false;
+                if (cb) cb(false);
+            });
+        };
+
+        // Register for unsaved-changes guard
+        window._saveBeforeLeave = function (cb) {
+            window.saveReceipt(cb);
+        };
+    })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employees — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Employees</h2>
+
+        {% if current_user.is_bdb %}
+            {% if tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    <option value="">All Companies</option>
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        {% else %}
+            {% if selected_token %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        {% if selected_token %}
+        <div class="meta-card" style="margin-bottom: 12px; padding: 12px 16px; background: var(--gray-50); border: 1px dashed var(--gray-300); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <strong style="font-size: 13px; color: var(--gray-600);">Labor Burden:</strong>
+            <span id="emp-burden-display">{{ selected_token.labor_burden_pct or 0 }}%</span>
+            <input type="number" id="emp-burden-input" value="{{ selected_token.labor_burden_pct or 0 }}"
+                   step="0.1" min="0" max="100" style="display:none; width:70px; font-size:13px; padding:2px 6px;">
+            {% if current_user.is_bdb or current_user.role in ('admin', 'viewer') %}
+            <button type="button" class="btn btn-blue btn-sm" id="emp-burden-edit"
+                    onclick="editEmpBurden()" style="padding:2px 8px; font-size:11px;">Edit</button>
+            <button type="button" class="btn btn-green btn-sm" id="emp-burden-save"
+                    onclick="saveEmpBurden('{{ selected_token.token }}')" style="display:none; padding:2px 8px; font-size:11px;">Save</button>
+            {% endif %}
+            <span style="color: var(--gray-400); margin-left: 8px;">|</span>
+            <strong style="font-size: 13px; color: var(--gray-600);">Client Login URL:</strong>
+            <code id="emp-login-url" style="font-size: 13px;">{{ request.host_url.replace('http://', 'https://') }}c/{{ selected_token.token }}</code>
+            <button type="button" class="btn btn-blue btn-sm" style="padding: 2px 10px; font-size: 11px;" onclick="copyUrl('emp-login-url', this)">Copy</button>
+        </div>
+
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Add Employee</h3>
+            <form method="POST" action="{{ url_for('time_admin.admin_employee_create') }}">
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+                <div class="form-row">
+                    <div class="form-group" style="flex: 2;">
+                        <label for="name">Employee Name</label>
+                        <input type="text" id="name" name="name" placeholder="John Smith" required>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="employee_id">Employee ID</label>
+                        <input type="text" id="employee_id" name="employee_id" placeholder="EMP-001">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="hourly_wage">Hourly Wage <span style="font-weight: 400; color: var(--gray-400);">(optional)</span></label>
+                        <input type="number" id="hourly_wage" name="hourly_wage" placeholder="25.00" step="0.01" min="0">
+                    </div>
+                </div>
+                <div class="form-row" style="margin-top: 12px;">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="username">Username <span style="font-weight: 400; color: var(--gray-400);">(optional, case sensitive)</span></label>
+                        <input type="text" id="username" name="username" placeholder="jsmith" autocomplete="off">
+                        <span id="username-status" style="font-size: 12px; display: none;"></span>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="password">Password <span style="font-weight: 400; color: var(--gray-400);">(optional)</span></label>
+                        <input type="text" id="password" name="password" placeholder="Set login password" autocomplete="off">
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px;">
+                    <label style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 8px 4px; border: 1px solid var(--gray-200); border-radius: 6px; background: #fff;">
+                        <input type="checkbox" name="timekeeper_access" value="1" checked> Timekeeper
+                    </label>
+                    <label style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 8px 4px; border: 1px solid var(--gray-200); border-radius: 6px; background: #fff;">
+                        <input type="checkbox" name="job_photos_access" value="1" checked> Photos
+                    </label>
+                    <label style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 8px 4px; border: 1px solid var(--gray-200); border-radius: 6px; background: #fff;">
+                        <input type="checkbox" name="schedule_access" value="1" checked> Schedule
+                    </label>
+                    <label style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 8px 4px; border: 1px solid var(--gray-200); border-radius: 6px; background: #fff;">
+                        <input type="checkbox" name="receipt_access" value="1"> Receipts
+                    </label>
+                    <label style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 8px 4px; border: 1px solid var(--gray-200); border-radius: 6px; background: #fff;">
+                        <input type="checkbox" name="estimate_access" value="1"> Estimates
+                    </label>
+                </div>
+                <div style="margin-top: 12px;">
+                    <button type="submit" class="btn btn-green">Add Employee</button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if employees %}
+        <div class="table-wrap">
+            <table class="resizable">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Employee ID</th>
+                        <th>Hourly Wage</th>
+                        <th>Time</th>
+                        <th>Photos</th>
+                        <th>Sched</th>
+                        <th>Rcpts</th>
+                        <th>Est</th>
+                        <th>Username</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for emp in employees %}
+                    <tr>
+                        <td>
+                            <span id="name-display-{{ emp.id }}">{{ emp.name }}</span>
+                            <input type="text" id="name-input-{{ emp.id }}" value="{{ emp.name }}"
+                                   style="display: none; width: 100%;">
+                        </td>
+                        <td>
+                            <span id="empid-display-{{ emp.id }}">{{ emp.employee_id or '' }}</span>
+                            <input type="text" id="empid-input-{{ emp.id }}" value="{{ emp.employee_id or '' }}"
+                                   style="display: none; width: 100%;">
+                        </td>
+                        <td>
+                            <span id="wage-display-{{ emp.id }}">{{ '$%.2f'|format(emp.hourly_wage) if emp.hourly_wage else '—' }}</span>
+                            <input type="number" id="wage-input-{{ emp.id }}" value="{{ emp.hourly_wage or '' }}"
+                                   step="0.01" min="0" placeholder="0.00"
+                                   style="display: none; width: 80px;">
+                        </td>
+                        <td style="text-align: center;">
+                            <input type="checkbox" id="timekeeper-input-{{ emp.id }}"
+                                   {% if emp.timekeeper_access %}checked{% endif %}
+                                   onchange="toggleAccess({{ emp.id }}, 'timekeeper_access', this.checked)">
+                        </td>
+                        <td style="text-align: center;">
+                            <input type="checkbox" id="photos-input-{{ emp.id }}"
+                                   {% if emp.job_photos_access %}checked{% endif %}
+                                   onchange="toggleAccess({{ emp.id }}, 'job_photos_access', this.checked)">
+                        </td>
+                        <td style="text-align: center;">
+                            <input type="checkbox" id="schedule-input-{{ emp.id }}"
+                                   {% if emp.schedule_access %}checked{% endif %}
+                                   onchange="toggleAccess({{ emp.id }}, 'schedule_access', this.checked)">
+                        </td>
+                        <td style="text-align: center;">
+                            <input type="checkbox" id="receipt-input-{{ emp.id }}"
+                                   {% if emp.receipt_access %}checked{% endif %}
+                                   onchange="toggleAccess({{ emp.id }}, 'receipt_access', this.checked)">
+                        </td>
+                        <td style="text-align: center;">
+                            <input type="checkbox" id="estimate-input-{{ emp.id }}"
+                                   {% if emp.estimate_access %}checked{% endif %}
+                                   onchange="toggleAccess({{ emp.id }}, 'estimate_access', this.checked)">
+                        </td>
+                        <td>
+                            {% if emp.username %}
+                            <span style="font-size: 13px;">{{ emp.username }}</span>
+                            {% else %}
+                            <span style="color: var(--gray-400); font-size: 12px;">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if emp.is_active %}
+                            <span class="badge badge-active">Active</span>
+                            {% else %}
+                            <span class="badge badge-inactive">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ emp.created_at[:10] if emp.created_at else '' }}</td>
+                        <td style="display: flex; gap: 6px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-blue btn-sm" id="edit-btn-{{ emp.id }}"
+                                    onclick="toggleEmployeeEdit({{ emp.id }})">Edit</button>
+                            <button type="button" class="btn btn-green btn-sm" id="save-btn-{{ emp.id }}"
+                                    style="display: none;"
+                                    onclick="saveEmployee({{ emp.id }})">Save</button>
+                            <form method="POST" action="{{ url_for('time_admin.admin_employee_toggle', emp_id=emp.id) }}" style="display: inline;">
+                                {% if emp.is_active %}
+                                <button type="submit" class="btn btn-red btn-sm">Deactivate</button>
+                                {% else %}
+                                <button type="submit" class="btn btn-green btn-sm">Activate</button>
+                                {% endif %}
+                            </form>
+                            {% if emp.username %}
+                            <button type="button" class="btn btn-orange btn-sm" onclick="toggleCredForm({{ emp.id }}, 'reset')">Reset PW</button>
+                            <button type="button" class="btn btn-blue btn-sm" onclick="copyCredentials({{ emp.id }}, '{{ emp.username }}', '{{ selected_token.token if selected_token else '' }}')">Copy Credentials</button>
+                            {% else %}
+                            <button type="button" class="btn btn-purple btn-sm" onclick="toggleCredForm({{ emp.id }}, 'set')">Set Login</button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr id="cred-row-{{ emp.id }}" style="display: none;">
+                        <td colspan="12" style="background: var(--gray-50); padding: 12px;">
+                            {% if emp.username %}
+                            <form method="POST" action="{{ url_for('time_admin.admin_employee_reset_password', emp_id=emp.id) }}" style="display: flex; gap: 8px; align-items: flex-end;">
+                                <div class="form-group" style="flex: 1;">
+                                    <label>New Password for {{ emp.username }}</label>
+                                    <input type="text" name="new_password" placeholder="New password" required autocomplete="off">
+                                </div>
+                                <button type="submit" class="btn btn-orange btn-sm">Reset Password</button>
+                                <button type="button" class="btn btn-sm" style="background: var(--gray-400);" onclick="toggleCredForm({{ emp.id }})">Cancel</button>
+                            </form>
+                            {% else %}
+                            <form method="POST" action="{{ url_for('time_admin.admin_employee_set_credentials', emp_id=emp.id) }}" style="display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap;">
+                                <div class="form-group" style="flex: 1;">
+                                    <label>Username <span style="font-weight: 400; font-size: 12px; color: var(--gray-400);">(case sensitive)</span></label>
+                                    <input type="text" name="username" placeholder="jsmith" required autocomplete="off" class="check-username">
+                                    <span class="username-status" style="font-size: 12px; display: none;"></span>
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <label>Password</label>
+                                    <input type="text" name="password" placeholder="Password" required autocomplete="off">
+                                </div>
+                                <button type="submit" class="btn btn-purple btn-sm">Set Login</button>
+                                <button type="button" class="btn btn-sm" style="background: var(--gray-400);" onclick="toggleCredForm({{ emp.id }})">Cancel</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500);">No employees yet.{% if not selected_token %} Select a company above to add employees.{% endif %}</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script>
+    function toggleEmployeeEdit(id) {
+        var nameDisplay = document.getElementById('name-display-' + id);
+        var nameInput = document.getElementById('name-input-' + id);
+        var empidDisplay = document.getElementById('empid-display-' + id);
+        var empidInput = document.getElementById('empid-input-' + id);
+        var wageDisplay = document.getElementById('wage-display-' + id);
+        var wageInput = document.getElementById('wage-input-' + id);
+        var editBtn = document.getElementById('edit-btn-' + id);
+        var saveBtn = document.getElementById('save-btn-' + id);
+        var editing = nameInput.style.display === 'none';
+        nameDisplay.style.display = editing ? 'none' : '';
+        nameInput.style.display = editing ? '' : 'none';
+        empidDisplay.style.display = editing ? 'none' : '';
+        empidInput.style.display = editing ? '' : 'none';
+        wageDisplay.style.display = editing ? 'none' : '';
+        wageInput.style.display = editing ? '' : 'none';
+        editBtn.style.display = editing ? 'none' : '';
+        saveBtn.style.display = editing ? '' : 'none';
+    }
+
+    function saveEmployee(id) {
+        var name = document.getElementById('name-input-' + id).value;
+        var employee_id = document.getElementById('empid-input-' + id).value;
+        var wage = document.getElementById('wage-input-' + id).value;
+        fetch('/admin/employees/' + id + '/update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: name, employee_id: employee_id, hourly_wage: wage})
+        }).then(function(resp) {
+            if (resp.ok) { window._guardBypass = true; window.location.reload(); }
+            else { alert('Error saving employee.'); }
+        });
+    }
+
+    function toggleCredForm(id) {
+        var row = document.getElementById('cred-row-' + id);
+        row.style.display = row.style.display === 'none' ? '' : 'none';
+    }
+
+    function editEmpBurden() {
+        document.getElementById('emp-burden-display').style.display = 'none';
+        document.getElementById('emp-burden-input').style.display = '';
+        document.getElementById('emp-burden-edit').style.display = 'none';
+        document.getElementById('emp-burden-save').style.display = '';
+    }
+
+    function saveEmpBurden(token) {
+        var pct = document.getElementById('emp-burden-input').value;
+        fetch('/admin/labor-burden/update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({token: token, labor_burden_pct: pct})
+        }).then(function(resp) {
+            if (resp.ok) { window._guardBypass = true; window.location.reload(); }
+            else { alert('Error saving labor burden.'); }
+        });
+    }
+
+    function toggleAccess(id, field, checked) {
+        var payload = {
+            name: document.getElementById('name-display-' + id).textContent,
+            employee_id: document.getElementById('empid-display-' + id).textContent.trim()
+        };
+        payload[field] = checked ? 1 : 0;
+        fetch('/admin/employees/' + id + '/update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        }).then(function(resp) {
+            if (!resp.ok) { alert('Error updating access.'); window._guardBypass = true; window.location.reload(); }
+        });
+    }
+
+    function copyCredentials(empId, username, token) {
+        var loginUrl = window.location.origin + '/c/' + token;
+        var text = 'Username: ' + username + ' | Login URL: ' + loginUrl.replace('http://', 'https://');
+        navigator.clipboard.writeText(text).then(function() {
+            alert('Credentials copied to clipboard.');
+        });
+    }
+
+    // Live username availability check
+    var _checkTimer = null;
+    function checkUsername(input, statusEl) {
+        clearTimeout(_checkTimer);
+        var val = input.value.trim();
+        if (!val) { statusEl.style.display = 'none'; return; }
+        _checkTimer = setTimeout(function() {
+            fetch('/api/check-username?username=' + encodeURIComponent(val))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                statusEl.style.display = '';
+                if (data.available) {
+                    statusEl.textContent = 'Available';
+                    statusEl.style.color = 'var(--green)';
+                    input.setCustomValidity('');
+                } else {
+                    statusEl.textContent = 'Username is taken';
+                    statusEl.style.color = 'var(--red)';
+                    input.setCustomValidity('Username is taken');
+                }
+            });
+        }, 400);
+    }
+
+    // Add employee form
+    var addUsernameInput = document.getElementById('username');
+    var addUsernameStatus = document.getElementById('username-status');
+    if (addUsernameInput && addUsernameStatus) {
+        addUsernameInput.addEventListener('input', function() { checkUsername(addUsernameInput, addUsernameStatus); });
+    }
+
+    // Set Login inline forms
+    document.querySelectorAll('.check-username').forEach(function(input) {
+        var statusEl = input.parentElement.querySelector('.username-status');
+        if (statusEl) {
+            input.addEventListener('input', function() { checkUsername(input, statusEl); });
+        }
+    });
+    </script>
+</body>
+</html>

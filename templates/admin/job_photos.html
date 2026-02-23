@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Photos — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Job Photos</h2>
+
+        {% if current_user.is_bdb %}
+            {% if tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    <option value="">Select Company</option>
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        {% else %}
+            {% if selected_token %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        {% if selected_token %}
+            {# Step 1: Job pills #}
+            {% if jobs_with_photos %}
+            <div class="browse-nav">
+                {% for j in jobs_with_photos %}
+                <a href="{{ url_for('job_photos.admin_job_photos', token=selected_token.token, job_id=j.id) }}"
+                   {% if job_id == j.id %}class="active"{% endif %}>
+                    {{ j.job_name }} ({{ j.photo_count }})
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p style="color: var(--gray-500);">No job photos yet for this company.</p>
+            {% endif %}
+
+            {# Step 2: Week folders #}
+            {% if selected_job and weeks %}
+            <h3 style="margin-bottom: 12px;">{{ selected_job.job_name }}</h3>
+            <div class="browse-nav">
+                {% for w in weeks %}
+                <a href="{{ url_for('job_photos.admin_job_photos', token=selected_token.token, job_id=job_id, week=w.week_folder) }}"
+                   {% if week == w.week_folder %}class="active"{% endif %}>
+                    {{ w.week_folder }} ({{ w.photo_count }})
+                </a>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {# Step 3: Photo gallery #}
+            {% if week and photos is defined %}
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                    <h3 style="margin: 0;">{{ selected_job.job_name }} — {{ week }}</h3>
+                    <a href="{{ url_for('job_photos.download_zip', job_id=job_id, week=week) }}"
+                       class="btn btn-blue btn-sm">Download ZIP</a>
+                    <a href="{{ url_for('job_photos.download_pdf', job_id=job_id, week=week) }}"
+                       class="btn btn-purple btn-sm">Download PDF</a>
+                </div>
+
+                {% if photos %}
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 80px;">Thumbnail</th>
+                                <th>Date/Time</th>
+                                <th>Caption</th>
+                                <th>GPS</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for photo in photos %}
+                            <tr>
+                                <td>
+                                    <a href="{{ url_for('job_photos.serve_photo', photo_id=photo.id) }}" target="_blank">
+                                        <img src="{{ url_for('job_photos.serve_photo', photo_id=photo.id, thumb='1') }}"
+                                             alt="Photo" style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px; border: 1px solid var(--gray-200); cursor: pointer;">
+                                    </a>
+                                </td>
+                                <td>{{ photo.created_at|fmt_datetime }}</td>
+                                <td>{{ photo.caption if photo.caption else '—' }}</td>
+                                <td>
+                                    {% if photo.latitude and photo.longitude %}
+                                    <a href="https://maps.google.com/?q={{ photo.latitude }},{{ photo.longitude }}" target="_blank"
+                                       style="color: var(--blue); text-decoration: none; font-size: 12px;">
+                                        {{ "%.5f"|format(photo.latitude) }}, {{ "%.5f"|format(photo.longitude) }}
+                                    </a>
+                                    {% else %}
+                                    —
+                                    {% endif %}
+                                </td>
+                                <td style="display: flex; gap: 6px;">
+                                    <a href="{{ url_for('job_photos.admin_photo_detail', photo_id=photo.id) }}" class="btn btn-blue btn-sm">View</a>
+                                    {% if current_user.is_admin or current_user.is_bdb %}
+                                    <form method="POST" action="{{ url_for('job_photos.admin_delete_photo', photo_id=photo.id) }}"
+                                          onsubmit="return confirm('Delete this photo?');" style="display: inline;">
+                                        <button type="submit" class="btn btn-red btn-sm">Delete</button>
+                                    </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p style="color: var(--gray-500);">No photos for this week.</p>
+                {% endif %}
+            {% endif %}
+        {% else %}
+        <p style="color: var(--gray-500);">Select a company above to browse job photos.</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>

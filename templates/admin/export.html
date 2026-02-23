@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Export — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Export Time Data</h2>
+
+        {% if current_user.is_bdb %}
+            {% if tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    <option value="">Select Company</option>
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        {% else %}
+            {% if selected_token %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        {% if selected_token %}
+        <div class="meta-card">
+            <h3 style="margin-top: 0;">Download Payroll Export</h3>
+            <p style="color: var(--gray-500); font-size: 14px; margin-bottom: 16px;">
+                Export time entries for <strong>{{ selected_token.company_name }}</strong>.
+                Pick a pay week or select a custom date range.
+            </p>
+
+            <form id="export-form">
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+                <div style="display: flex; gap: 24px; align-items: flex-start;">
+                    {# Left: Pay Week + Date Fields #}
+                    <div style="flex: 0 0 auto;">
+                        <div class="form-group" style="margin-bottom: 12px; width: 220px;">
+                            <label for="week-select">Pay Week</label>
+                            <select id="week-select">
+                                <option value="">Custom date range</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 8px; width: 220px;">
+                            <label for="date_from">Date From</label>
+                            <input type="date" id="date_from" name="date_from" required>
+                        </div>
+                        <div class="form-group" style="width: 220px;">
+                            <label for="date_to">Date To</label>
+                            <input type="date" id="date_to" name="date_to" required>
+                        </div>
+                    </div>
+
+                    {# Right: Download Buttons #}
+                    <div style="display: grid; grid-template-columns: auto auto auto; gap: 8px; align-self: center;">
+                        <div></div>
+                        <div style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-align: center;">Excel</div>
+                        <div style="font-size: 11px; font-weight: 600; color: var(--gray-500); text-align: center;">PDF</div>
+                        <div style="font-size: 13px; font-weight: 600; color: var(--gray-700); align-self: center;">Hours Report</div>
+                        <button type="button" id="btn-excel" class="btn btn-green btn-sm">Excel</button>
+                        <button type="button" id="btn-pdf" class="btn btn-green btn-sm">PDF</button>
+                        <div style="font-size: 13px; font-weight: 600; color: var(--gray-700); align-self: center;">Payroll Cost</div>
+                        <button type="button" id="btn-payroll" class="btn btn-purple btn-sm">Excel</button>
+                        <button type="button" id="btn-payroll-pdf" class="btn btn-purple btn-sm">PDF</button>
+                        <div style="font-size: 13px; font-weight: 600; color: var(--gray-700); align-self: center;">Combined</div>
+                        <button type="button" id="btn-combined" class="btn btn-orange btn-sm">Excel</button>
+                        <button type="button" id="btn-combined-pdf" class="btn btn-orange btn-sm">PDF</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <script>
+        (function() {
+            var weekSelect = document.getElementById('week-select');
+            var dateFrom = document.getElementById('date_from');
+            var dateTo = document.getElementById('date_to');
+            var form = document.getElementById('export-form');
+            var btnExcel = document.getElementById('btn-excel');
+            var btnPdf = document.getElementById('btn-pdf');
+            var btnPayroll = document.getElementById('btn-payroll');
+            var btnCombined = document.getElementById('btn-combined');
+            var btnPayrollPdf = document.getElementById('btn-payroll-pdf');
+            var btnCombinedPdf = document.getElementById('btn-combined-pdf');
+
+            // Build ISO week options for current year
+            function getISOWeeks(year) {
+                var weeks = [];
+                var jan4 = new Date(year, 0, 4);
+                var dow = jan4.getDay() || 7;
+                var week1Mon = new Date(jan4);
+                week1Mon.setDate(jan4.getDate() - dow + 1);
+
+                for (var w = 1; w <= 53; w++) {
+                    var mon = new Date(week1Mon);
+                    mon.setDate(week1Mon.getDate() + (w - 1) * 7);
+                    var sun = new Date(mon);
+                    sun.setDate(mon.getDate() + 6);
+                    if (mon.getFullYear() > year) break;
+                    weeks.push({
+                        num: w,
+                        from: mon.toISOString().slice(0, 10),
+                        to: sun.toISOString().slice(0, 10),
+                        label: 'Week ' + w + ': ' + formatShort(mon) + ' – ' + formatShort(sun)
+                    });
+                }
+                return weeks;
+            }
+
+            function formatShort(d) {
+                var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                return months[d.getMonth()] + ' ' + d.getDate();
+            }
+
+            var year = new Date().getFullYear();
+            var weeks = getISOWeeks(year);
+            weeks.forEach(function(w) {
+                var opt = document.createElement('option');
+                opt.value = w.from + '|' + w.to;
+                opt.textContent = w.label;
+                weekSelect.appendChild(opt);
+            });
+
+            // Auto-select current week
+            var today = new Date().toISOString().slice(0, 10);
+            for (var i = 0; i < weeks.length; i++) {
+                if (today >= weeks[i].from && today <= weeks[i].to) {
+                    weekSelect.value = weeks[i].from + '|' + weeks[i].to;
+                    dateFrom.value = weeks[i].from;
+                    dateTo.value = weeks[i].to;
+                    break;
+                }
+            }
+
+            weekSelect.addEventListener('change', function() {
+                if (this.value) {
+                    var parts = this.value.split('|');
+                    dateFrom.value = parts[0];
+                    dateTo.value = parts[1];
+                } else {
+                    dateFrom.value = '';
+                    dateTo.value = '';
+                }
+            });
+
+            dateFrom.addEventListener('change', function() { weekSelect.value = ''; });
+            dateTo.addEventListener('change', function() { weekSelect.value = ''; });
+
+            function downloadExport(baseUrl) {
+                if (!dateFrom.value || !dateTo.value) {
+                    alert('Please select a date range.');
+                    return;
+                }
+                var params = new URLSearchParams(new FormData(form));
+                window.location.href = baseUrl + '?' + params.toString();
+            }
+
+            btnExcel.addEventListener('click', function() {
+                downloadExport('{{ url_for("time_admin.admin_export_download") }}');
+            });
+            btnPdf.addEventListener('click', function() {
+                downloadExport('{{ url_for("time_admin.admin_export_download_pdf") }}');
+            });
+            btnPayroll.addEventListener('click', function() {
+                downloadExport('{{ url_for("time_admin.admin_export_payroll_cost") }}');
+            });
+            btnCombined.addEventListener('click', function() {
+                downloadExport('{{ url_for("time_admin.admin_export_combined") }}');
+            });
+            btnPayrollPdf.addEventListener('click', function() {
+                downloadExport('{{ url_for("time_admin.admin_export_payroll_cost_pdf") }}');
+            });
+            btnCombinedPdf.addEventListener('click', function() {
+                downloadExport('{{ url_for("time_admin.admin_export_combined_pdf") }}');
+            });
+        })();
+        </script>
+        {% else %}
+        <p style="color: var(--gray-500);">Select a company above to export time data.</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>

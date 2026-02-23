@@ -1,0 +1,14 @@
+[Unit]
+Description=Best Decision Project Tools (Gunicorn)
+After=network.target
+
+[Service]
+User=joemack
+WorkingDirectory=/home/joemack/Best-Decision-Project-Tools
+ExecStart=/home/joemack/Best-Decision-Project-Tools/venv/bin/gunicorn app:app -c gunicorn.conf.py
+Restart=always
+RestartSec=3
+EnvironmentFile=/home/joemack/Best-Decision-Project-Tools/.env
+
+[Install]
+WantedBy=multi-user.target

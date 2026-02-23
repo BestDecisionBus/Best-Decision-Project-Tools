@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if is_project %}Project{% else %}Estimate{% endif %} Detail — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% if estimate %}
+        {# --- Estimate Info (editable) --- #}
+        <div id="estimate-form" style="background: #fff; border: 1px solid var(--gray-200); border-radius: 8px; padding: 20px; margin-bottom: 16px; clear: both;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;">
+                    <h2 id="doc-type-label" style="font-size: 28px; margin: 0; white-space: nowrap;">{% if is_project %}Project{% else %}Estimate{% endif %} #</h2>
+                    <input type="text" id="edit-estimate-number" value="{{ estimate.estimate_number or estimate.id }}" class="est-input" style="width: 195px; font-size: 24px; font-weight: 700; padding: 4px 8px; text-align: right;">
+                    <span style="font-size: 18px; color: var(--gray-400); margin: 0 2px;">|</span>
+                    <span style="font-size: 18px; color: var(--gray-500); font-weight: 600; white-space: nowrap;">Created: {{ estimate.created_at[:10] if estimate.created_at else '' }}</span>
+                    <span style="font-size: 18px; color: var(--gray-400); margin: 0 2px;">|</span>
+                    <label style="font-size: 15px; color: var(--gray-500); font-weight: 600; margin: 0; white-space: nowrap;">Accepted:</label>
+                    <input type="date" id="edit-date-accepted" value="{{ estimate.date_accepted or '' }}" class="est-input" style="width: 170px; font-size: 16px; font-weight: 600; padding: 4px 8px;">
+                    <span style="font-size: 18px; color: var(--gray-400); margin: 0 2px;">|</span>
+                    <label style="font-size: 15px; color: var(--gray-500); font-weight: 600; margin: 0; white-space: nowrap;">Expected Completion:</label>
+                    <input type="date" id="edit-expected-completion" value="{{ estimate.expected_completion or '' }}" class="est-input" style="width: 170px; font-size: 16px; font-weight: 600; padding: 4px 8px;">
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <a href="/admin/estimates?token={{ selected_token.token if selected_token else '' }}" class="btn btn-sm" style="background: var(--gray-400); color: #fff;">Back to Estimates / Projects</a>
+                    <form method="POST" action="/admin/estimates/{{ estimate.id }}/delete" style="display: inline;" onsubmit="return confirm('Permanently delete this {% if is_project %}project{% else %}estimate{% endif %}?')">
+                        <button type="submit" class="btn btn-sm btn-red">Delete {% if is_project %}Project{% else %}Estimate{% endif %}</button>
+                    </form>
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                <div>
+                    <label class="est-label">Job</label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <select id="edit-job-select" class="est-input" style="flex: 1;" onchange="onJobSelectChange()">
+                            {% for j in all_jobs %}
+                            <option value="{{ j.id }}" data-address="{{ j.job_address or '' }}" {% if j.id == estimate.job_id %}selected{% endif %}>{{ j.job_name }}</option>
+                            {% endfor %}
+                        </select>
+                        <a href="/admin/jobs?token={{ selected_token.token if selected_token else '' }}" target="_blank" class="btn btn-sm btn-blue" style="white-space: nowrap;" title="Create a new job, then refresh this page">+ New Job</a>
+                    </div>
+                </div>
+                <div>
+                    <label class="est-label">Job Address</label>
+                    <div id="display-job-address" class="est-input" style="background: var(--gray-50); min-height: 38px; display: flex; align-items: center;">{{ job.job_address if job else '' }}</div>
+                </div>
+                <div>
+                    <label class="est-label">Customer Name</label>
+                    <input type="text" id="edit-customer-name" value="{{ estimate.customer_name or '' }}" class="est-input">
+                </div>
+                <div>
+                    <label class="est-label">Customer Phone</label>
+                    <input type="tel" id="edit-customer-phone" value="{{ estimate.customer_phone or '' }}" class="est-input" placeholder="(555) 555-5555" oninput="formatPhone(this)" pattern="\(\d{3}\)\s?\d{3}-\d{4}">
+                </div>
+                <div>
+                    <label class="est-label">Customer Email</label>
+                    <input type="email" id="edit-customer-email" value="{{ estimate.customer_email or '' }}" class="est-input" placeholder="name@example.com">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div>
+                        <label for="edit-approval-status" class="est-label">Approval Status</label>
+                        <select id="edit-approval-status" onchange="styleApprovalSelect(this)" class="est-input" style="font-weight: 700; height: 52px;" size="1">
+                            <option value="pending" {% if estimate.approval_status == 'pending' %}selected{% endif %}>Pending</option>
+                            <option value="accepted" {% if estimate.approval_status == 'accepted' %}selected{% endif %}>Accepted</option>
+                            <option value="in_progress" {% if estimate.approval_status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                            <option value="completed" {% if estimate.approval_status == 'completed' %}selected{% endif %}>Completed</option>
+                            <option value="declined" {% if estimate.approval_status == 'declined' %}selected{% endif %}>Declined</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="edit-completion-pct" class="est-label">Job Completed %</label>
+                        <input type="number" id="edit-completion-pct" value="{{ estimate.completion_pct|default(0)|int }}" step="1" min="0" max="100" class="est-input" style="font-weight: 700; height: 52px;" onfocus="this.select()" oninput="computeMargins()">
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div>
+                        <label for="edit-estimate-value" class="est-label">Estimate Value ($)</label>
+                        <input type="number" id="edit-estimate-value" value="{{ '{:.2f}'.format(estimate.estimate_value or 0) }}" step="0.01" min="0" class="est-input" onfocus="this.select()" oninput="computeMargins()">
+                    </div>
+                    <div>
+                        <label for="edit-client-budget" class="est-label">Client Budget ($)</label>
+                        <input type="number" id="edit-client-budget" value="{{ '{:.2f}'.format(estimate.client_budget or 0) }}" step="0.01" min="0" class="est-input" placeholder="0.00" onfocus="this.select()">
+                    </div>
+                </div>
+                <div style="grid-column: 2;">
+                    <label for="edit-actual-collected" class="est-label">Actual Collected ($)</label>
+                    <input type="number" id="edit-actual-collected" value="{{ '{:.2f}'.format(estimate.actual_collected or 0) }}" step="0.01" min="0" class="est-input" onfocus="this.select()" oninput="computeMargins()">
+                </div>
+            </div>
+
+            {% if estimate.title %}
+            <div style="margin-bottom: 14px;">
+                <label class="est-label">Description / Caption</label>
+                <div style="background: var(--gray-50); padding: 14px; border-radius: 8px; margin-top: 4px; font-size: 16px;">{{ estimate.title }}</div>
+            </div>
+            {% endif %}
+
+            <div style="margin-bottom: 14px;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+                    <label for="edit-transcription" class="est-label" style="margin-bottom: 0;">Transcription</label>
+                    {% if estimate.status == 'complete' %}
+                    <span class="badge badge-active" style="font-size: 13px; padding: 5px 14px;">Complete</span>
+                    {% elif estimate.status == 'error' %}
+                    <span class="badge" style="background: #fee2e2; color: #991b1b; font-size: 13px; padding: 5px 14px;">Error</span>
+                    {% else %}
+                    <span class="badge" style="background: #fef3c7; color: #92400e; font-size: 13px; padding: 5px 14px;">{{ estimate.status }}</span>
+                    {% endif %}
+                </div>
+                <textarea id="edit-transcription" rows="6" style="width: 100%; resize: vertical; font-size: 16px; line-height: 1.6; margin-top: 4px; padding: 12px; background: #fefce8; border: 1px solid var(--gray-300); border-radius: 6px;">{{ estimate.transcription or '' }}</textarea>
+            </div>
+
+            <div style="margin-bottom: 14px;">
+                <label for="edit-notes" class="est-label">Additional Notes</label>
+                <textarea id="edit-notes" rows="4" placeholder="Add notes, observations, or follow-up items..." style="width: 100%; resize: vertical; font-size: 16px; margin-top: 4px; padding: 12px; background: #fefce8; border: 1px solid var(--gray-300); border-radius: 6px;">{{ estimate.notes or '' }}</textarea>
+            </div>
+
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <button type="button" class="btn btn-green" onclick="saveEstimate()" style="font-size: 16px; padding: 10px 24px;">Save Changes</button>
+                <button type="button" class="btn" style="background: #7c3aed; color: #fff; font-size: 16px; padding: 10px 24px;" onclick="sendToJobFolder()">Send PDF to Job Folder</button>
+                <span id="save-status" style="font-size: 15px;"></span>
+                <span id="folder-status" style="font-size: 15px;"></span>
+            </div>
+        </div>
+
+        {# --- Reports --- #}
+        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+            <button type="button" class="btn btn-sm btn-blue" onclick="downloadInternalPDF()">Internal Report PDF</button>
+            <a href="/admin/estimates/{{ estimate.id }}/report/xlsx" class="btn btn-sm btn-green">Financial Report (Excel)</a>
+            <button type="button" class="btn btn-sm btn-orange" onclick="downloadScopePDF()">Scope of Work PDF</button>
+        </div>
+
+        {# --- Photos + Upload --- #}
+        <div style="background: #fff; border: 1px solid var(--gray-200); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <strong>Job Site Photos{% if photos %} ({{ photos|length }}){% endif %}</strong>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    {% if photos %}
+                    <a href="#" onclick="toggleAllPhotos(true); return false;" style="font-size: 12px;">Select All</a>
+                    <span style="color: var(--gray-300);">|</span>
+                    <a href="#" onclick="toggleAllPhotos(false); return false;" style="font-size: 12px;">Deselect All</a>
+                    {% endif %}
+                    <input type="file" id="photo-upload-input" accept="image/*,.pdf,.doc,.docx" multiple style="display: none;" onchange="uploadFiles(this)">
+                    <button type="button" class="btn btn-sm btn-blue" onclick="document.getElementById('photo-upload-input').click()">Upload Photos / Docs</button>
+                </div>
+            </div>
+
+            <div id="upload-status" style="display: none; margin-bottom: 12px; font-size: 13px; color: var(--blue);"></div>
+
+            {% if photos %}
+            <div class="photo-gallery">
+                {% for p in photos %}
+                <div style="position: relative;">
+                    <label style="position: absolute; top: 4px; left: 4px; z-index: 1; background: rgba(255,255,255,0.85); border-radius: 4px; padding: 2px 4px; cursor: pointer;">
+                        <input type="checkbox" class="photo-select" value="{{ p.id }}" checked>
+                    </label>
+                    <img src="/api/job-photos/{{ p.id }}?thumb=1" alt="Photo" style="width: 100%; border-radius: 6px; cursor: pointer;"
+                         onclick="window.open('/api/job-photos/{{ p.id }}', '_blank')">
+                    {% if p.caption %}
+                    <div style="font-size: 12px; color: var(--gray-500); margin-top: 4px;">{{ p.caption }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p style="color: var(--gray-500); font-size: 13px;">No photos yet.</p>
+            {% endif %}
+        </div>
+
+        {# --- Line Items --- #}
+        <div style="background: #fff; border: 1px solid var(--gray-200); border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <strong>Line Items</strong>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <select id="ps-select" style="padding: 4px 8px; font-size: 13px; min-width: 200px;">
+                        <option value="">Add from Products &amp; Services...</option>
+                        {% for ps in products_services %}
+                        <option value="{{ ps.name }}" data-price="{{ '{:.2f}'.format(ps.unit_price or 0) }}">{{ ps.name }} (${{ '{:.2f}'.format(ps.unit_price or 0) }})</option>
+                        {% endfor %}
+                    </select>
+                    <button type="button" class="btn btn-sm btn-green" onclick="addFromPS()">Add</button>
+                </div>
+            </div>
+            <table class="admin-table" id="line-items-table" style="margin-bottom: 12px; width: 100%;">
+                <colgroup>
+                    <col style="width: 55%;">
+                    <col style="width: 90px;">
+                    <col style="width: 160px;">
+                    <col style="width: 40px;">
+                    <col style="width: 160px;">
+                    <col style="width: 80px;">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th>Product / Service</th>
+                        <th style="text-align: center;">Qty</th>
+                        <th style="text-align: right;">Unit Price</th>
+                        <th style="text-align: center;">Tax</th>
+                        <th style="text-align: right;">Total</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="line-items-body">
+                    {% for item in items %}
+                    <tr data-item-id="{{ item.id }}">
+                        <td><input type="text" class="est-input li-desc" value="{{ item.description }}" style="width: 100%;" onchange="saveItem(this)"></td>
+                        <td><input type="text" inputmode="decimal" class="est-input li-qty" value="{{ item.quantity }}" placeholder="0.00" style="width: 100%; text-align: center;" onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)" onblur="applyCalc(this,2,function(el){calcRow(el);})" onkeydown="if(event.key==='Enter'){applyCalc(this,2,function(el){calcRow(el);});}"></td>
+                        <td><input type="text" inputmode="decimal" class="est-input li-price" value="{{ '{:.2f}'.format(item.unit_price) }}" placeholder="0.00" style="width: 100%; text-align: right;" onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)" onblur="applyCalc(this,2,function(el){calcRow(el);})" onkeydown="if(event.key==='Enter'){applyCalc(this,2,function(el){calcRow(el);});}"></td>
+                        <td style="text-align: center; padding: 0 4px;"><input type="checkbox" class="li-taxable" {% if item.taxable %}checked{% endif %} onchange="saveItem(this); calcTotals();"></td>
+                        <td><input type="text" class="est-input li-total" value="{{ '{:.2f}'.format(item.total) }}" readonly style="width: 100%; text-align: right; background: var(--gray-50); color: var(--gray-600); cursor: default;"></td>
+                        <td style="white-space: nowrap;">
+                            <button type="button" class="btn btn-sm" style="background: #7c3aed; color: #fff; padding: 2px 6px; font-size: 11px;" onclick="saveToPS(this)" title="Save to Products &amp; Services">Save</button>
+                            <button type="button" class="btn btn-red btn-sm" onclick="deleteItem(this)" style="padding: 2px 6px; font-size: 11px;">X</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not items %}
+                    <tr data-item-id="">
+                        <td><input type="text" class="est-input li-desc" value="" style="width: 100%;" placeholder="Description"></td>
+                        <td><input type="text" inputmode="decimal" class="est-input li-qty" value="" placeholder="0.00" style="width: 100%; text-align: center;" onfocus="this.select()" oninput="calcRow(this)" onblur="applyCalc(this,2,function(el){calcRow(el);})" onkeydown="if(event.key==='Enter'){applyCalc(this,2,function(el){calcRow(el);});}"></td>
+                        <td><input type="text" inputmode="decimal" class="est-input li-price" value="" placeholder="0.00" style="width: 100%; text-align: right;" onfocus="this.select()" oninput="calcRow(this)" onblur="applyCalc(this,2,function(el){calcRow(el);})" onkeydown="if(event.key==='Enter'){applyCalc(this,2,function(el){calcRow(el);});}"></td>
+                        <td style="text-align: center; padding: 0 4px;"><input type="checkbox" class="li-taxable" onchange="calcTotals()"></td>
+                        <td><input type="text" class="est-input li-total" value="" placeholder="0.00" readonly style="width: 100%; text-align: right; background: var(--gray-50); color: var(--gray-600); cursor: default;"></td>
+                        <td style="white-space: nowrap;">
+                            <button type="button" class="btn btn-sm" style="background: #7c3aed; color: #fff; padding: 2px 6px; font-size: 11px;" onclick="saveToPS(this)" title="Save to Products &amp; Services">Save</button>
+                            <button type="button" class="btn btn-red btn-sm" onclick="deleteItem(this)" style="padding: 2px 6px; font-size: 11px;">X</button>
+                        </td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+            <button type="button" class="btn btn-sm btn-blue" onclick="addLineItem()">+ Add Line Item</button>
+
+            <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+                <div style="width: 360px;">
+                    <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 15px;">
+                        <span>Subtotal:</span>
+                        <span id="li-subtotal" style="font-weight: 600;">$0.00</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 15px;">
+                        <span>
+                            Tax Rate:
+                            <input type="number" id="li-tax-rate" value="{{ '{:.2f}'.format(estimate.sales_tax_rate or 0) }}" step="0.01" min="0" max="100" style="width: 70px; text-align: right; padding: 2px 6px; font-size: 14px; background: #fefce8; border: 1px solid var(--gray-300); border-radius: 4px;" onfocus="this.select()" oninput="calcTotals()">%
+                        </span>
+                        <span>Sales Tax: <strong id="li-sales-tax">$0.00</strong></span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 18px; font-weight: 700; border-top: 2px solid var(--gray-300);">
+                        <span>Total:</span>
+                        <span id="li-grand-total">$0.00</span>
+                    </div>
+                </div>
+            </div>
+
+            {# --- Customer Message --- #}
+            <div style="margin-top: 20px; border-top: 1px solid var(--gray-200); padding-top: 16px;">
+                <label class="est-label">Message to Customer</label>
+                <select id="snippet-select" onchange="applySnippet()" style="width: 100%; margin-bottom: 8px; padding: 8px; font-size: 14px;">
+                    <option value="">-- Select a message or type below --</option>
+                    {% for s in snippets %}
+                    <option value="{{ s.name }}">{{ s.name[:80] }}{% if s.name|length > 80 %}...{% endif %}</option>
+                    {% endfor %}
+                </select>
+                <textarea id="edit-customer-message" rows="3" placeholder="Enter a message for the customer..." style="width: 100%; resize: vertical; font-size: 15px; padding: 10px; background: #fefce8; border: 1px solid var(--gray-300); border-radius: 6px;">{{ estimate.customer_message or '' }}</textarea>
+            </div>
+
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 16px; border-top: 1px solid var(--gray-200); padding-top: 16px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-green" onclick="saveAllItems()" style="font-size: 16px; padding: 10px 24px;">Save Changes</button>
+                <button type="button" class="btn" style="background: #7c3aed; color: #fff; font-size: 16px; padding: 10px 24px;" onclick="downloadClientPDF()">Export Client Estimate PDF</button>
+                <a href="#" onclick="emailPDF(); return false;" class="btn" style="background: #0891b2; color: #fff; font-size: 16px; padding: 10px 24px;">Email Client PDF</a>
+                <span id="items-save-status" style="font-size: 15px;"></span>
+            </div>
+        </div>
+        {% endif %}
+
+        {# --- Job Tasks --- #}
+        <div style="background: #fff; border: 1px solid var(--gray-200); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <strong>Job (<span style="position: relative; text-decoration: underline dotted; cursor: help;" title="Add company-wide tasks to Scheduled Tasks under Lists">Custom</span>) Tasks for Scheduling</strong>
+                <form id="add-task-form" style="display: flex; gap: 8px;" onsubmit="addTask(event)">
+                    <input type="text" id="new-task-name" placeholder="Add task..." style="padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 4px; font-size: 13px;">
+                    <button type="submit" class="btn btn-sm btn-green">Add</button>
+                </form>
+            </div>
+
+            {% if tasks %}
+            <table class="admin-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Task</th>
+                        <th>Source</th>
+                        <th>Active</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in tasks %}
+                    <tr id="task-row-{{ t.id }}" style="{% if not t.is_active %}opacity: 0.5;{% endif %}">
+                        <td>{{ loop.index }}</td>
+                        <td>{{ t.name }}</td>
+                        <td><span class="badge" style="font-size: 10px;">{{ t.source }}</span></td>
+                        <td>
+                            <input type="checkbox" {% if t.is_active %}checked{% endif %}
+                                   onchange="toggleTask({{ t.id }}, this.checked)">
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: var(--gray-500); font-size: 13px;">No tasks yet.</p>
+            {% endif %}
+        </div>
+
+        {# --- Job Financials --- #}
+        <div style="border: 1px solid var(--blue); border-top: 2px solid var(--blue); background: #f0f5ff; border-radius: 8px; padding: 20px;">
+            <label style="color: var(--blue-dark); font-size: 15px; text-transform: uppercase; font-weight: 700; margin-bottom: 16px; display: block; letter-spacing: 0.5px;">Job Financials</label>
+
+            <label style="color: var(--blue-dark); font-size: 13px; text-transform: uppercase; font-weight: 700; margin-bottom: 10px; display: block;">Estimated Costs</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 18px;">
+                <div class="fin-card">
+                    <label class="fin-label">Est. Materials ($)</label>
+                    <input type="number" id="edit-est-materials" value="{{ '{:.2f}'.format(estimate.est_materials_cost or 0) }}" step="0.01" min="0" class="est-input" onfocus="this.select()" oninput="computeMargins()">
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Est. Labor ($)</label>
+                    <input type="number" id="edit-est-labor" value="{{ '{:.2f}'.format(estimate.est_labor_cost or 0) }}" step="0.01" min="0" class="est-input" onfocus="this.select()" oninput="computeMargins()">
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Est. Labor Hours</label>
+                    <input type="number" id="edit-est-labor-hours" value="{{ estimate.est_labor_hours or 0 }}" step="0.25" min="0" class="est-input" onfocus="this.select()" oninput="computeMargins()">
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Margin %</label>
+                    <div id="calc-margin-pct" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Markup %</label>
+                    <div id="calc-markup-pct" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Gross Profit ($)</label>
+                    <div id="calc-gross-profit" class="fin-computed">—</div>
+                </div>
+            </div>
+
+            <label style="color: var(--blue-dark); font-size: 13px; text-transform: uppercase; font-weight: 700; margin-bottom: 10px; display: block;">Work in Progress — <span id="wip-pct-label" style="font-style: italic; font-weight: 600;">{{ estimate.completion_pct|default(0)|int }}% Complete</span></label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 18px;">
+                <div class="fin-card">
+                    <label class="fin-label">WIP Materials ($)</label>
+                    <div id="calc-wip-materials" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">WIP Labor ($)</label>
+                    <div id="calc-wip-labor" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">WIP Labor Hours</label>
+                    <div id="calc-wip-hours" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Margin %</label>
+                    <div id="calc-wip-margin-pct" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Markup %</label>
+                    <div id="calc-wip-markup-pct" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Gross Profit ($)</label>
+                    <div id="calc-wip-gross-profit" class="fin-computed">—</div>
+                </div>
+            </div>
+
+            <label style="color: var(--blue-dark); font-size: 13px; text-transform: uppercase; font-weight: 700; margin-bottom: 10px; display: block;">Actual Costs — <span id="actual-costs-status" style="font-style: italic; font-weight: 600;">{% if estimate.approval_status == 'completed' %}Finalized{% else %}Running{% endif %}</span></label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 18px;">
+                <div class="fin-card">
+                    <label class="fin-label">Actual Materials ($)</label>
+                    <input type="number" id="edit-actual-materials" value="{{ '{:.2f}'.format(estimate.actual_materials_cost or 0) }}" step="0.01" min="0" class="est-input" onfocus="this.select()" oninput="computeMargins()">
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Actual Labor ($)</label>
+                    <div class="fin-computed">{{ '${:,.2f}'.format(job_labor.total_cost) }}</div>
+                    <input type="hidden" id="edit-actual-labor" value="{{ '{:.2f}'.format(job_labor.total_cost) }}">
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Actual Labor Hours</label>
+                    <div class="fin-computed">{{ '{:,.2f}'.format(job_labor.total_hours) }}</div>
+                    <input type="hidden" id="edit-actual-labor-hours" value="{{ job_labor.total_hours }}">
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Margin %</label>
+                    <div id="calc-actual-margin-pct" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Markup %</label>
+                    <div id="calc-actual-markup-pct" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Gross Profit ($)</label>
+                    <div id="calc-actual-gross-profit" class="fin-computed">—</div>
+                </div>
+            </div>
+
+            <label style="color: var(--gray-700); font-size: 13px; text-transform: uppercase; font-weight: 700; margin-bottom: 10px; display: block;">Work in Progress vs Actual</label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr; gap: 12px;">
+                <div class="fin-card">
+                    <label class="fin-label">Materials Variance</label>
+                    <div id="calc-var-materials" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Labor Variance</label>
+                    <div id="calc-var-labor" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Hours Variance</label>
+                    <div id="calc-var-hours" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Margin Variance</label>
+                    <div id="calc-var-margin-pct" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Markup Variance</label>
+                    <div id="calc-var-markup-pct" class="fin-computed">—</div>
+                </div>
+                <div class="fin-card">
+                    <label class="fin-label">Profit Variance</label>
+                    <div id="calc-var-profit" class="fin-computed">—</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    var ESTIMATE_ID = {{ estimate.id if estimate else 0 }};
+    var JOB_ID = {{ (job.id if job else estimate.job_id if estimate else 0)|int }};
+    var TOKEN_STR = "{{ selected_token.token if selected_token else '' }}";
+
+    function styleApprovalSelect(sel) {
+        var v = sel.value;
+        var colors = {
+            'pending': '#ea580c',
+            'accepted': '#1d4ed8',
+            'in_progress': '#9333ea',
+            'completed': '#15803d',
+            'declined': '#dc2626'
+        };
+        var c = colors[v] || '#ea580c';
+        sel.style.background = c;
+        sel.style.color = '#fff';
+        sel.style.borderColor = c;
+
+        var st = document.getElementById('actual-costs-status');
+        if (st) st.textContent = v === 'completed' ? 'Finalized' : 'Running';
+
+        // Auto-set completion to 100% when completed
+        var compEl = document.getElementById('edit-completion-pct');
+        if (v === 'completed' && compEl) {
+            compEl.value = 100;
+        }
+
+        // Update Estimate/Project label based on status
+        var docLabel = document.getElementById('doc-type-label');
+        if (docLabel) docLabel.textContent = (v !== 'pending' && v !== 'declined' ? 'Project' : 'Estimate') + ' #';
+
+        var locked = (v === 'accepted' || v === 'in_progress' || v === 'completed');
+        ['edit-estimate-value','edit-est-materials','edit-est-labor','edit-est-labor-hours'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) {
+                el.readOnly = locked;
+                el.style.opacity = locked ? '0.6' : '1';
+            }
+        });
+        computeMargins();
+    }
+    styleApprovalSelect(document.getElementById('edit-approval-status'));
+
+    function onJobSelectChange() {
+        var sel = document.getElementById('edit-job-select');
+        var addrEl = document.getElementById('display-job-address');
+        var opt = sel.options[sel.selectedIndex];
+        addrEl.textContent = opt.getAttribute('data-address') || '';
+    }
+
+    function formatPhone(input) {
+        var digits = input.value.replace(/\D/g, '').slice(0, 10);
+        if (digits.length >= 7) {
+            input.value = '(' + digits.slice(0,3) + ') ' + digits.slice(3,6) + '-' + digits.slice(6);
+        } else if (digits.length >= 4) {
+            input.value = '(' + digits.slice(0,3) + ') ' + digits.slice(3);
+        } else if (digits.length > 0) {
+            input.value = '(' + digits;
+        }
+    }
+
+    // Safe math expression evaluator (allows +, -, *, /, (), digits, decimals)
+    function evalMathExpr(raw) {
+        var s = String(raw).trim();
+        if (!s) return null;
+        if (!/^[\d\s\.\+\-\*\/\(\)]+$/.test(s)) return null;
+        try {
+            var result = Function('return (' + s + ')')();
+            return (typeof result === 'number' && isFinite(result)) ? result : null;
+        } catch(e) { return null; }
+    }
+
+    // Evaluate expression in el, clamp to 0, format to `decimals` places, then call afterFn
+    function applyCalc(el, decimals, afterFn) {
+        var result = evalMathExpr(el.value);
+        if (result !== null) {
+            el.value = Math.max(0, result).toFixed(decimals);
+        } else {
+            var plain = parseFloat(el.value);
+            el.value = (isNaN(plain) ? 0 : Math.max(0, plain)).toFixed(decimals);
+        }
+        if (afterFn) afterFn(el);
+    }
+
+    // Enforce .00 on all dollar inputs on blur (with expression support)
+    var dollarIds = ['edit-estimate-value','edit-actual-collected',
+        'edit-est-materials','edit-est-labor','edit-actual-materials'];
+    dollarIds.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('focus', function() { this.select(); });
+        el.addEventListener('blur', function() {
+            applyCalc(this, 2, null);
+            computeMargins();
+        });
+    });
+
+    function fmtDollar(n) {
+        return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+
+    function setComputed(id, text, positive) {
+        var el = document.getElementById(id);
+        el.textContent = text;
+        el.style.color = positive ? '#4ade80' : '#f87171';
+    }
+
+    function computeMargins() {
+        var ev = parseFloat(document.getElementById('edit-estimate-value').value) || 0;
+        var em = parseFloat(document.getElementById('edit-est-materials').value) || 0;
+        var el = parseFloat(document.getElementById('edit-est-labor').value) || 0;
+        var am = parseFloat(document.getElementById('edit-actual-materials').value) || 0;
+        var al = parseFloat(document.getElementById('edit-actual-labor').value) || 0;
+        var ac = parseFloat(document.getElementById('edit-actual-collected').value) || 0;
+        var eh = parseFloat(document.getElementById('edit-est-labor-hours').value) || 0;
+        var ah = parseFloat(document.getElementById('edit-actual-labor-hours').value) || 0;
+
+        var compPct = parseFloat(document.getElementById('edit-completion-pct').value) || 0;
+        var pctFactor = compPct / 100;
+
+        var estCost = em + el;
+        var actualCost = am + al;
+
+        // --- Estimated row (full values) ---
+        var estGrossProfit = ev - estCost;
+        var estMarginPct = ev > 0 ? ((estGrossProfit / ev) * 100).toFixed(1) : '0.0';
+        var estMarkupPct = estCost > 0 ? ((estGrossProfit / estCost) * 100).toFixed(1) : '0.0';
+
+        setComputed('calc-margin-pct', estMarginPct + '%', estGrossProfit >= 0);
+        setComputed('calc-markup-pct', estMarkupPct + '%', estGrossProfit >= 0);
+        setComputed('calc-gross-profit', fmtDollar(estGrossProfit), estGrossProfit >= 0);
+
+        // --- Work in Progress row (estimated * completion %) ---
+        var wipEv = ev * pctFactor;
+        var wipMat = em * pctFactor;
+        var wipLab = el * pctFactor;
+        var wipHrs = eh * pctFactor;
+        var wipCost = wipMat + wipLab;
+        var wipGross = wipEv - wipCost;
+        var wipMarginPct = wipEv > 0 ? ((wipGross / wipEv) * 100).toFixed(1) : '0.0';
+        var wipMarkupPct = wipCost > 0 ? ((wipGross / wipCost) * 100).toFixed(1) : '0.0';
+
+        setComputed('calc-wip-materials', fmtDollar(wipMat), true);
+        setComputed('calc-wip-labor', fmtDollar(wipLab), true);
+        setComputed('calc-wip-hours', wipHrs.toFixed(1) + ' hrs', true);
+        setComputed('calc-wip-margin-pct', wipMarginPct + '%', wipGross >= 0);
+        setComputed('calc-wip-markup-pct', wipMarkupPct + '%', wipGross >= 0);
+        setComputed('calc-wip-gross-profit', fmtDollar(wipGross), wipGross >= 0);
+
+        // Update WIP % label
+        var wipLabel = document.getElementById('wip-pct-label');
+        if (wipLabel) wipLabel.textContent = compPct.toFixed(0) + '% Complete';
+
+        // --- Actual row ---
+        var actualGross = ac - actualCost;
+        var actualMarginPct = ac > 0 ? ((actualGross / ac) * 100).toFixed(1) : '0.0';
+        var actualMarkupPct = actualCost > 0 ? ((actualGross / actualCost) * 100).toFixed(1) : '0.0';
+
+        setComputed('calc-actual-margin-pct', actualMarginPct + '%', actualGross >= 0);
+        setComputed('calc-actual-markup-pct', actualMarkupPct + '%', actualGross >= 0);
+        setComputed('calc-actual-gross-profit', fmtDollar(actualGross), actualGross >= 0);
+
+        // --- Variance row (WIP vs Actual) ---
+        var varMat = wipMat - am;
+        var varLab = wipLab - al;
+        var varHours = wipHrs - ah;
+        var varMarginPct = parseFloat(actualMarginPct) - parseFloat(wipMarginPct);
+        var varMarkupPct = parseFloat(actualMarkupPct) - parseFloat(wipMarkupPct);
+        var varProfit = actualGross - wipGross;
+
+        setComputed('calc-var-materials', fmtDollar(varMat), varMat >= 0);
+        setComputed('calc-var-labor', fmtDollar(varLab), varLab >= 0);
+        setComputed('calc-var-hours', (varHours >= 0 ? '+' : '') + varHours.toFixed(1) + ' hrs', varHours >= 0);
+        setComputed('calc-var-margin-pct', (varMarginPct >= 0 ? '+' : '') + varMarginPct.toFixed(1) + ' pts', varMarginPct >= 0);
+        setComputed('calc-var-markup-pct', (varMarkupPct >= 0 ? '+' : '') + varMarkupPct.toFixed(1) + ' pts', varMarkupPct >= 0);
+        setComputed('calc-var-profit', fmtDollar(varProfit), varProfit >= 0);
+    }
+    computeMargins();
+
+    function saveEstimate(onDone) {
+        // Validate phone format if provided
+        var phone = document.getElementById('edit-customer-phone').value.trim();
+        if (phone && !/^\(\d{3}\)\s?\d{3}-\d{4}$/.test(phone)) {
+            var status = document.getElementById('save-status');
+            status.style.color = 'var(--red)';
+            status.textContent = 'Phone must be (XXX) XXX-XXXX';
+            setTimeout(function() { status.textContent = ''; }, 3000);
+            if (onDone) onDone(false);
+            return;
+        }
+        // Validate email format if provided
+        var email = document.getElementById('edit-customer-email').value.trim();
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            var status = document.getElementById('save-status');
+            status.style.color = 'var(--red)';
+            status.textContent = 'Enter a valid email address';
+            setTimeout(function() { status.textContent = ''; }, 3000);
+            if (onDone) onDone(false);
+            return;
+        }
+        var payload = {
+            transcription: document.getElementById('edit-transcription').value,
+            notes: document.getElementById('edit-notes').value,
+            job_id: document.getElementById('edit-job-select').value,
+            approval_status: document.getElementById('edit-approval-status').value,
+            estimate_value: parseFloat(document.getElementById('edit-estimate-value').value) || 0,
+            client_budget: parseFloat(document.getElementById('edit-client-budget').value) || 0,
+            est_materials_cost: parseFloat(document.getElementById('edit-est-materials').value) || 0,
+            est_labor_cost: parseFloat(document.getElementById('edit-est-labor').value) || 0,
+            actual_materials_cost: parseFloat(document.getElementById('edit-actual-materials').value) || 0,
+            actual_collected: parseFloat(document.getElementById('edit-actual-collected').value) || 0,
+            est_labor_hours: parseFloat(document.getElementById('edit-est-labor-hours').value) || 0,
+            customer_name: document.getElementById('edit-customer-name').value,
+            customer_phone: phone,
+            customer_email: email,
+            estimate_number: document.getElementById('edit-estimate-number').value.trim(),
+            date_accepted: document.getElementById('edit-date-accepted').value,
+            expected_completion: document.getElementById('edit-expected-completion').value,
+            sales_tax_rate: parseFloat(document.getElementById('li-tax-rate').value) || 0,
+            customer_message: document.getElementById('edit-customer-message').value,
+            completion_pct: parseFloat(document.getElementById('edit-completion-pct').value) || 0
+        };
+        fetch('/admin/estimates/' + ESTIMATE_ID + '/update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        }).then(function(r) { return r.json(); })
+        .then(function(data) {
+            var status = document.getElementById('save-status');
+            if (data.ok) {
+                status.style.color = 'var(--green)';
+                status.textContent = 'Saved!';
+                if (window._markClean) window._markClean();
+                if (onDone) onDone(true);
+            } else {
+                status.style.color = 'var(--red)';
+                status.textContent = data.error || 'Save failed';
+                if (onDone) onDone(false);
+            }
+            setTimeout(function() { status.textContent = ''; }, 3000);
+        });
+    }
+
+    // Register save function for unsaved-changes guard
+    window._saveBeforeLeave = function(cb) { saveEstimate(cb); };
+
+    // --- Line Items ---
+    function fmtMoney(n) {
+        return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+
+    function calcRow(el) {
+        var row = el.closest('tr');
+        var qty = parseFloat(row.querySelector('.li-qty').value) || 0;
+        var price = parseFloat(row.querySelector('.li-price').value) || 0;
+        row.querySelector('.li-total').value = (qty * price).toFixed(2);
+        calcTotals();
+    }
+
+    function calcTotals() {
+        var rows = document.querySelectorAll('#line-items-body tr');
+        var subtotal = 0;
+        var taxableTotal = 0;
+        rows.forEach(function(row) {
+            var total = parseFloat(row.querySelector('.li-total').value) || 0;
+            subtotal += total;
+            if (row.querySelector('.li-taxable').checked) {
+                taxableTotal += total;
+            }
+        });
+        var taxRate = parseFloat(document.getElementById('li-tax-rate').value) || 0;
+        var salesTax = taxableTotal * (taxRate / 100);
+        var grandTotal = subtotal + salesTax;
+        document.getElementById('li-subtotal').textContent = fmtMoney(subtotal);
+        document.getElementById('li-sales-tax').textContent = fmtMoney(salesTax);
+        document.getElementById('li-grand-total').textContent = fmtMoney(grandTotal);
+
+        // Auto-sync estimate value from line items grand total
+        var estValueEl = document.getElementById('edit-estimate-value');
+        if (grandTotal > 0) {
+            estValueEl.value = grandTotal.toFixed(2);
+            estValueEl.readOnly = true;
+            estValueEl.style.background = 'var(--gray-50)';
+            estValueEl.style.color = 'var(--gray-500)';
+            estValueEl.title = 'Auto-calculated from Products & Services total';
+        } else {
+            estValueEl.readOnly = false;
+            estValueEl.style.background = '';
+            estValueEl.style.color = '';
+            estValueEl.title = '';
+        }
+        computeMargins();
+    }
+
+    function addLineItem(desc, price) {
+        var tbody = document.getElementById('line-items-body');
+        var tr = document.createElement('tr');
+        tr.setAttribute('data-item-id', '');
+        tr.innerHTML = '<td><input type="text" class="est-input li-desc" value="' + (desc || '') + '" style="width: 100%;" placeholder="Description" onchange="saveItem(this)"></td>' +
+            '<td><input type="text" inputmode="decimal" class="est-input li-qty" value="" placeholder="0.00" style="width: 100%; text-align: center;" onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)" onblur="applyCalc(this,2,function(el){calcRow(el);})" onkeydown="if(event.key===\'Enter\'){applyCalc(this,2,function(el){calcRow(el);});}"></td>' +
+            '<td><input type="text" inputmode="decimal" class="est-input li-price" value="' + (price || '') + '" placeholder="0.00" style="width: 100%; text-align: right;" onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)" onblur="applyCalc(this,2,function(el){calcRow(el);})" onkeydown="if(event.key===\'Enter\'){applyCalc(this,2,function(el){calcRow(el);});}"></td>' +
+            '<td style="text-align: center; padding: 0 4px;"><input type="checkbox" class="li-taxable" onchange="saveItem(this); calcTotals();"></td>' +
+            '<td><input type="text" class="est-input li-total" value="' + (price || '') + '" placeholder="0.00" readonly style="width: 100%; text-align: right; background: var(--gray-50); color: var(--gray-600); cursor: default;"></td>' +
+            '<td style="white-space: nowrap;">' +
+            '<button type="button" class="btn btn-sm" style="background: #7c3aed; color: #fff; padding: 2px 6px; font-size: 11px;" onclick="saveToPS(this)" title="Save to Products &amp; Services">Save</button> ' +
+            '<button type="button" class="btn btn-red btn-sm" onclick="deleteItem(this)" style="padding: 2px 6px; font-size: 11px;">X</button></td>';
+        tbody.appendChild(tr);
+        calcTotals();
+    }
+
+    function saveItem(el) {
+        var row = el.closest('tr');
+        var itemId = row.getAttribute('data-item-id');
+        var desc = row.querySelector('.li-desc').value.trim();
+        var qty = parseFloat(row.querySelector('.li-qty').value) || 0;
+        var price = parseFloat(row.querySelector('.li-price').value) || 0;
+        var total = parseFloat(row.querySelector('.li-total').value) || 0;
+        var taxable = row.querySelector('.li-taxable').checked;
+        if (!desc) return;
+
+        if (itemId) {
+            fetch('/admin/estimates/items/' + itemId + '/update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, total: total, taxable: taxable})
+            });
+        } else {
+            fetch('/admin/estimates/' + ESTIMATE_ID + '/items/create', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, total: total, taxable: taxable, sort_order: 0})
+            }).then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok && data.item) {
+                    row.setAttribute('data-item-id', data.item.id);
+                }
+            });
+        }
+    }
+
+    function deleteItem(btn) {
+        var row = btn.closest('tr');
+        var itemId = row.getAttribute('data-item-id');
+        if (itemId) {
+            fetch('/admin/estimates/items/' + itemId + '/delete', {method: 'POST'});
+        }
+        row.remove();
+        calcTotals();
+    }
+
+    function applySnippet() {
+        var sel = document.getElementById('snippet-select');
+        if (sel.value) {
+            document.getElementById('edit-customer-message').value = sel.value;
+        }
+    }
+
+    function emailPDF() {
+        var email = document.getElementById('edit-customer-email').value.trim();
+        var estNum = document.getElementById('edit-estimate-number').value.trim();
+        var subject = encodeURIComponent('Estimate #' + estNum);
+        var sel = _selectedPhotoIds();
+        var pdfUrl = window.location.origin + '/admin/estimates/' + ESTIMATE_ID + '/report/client-pdf';
+        if (sel.ids.length > 0 && sel.ids.length < sel.total) {
+            pdfUrl += '?photos=' + sel.ids.join(',');
+        }
+        var body = encodeURIComponent('Please find the attached estimate. You can download it here:\n\n' + pdfUrl);
+        var mailto = 'mailto:' + encodeURIComponent(email) + '?subject=' + subject + '&body=' + body;
+        window.location.href = mailto;
+    }
+
+    function saveToPS(btn) {
+        var row = btn.closest('tr');
+        var name = row.querySelector('.li-desc').value.trim();
+        var price = parseFloat(row.querySelector('.li-price').value) || 0;
+        if (!name) { alert('Enter a description first.'); return; }
+        fetch('/admin/estimates/' + ESTIMATE_ID + '/items/save-product', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: name, unit_price: price})
+        }).then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                // Add to the P&S dropdown
+                var sel = document.getElementById('ps-select');
+                var opt = document.createElement('option');
+                opt.value = name;
+                opt.setAttribute('data-price', price.toFixed(2));
+                opt.textContent = name + ' ($' + price.toFixed(2) + ')';
+                sel.appendChild(opt);
+                btn.textContent = 'Saved!';
+                btn.style.background = '#15803d';
+                setTimeout(function() { btn.textContent = 'Save'; btn.style.background = '#7c3aed'; }, 2000);
+            } else {
+                alert(data.error || 'Failed to save.');
+            }
+        });
+    }
+
+    function addFromPS() {
+        var sel = document.getElementById('ps-select');
+        if (!sel.value) return;
+        var opt = sel.options[sel.selectedIndex];
+        var name = sel.value;
+        var price = opt.getAttribute('data-price') || '0.00';
+        addLineItem(name, price);
+        // Auto-save the new row
+        var tbody = document.getElementById('line-items-body');
+        var lastRow = tbody.lastElementChild;
+        if (lastRow) saveItem(lastRow.querySelector('.li-desc'));
+        sel.value = '';
+    }
+
+    function saveAllItems() {
+        var rows = document.querySelectorAll('#line-items-body tr');
+        var promises = [];
+        rows.forEach(function(row) {
+            var desc = row.querySelector('.li-desc').value.trim();
+            if (!desc) return;
+            var qty = parseFloat(row.querySelector('.li-qty').value) || 0;
+            var price = parseFloat(row.querySelector('.li-price').value) || 0;
+            var total = parseFloat(row.querySelector('.li-total').value) || 0;
+            var taxable = row.querySelector('.li-taxable').checked;
+            var itemId = row.getAttribute('data-item-id');
+            if (itemId) {
+                promises.push(fetch('/admin/estimates/items/' + itemId + '/update', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({description: desc, quantity: qty, unit_price: price, total: total, taxable: taxable})
+                }));
+            } else {
+                promises.push(fetch('/admin/estimates/' + ESTIMATE_ID + '/items/create', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({description: desc, quantity: qty, unit_price: price, total: total, taxable: taxable, sort_order: 0})
+                }).then(function(r) { return r.json(); }).then(function(data) {
+                    if (data.ok && data.item) {
+                        row.setAttribute('data-item-id', data.item.id);
+                    }
+                }));
+            }
+        });
+        // Also save estimate-level fields (tax rate, customer message, completion_pct)
+        saveEstimate();
+        Promise.all(promises).then(function() {
+            var st = document.getElementById('items-save-status');
+            st.style.color = 'var(--green)';
+            st.textContent = 'All changes saved!';
+            if (window._markClean) window._markClean();
+            setTimeout(function() { st.textContent = ''; }, 3000);
+        });
+    }
+
+    // Recalculate every row's total from qty × price on load, then sum
+    document.querySelectorAll('#line-items-body tr').forEach(function(row) {
+        var qty = parseFloat(row.querySelector('.li-qty').value) || 0;
+        var price = parseFloat(row.querySelector('.li-price').value) || 0;
+        row.querySelector('.li-total').value = (qty * price).toFixed(2);
+    });
+    calcTotals();
+
+    function uploadFiles(input) {
+        if (!input.files.length) return;
+        var statusEl = document.getElementById('upload-status');
+        statusEl.style.display = '';
+        statusEl.textContent = 'Uploading ' + input.files.length + ' file(s)...';
+        var promises = [];
+        for (var i = 0; i < input.files.length; i++) {
+            var fd = new FormData();
+            fd.append('token', TOKEN_STR);
+            fd.append('job_id', JOB_ID);
+            fd.append('image', input.files[i]);
+            promises.push(fetch('/api/job-photos/upload', {method: 'POST', body: fd}).then(function(r) { return r.json(); }));
+        }
+        Promise.all(promises).then(function(results) {
+            var ok = results.filter(function(r) { return r.id || r.ok; }).length;
+            statusEl.textContent = ok + ' of ' + results.length + ' uploaded. Reloading...';
+            setTimeout(function() { location.reload(); }, 1000);
+        }).catch(function(err) {
+            statusEl.style.color = 'var(--red)';
+            statusEl.textContent = 'Upload failed: ' + err.message;
+        });
+        input.value = '';
+    }
+
+    function addTask(e) {
+        e.preventDefault();
+        var name = document.getElementById('new-task-name').value.trim();
+        if (!name) return;
+        var fd = new FormData();
+        fd.append('name', name);
+        fetch('/admin/job-tasks/' + JOB_ID + '/create', {method: 'POST', body: fd})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) { location.reload(); }
+                else { alert(data.error || 'Failed'); }
+            });
+    }
+
+    function downloadInternalPDF() {
+        var checks = document.querySelectorAll('.photo-select');
+        var ids = [];
+        checks.forEach(function(cb) {
+            if (cb.checked) ids.push(cb.value);
+        });
+        var url = '/admin/estimates/' + ESTIMATE_ID + '/report/pdf';
+        if (ids.length > 0 && ids.length < checks.length) {
+            url += '?photos=' + ids.join(',');
+        }
+        window.location.href = url;
+    }
+
+    function _selectedPhotoIds() {
+        var checks = document.querySelectorAll('.photo-select');
+        var ids = [];
+        checks.forEach(function(cb) { if (cb.checked) ids.push(cb.value); });
+        return { ids: ids, total: checks.length };
+    }
+
+    function downloadScopePDF() {
+        var sel = _selectedPhotoIds();
+        var url = '/admin/estimates/' + ESTIMATE_ID + '/report/scope-pdf';
+        if (sel.ids.length > 0 && sel.ids.length < sel.total) {
+            url += '?photos=' + sel.ids.join(',');
+        }
+        window.location.href = url;
+    }
+
+    function downloadClientPDF() {
+        var sel = _selectedPhotoIds();
+        var url = '/admin/estimates/' + ESTIMATE_ID + '/report/client-pdf';
+        if (sel.ids.length > 0 && sel.ids.length < sel.total) {
+            url += '?photos=' + sel.ids.join(',');
+        }
+        window.location.href = url;
+    }
+
+    function toggleAllPhotos(checked) {
+        document.querySelectorAll('.photo-select').forEach(function(cb) {
+            cb.checked = checked;
+        });
+    }
+
+    function sendToJobFolder() {
+        var st = document.getElementById('folder-status');
+        st.style.color = 'var(--blue)';
+        st.textContent = 'Sending...';
+        fetch('/admin/estimates/' + ESTIMATE_ID + '/send-to-job-folder', {
+            method: 'POST',
+            headers: {'X-Requested-With': 'XMLHttpRequest'}
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                st.style.color = 'var(--green)';
+                st.textContent = 'Sent to job folder!';
+            } else {
+                st.style.color = 'var(--red)';
+                st.textContent = data.error || 'Failed';
+            }
+            setTimeout(function() { st.textContent = ''; }, 4000);
+        })
+        .catch(function(err) {
+            st.style.color = 'var(--red)';
+            st.textContent = 'Error: ' + err.message;
+            setTimeout(function() { st.textContent = ''; }, 4000);
+        });
+    }
+
+    function toggleTask(taskId, checked) {
+        fetch('/admin/job-tasks/' + taskId + '/toggle', {method: 'POST'})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    var row = document.getElementById('task-row-' + taskId);
+                    if (row) row.style.opacity = data.is_active ? '1' : '0.5';
+                }
+            });
+    }
+    </script>
+
+    <script>
+    // --- Auto-refresh jobs dropdown on window focus (estimate-specific) ---
+    (function() {
+        var TOKEN = '{{ selected_token.token if selected_token else "" }}';
+        window.addEventListener('focus', function() {
+            if (!TOKEN) return;
+            fetch('/admin/estimates/jobs.json?token=' + encodeURIComponent(TOKEN))
+                .then(function(r) { return r.json(); })
+                .then(function(jobs) {
+                    var sel = document.getElementById('edit-job-select');
+                    if (!sel) return;
+                    var curVal = sel.value;
+                    sel.innerHTML = '';
+                    jobs.forEach(function(j) {
+                        var opt = document.createElement('option');
+                        opt.value = j.id;
+                        opt.textContent = j.job_name;
+                        opt.setAttribute('data-address', j.job_address || '');
+                        if (String(j.id) === String(curVal)) opt.selected = true;
+                        sel.appendChild(opt);
+                    });
+                    if (!sel.querySelector('option[selected]') && sel.options.length) {
+                        sel.options[0].selected = true;
+                    }
+                    onJobSelectChange();
+                });
+        });
+    })();
+    </script>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>

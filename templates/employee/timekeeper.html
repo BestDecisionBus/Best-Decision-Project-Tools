@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timekeeper — {{ token.company_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="timekeeper-container">
+        <!-- Header with company logo/name -->
+        <div class="timekeeper-header">
+            {% if token.logo_file %}
+            <div class="header-row">
+                <img src="/static/logos/{{ token.logo_file }}" alt="{{ token.company_name }}" class="company-logo">
+                <div class="header-text">
+                    <h1>{{ token.company_name }}</h1>
+                    <span style="font-size: 16px; color: var(--gray-500);">Timekeeper</span>
+                </div>
+            </div>
+            {% else %}
+            <h1>{{ token.company_name }}</h1>
+            <span style="font-size: 16px; color: var(--gray-500);">Timekeeper</span>
+            {% endif %}
+            <a href="{{ url_for('timekeeper.timekeeper_help') }}" target="_blank" class="help-link">Help</a>
+        </div>
+
+        <!-- Logged-in employee info -->
+        <div class="tk-section" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #fff; border: 1px solid var(--gray-200); border-radius: 8px;">
+            <span style="font-weight: 600; color: var(--gray-800);">{{ employee.name }} <span style="color: var(--gray-400); font-weight: 400; font-size: 13px;">({{ employee.employee_id }})</span></span>
+            <a href="/c/{{ token.token }}" class="back-to-home">Back to Home</a>
+        </div>
+
+        <!-- Status display -->
+        <div id="status-section" class="tk-section" style="display: none;">
+            <div id="status-message" class="status-box"></div>
+        </div>
+
+        <!-- Select Job (shown when not clocked in) -->
+        <div id="job-section" class="tk-section" style="display: none;">
+            <label for="job-select">Select Job</label>
+            <select id="job-select" class="tk-select">
+                <option value="">-- Choose Job --</option>
+                {% for job in jobs %}
+                <option value="{{ job.id }}">{{ job.job_name }} — {{ job.job_address }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Clock In Button -->
+        <div id="clock-in-section" class="tk-section" style="display: none;">
+            <button id="clock-in-btn" class="btn-clock btn-clock-in" onclick="clockIn()">
+                CLOCK IN
+            </button>
+            <p class="gps-status" id="gps-status">Acquiring GPS...</p>
+        </div>
+
+        <!-- Clock Out Button -->
+        <div id="clock-out-section" class="tk-section" style="display: none;">
+            <button id="clock-out-btn" class="btn-clock btn-clock-out" onclick="clockOut()">
+                CLOCK OUT
+            </button>
+            <p id="active-info" class="active-info"></p>
+        </div>
+
+        <!-- Result message -->
+        <div id="result-section" class="tk-section" style="display: none;">
+            <div id="result-message"></div>
+        </div>
+
+        <!-- Today's Entries -->
+        <div id="today-section" class="tk-section" style="display: none;">
+            <h3>Today's Punches</h3>
+            <div id="today-entries"></div>
+        </div>
+    </div>
+    {% include '_footer.html' %}
+    <script>
+    var TOKEN = "{{ token.token }}";
+    var EMPLOYEE_ID = {{ employee.id }};
+    </script>
+    <script src="/static/js/timekeeper.js?v={{ cache_bust }}"></script>
+</body>
+</html>

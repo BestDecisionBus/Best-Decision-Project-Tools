@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual Entry — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <a href="{{ url_for('admin.admin_dashboard') }}{% if selected_token %}?token={{ selected_token.token }}{% endif %}"
+           style="color: var(--blue); text-decoration: none; font-size: 14px;">&larr; Back to Dashboard</a>
+
+        <h2 style="margin-top: 12px;">Create Manual Entry</h2>
+
+        {% if current_user.is_bdb %}
+            {% if tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    <option value="">Select Company</option>
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        {% else %}
+            {% if selected_token %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        {% if selected_token %}
+        <div class="meta-card">
+            <form method="POST" action="{{ url_for('time_admin.admin_manual_entry') }}">
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+
+                <div class="form-row">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="employee_id">Employee</label>
+                        <select id="employee_id" name="employee_id" required>
+                            <option value="">Select Employee</option>
+                            {% for emp in employees %}
+                            <option value="{{ emp.id }}">{{ emp.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="job_id">Job</label>
+                        <select id="job_id" name="job_id" required>
+                            <option value="">Select Job</option>
+                            {% for job in jobs %}
+                            <option value="{{ job.id }}">{{ job.job_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="manual_time_in">Time In</label>
+                        <input type="datetime-local" id="manual_time_in" name="manual_time_in" required>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="manual_time_out">Time Out</label>
+                        <input type="datetime-local" id="manual_time_out" name="manual_time_out" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="admin_notes">Admin Notes (required — explain the reason for this manual entry)</label>
+                    <textarea id="admin_notes" name="admin_notes" rows="3" required
+                              placeholder="e.g. Employee forgot to clock in, timesheet submitted on paper..."></textarea>
+                </div>
+
+                <button type="submit" class="btn btn-green">Create Manual Entry</button>
+            </form>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500);">Select a company above to create a manual entry.</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>

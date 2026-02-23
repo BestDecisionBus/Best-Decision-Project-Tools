@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jobs — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Jobs</h2>
+
+        {% if current_user.is_bdb %}
+            {% if tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    <option value="">All Companies</option>
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        {% else %}
+            {% if selected_token %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        {% if selected_token %}
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Add Job</h3>
+            <form method="POST" action="{{ url_for('time_admin.admin_job_create') }}">
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+                <div class="form-row">
+                    <div class="form-group" style="flex: 2;">
+                        <label for="job_name">Job Name</label>
+                        <input type="text" id="job_name" name="job_name" placeholder="Main St Renovation" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex: 3;">
+                        <label for="job_address">Address</label>
+                        <input type="text" id="job_address" name="job_address" placeholder="123 Main St, Anytown, USA">
+                    </div>
+                    <div class="form-group" style="align-self: flex-end;">
+                        <button type="button" class="btn btn-blue btn-sm" onclick="geocodeAddress()">Geocode</button>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="latitude">Latitude</label>
+                        <input type="number" id="latitude" name="latitude" step="any" placeholder="0.000000">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="longitude">Longitude</label>
+                        <input type="number" id="longitude" name="longitude" step="any" placeholder="0.000000">
+                    </div>
+                    <div class="form-group" style="align-self: flex-end;">
+                        <button type="submit" class="btn btn-green">Add Job</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if jobs %}
+        <div class="table-wrap">
+            <table class="resizable">
+                <thead>
+                    <tr>
+                        <th>Job Name</th>
+                        <th>Address</th>
+                        <th>Lat/Lng</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in jobs %}
+                    <tr>
+                        <td>
+                            <span id="jobname-display-{{ job.id }}">{{ job.job_name }}</span>
+                            <input type="text" id="jobname-input-{{ job.id }}" value="{{ job.job_name }}"
+                                   style="display: none; width: 100%;">
+                        </td>
+                        <td>
+                            <span id="addr-display-{{ job.id }}">{{ job.job_address or '' }}</span>
+                            <input type="text" id="addr-input-{{ job.id }}" value="{{ job.job_address or '' }}"
+                                   style="display: none; width: 100%;">
+                        </td>
+                        <td>
+                            <span id="latlng-display-{{ job.id }}">
+                                {% if job.latitude and job.longitude %}
+                                <span style="font-size: 12px;">{{ "%.5f"|format(job.latitude) }}, {{ "%.5f"|format(job.longitude) }}</span>
+                                {% else %}
+                                <span style="color: var(--gray-400);">--</span>
+                                {% endif %}
+                            </span>
+                            <div id="latlng-edit-{{ job.id }}" style="display: none;">
+                                <div style="display: flex; gap: 4px; align-items: center;">
+                                    <input type="number" id="lat-input-{{ job.id }}" step="any" placeholder="Lat"
+                                           value="{{ job.latitude or '' }}" style="width: 110px; font-size: 12px;">
+                                    <input type="number" id="lng-input-{{ job.id }}" step="any" placeholder="Lng"
+                                           value="{{ job.longitude or '' }}" style="width: 110px; font-size: 12px;">
+                                    <button type="button" class="btn btn-blue btn-sm" style="font-size: 11px; padding: 2px 6px;"
+                                            onclick="geocodeJobAddress({{ job.id }})">Geocode</button>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            {% if job.is_active %}
+                            <span class="badge badge-active">Active</span>
+                            {% else %}
+                            <span class="badge badge-inactive">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td style="display: flex; gap: 6px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-blue btn-sm" id="jobedit-btn-{{ job.id }}"
+                                    onclick="toggleJobEdit({{ job.id }})">Edit</button>
+                            <button type="button" class="btn btn-green btn-sm" id="jobsave-btn-{{ job.id }}"
+                                    style="display: none;"
+                                    onclick="saveJob({{ job.id }})">Save</button>
+                            <form method="POST" action="{{ url_for('time_admin.admin_job_toggle', job_id=job.id) }}" style="display: inline;">
+                                {% if job.is_active %}
+                                <button type="submit" class="btn btn-red btn-sm">Deactivate</button>
+                                {% else %}
+                                <button type="submit" class="btn btn-green btn-sm">Activate</button>
+                                {% endif %}
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500);">No jobs yet.{% if not selected_token %} Select a company above to add jobs.{% endif %}</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script>
+    function geocodeAddress() {
+        var address = document.getElementById('job_address').value;
+        if (!address) { alert('Enter an address first.'); return; }
+        fetch('{{ url_for("api_geocode") }}?address=' + encodeURIComponent(address))
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                if (data.lat != null && data.lng != null) {
+                    document.getElementById('latitude').value = data.lat;
+                    document.getElementById('longitude').value = data.lng;
+                } else {
+                    alert(data.error || 'Could not geocode that address.');
+                }
+            })
+            .catch(function() { alert('Geocode request failed.'); });
+    }
+
+    function toggleJobEdit(id) {
+        var nameDisplay = document.getElementById('jobname-display-' + id);
+        var nameInput = document.getElementById('jobname-input-' + id);
+        var addrDisplay = document.getElementById('addr-display-' + id);
+        var addrInput = document.getElementById('addr-input-' + id);
+        var latlngDisplay = document.getElementById('latlng-display-' + id);
+        var latlngEdit = document.getElementById('latlng-edit-' + id);
+        var editBtn = document.getElementById('jobedit-btn-' + id);
+        var saveBtn = document.getElementById('jobsave-btn-' + id);
+        var editing = nameInput.style.display === 'none';
+        nameDisplay.style.display = editing ? 'none' : '';
+        nameInput.style.display = editing ? '' : 'none';
+        addrDisplay.style.display = editing ? 'none' : '';
+        addrInput.style.display = editing ? '' : 'none';
+        latlngDisplay.style.display = editing ? 'none' : '';
+        latlngEdit.style.display = editing ? '' : 'none';
+        editBtn.style.display = editing ? 'none' : '';
+        saveBtn.style.display = editing ? '' : 'none';
+    }
+
+    function saveJob(id) {
+        var job_name = document.getElementById('jobname-input-' + id).value;
+        var job_address = document.getElementById('addr-input-' + id).value;
+        var lat = document.getElementById('lat-input-' + id).value;
+        var lng = document.getElementById('lng-input-' + id).value;
+        var payload = {job_name: job_name, job_address: job_address};
+        if (lat) payload.latitude = parseFloat(lat);
+        if (lng) payload.longitude = parseFloat(lng);
+        fetch('/admin/jobs/' + id + '/update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        }).then(function(resp) {
+            if (resp.ok) { window._guardBypass = true; window.location.reload(); }
+            else { alert('Error saving job.'); }
+        });
+    }
+
+    function geocodeJobAddress(id) {
+        var address = document.getElementById('addr-input-' + id).value;
+        if (!address) { alert('Enter an address first.'); return; }
+        fetch('{{ url_for("api_geocode") }}?address=' + encodeURIComponent(address))
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                if (data.lat != null && data.lng != null) {
+                    document.getElementById('lat-input-' + id).value = data.lat;
+                    document.getElementById('lng-input-' + id).value = data.lng;
+                } else {
+                    alert(data.error || 'Could not geocode that address.');
+                }
+            })
+            .catch(function() { alert('Geocode request failed.'); });
+    }
+    </script>
+</body>
+</html>

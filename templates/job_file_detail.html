@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Detail — {{ token.company_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="capture-container">
+        <div class="capture-header">
+            {% if token.logo_file %}
+            <div class="header-row">
+                <img src="/static/logos/{{ token.logo_file }}" alt="{{ token.company_name }}" class="company-logo">
+                <div class="header-text">
+                    <div class="company-name">{{ token.company_name }}</div>
+                    <h1>File Detail</h1>
+                </div>
+            </div>
+            {% else %}
+            <div class="company-name">{{ token.company_name }}</div>
+            <h1>File Detail</h1>
+            {% endif %}
+            <a href="/job-files?token={{ token.token }}&job_id={{ file.job_id }}" class="back-to-home">&larr; Back to Files</a>
+        </div>
+
+        <div style="background: #fff; border: 2px solid var(--gray-200); border-radius: 10px; padding: 20px; margin-bottom: 16px;">
+            {% if file.job_name %}
+            <div style="font-size: 13px; color: var(--gray-500); margin-bottom: 4px;">Job</div>
+            <div style="font-weight: 600; color: var(--gray-800); margin-bottom: 12px;">{{ file.job_name }}</div>
+            {% endif %}
+
+            <div style="font-size: 13px; color: var(--gray-500); margin-bottom: 4px;">File</div>
+            <div style="font-weight: 600; color: var(--gray-800); margin-bottom: 12px;">{{ file.image_file.split('/')[-1] }}</div>
+
+            {% if file.caption %}
+            <div style="font-size: 13px; color: var(--gray-500); margin-bottom: 4px;">Caption</div>
+            <div style="color: var(--gray-800); margin-bottom: 12px;">{{ file.caption }}</div>
+            {% endif %}
+
+            <div style="font-size: 13px; color: var(--gray-500); margin-bottom: 4px;">Date</div>
+            <div style="color: var(--gray-800); margin-bottom: 16px;">{{ file.created_at[:19] if file.created_at else '—' }}</div>
+
+            {% set ext = file.image_file.split('.')[-1] | lower %}
+            {% if ext == 'pdf' %}
+            <a href="/api/job-photos/{{ file.id }}" target="_blank" class="btn btn-blue" style="display: block; width: 100%; padding: 14px; font-size: 16px; text-align: center; font-weight: 600; margin-bottom: 8px;">
+                View PDF
+            </a>
+            {% endif %}
+        </div>
+    </div>
+    {% include '_footer.html' %}
+</body>
+</html>

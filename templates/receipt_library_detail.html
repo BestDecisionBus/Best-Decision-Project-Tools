@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipt Detail — {{ token_data.company_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="capture-container">
+        <div class="capture-header">
+            {% if logo_url %}
+            <div class="header-row">
+                <img src="{{ logo_url }}" alt="{{ token_data.company_name }}" class="company-logo">
+                <div class="header-text">
+                    <div class="company-name">{{ token_data.company_name }}</div>
+                    <h1>Receipt Detail</h1>
+                </div>
+            </div>
+            {% else %}
+            <div class="company-name">{{ token_data.company_name }}</div>
+            <h1>Receipt Detail</h1>
+            {% endif %}
+            <a href="/receipt-library?token={{ token }}" class="back-to-home">Back to Library</a>
+        </div>
+
+        <div style="margin-top: 16px;">
+            <img src="/api/receipt-image/{{ receipt.id }}?token={{ token }}" alt="Receipt"
+                 style="width: 100%; border-radius: 8px; border: 1px solid var(--gray-200);">
+        </div>
+
+        <div class="meta-card" style="margin-top: 16px;">
+            {% if job_name %}
+            <div style="margin-bottom: 8px;">
+                <strong style="color: var(--gray-500); font-size: 12px; text-transform: uppercase;">Job</strong>
+                <div style="font-weight: 600;">{{ job_name }}</div>
+            </div>
+            {% endif %}
+
+            {% if cat_names %}
+            <div style="margin-bottom: 8px;">
+                <strong style="color: var(--gray-500); font-size: 12px; text-transform: uppercase;">Categories</strong>
+                <div>{{ cat_names | join(', ') }}</div>
+            </div>
+            {% endif %}
+
+            <div style="margin-bottom: 8px;">
+                <strong style="color: var(--gray-500); font-size: 12px; text-transform: uppercase;">Date</strong>
+                <div>{{ receipt.timestamp|fmt_datetime }}</div>
+            </div>
+
+            {% if receipt.transcription %}
+            <div>
+                <strong style="color: var(--gray-500); font-size: 12px; text-transform: uppercase;">Transcription</strong>
+                <div style="background: var(--gray-50); padding: 12px; border-radius: 8px; margin-top: 4px; line-height: 1.6; font-size: 14px;">
+                    {{ receipt.transcription }}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% include '_footer.html' %}
+</body>
+</html>

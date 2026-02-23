@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipts — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 style="margin: 0;">Recent Submissions</h2>
+            <a href="{{ url_for('receipt_admin.receipt_browse') }}" class="btn btn-blue">Browse by Month</a>
+        </div>
+
+        {% if current_user.is_bdb %}
+            {% if tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    <option value="">All Companies</option>
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        {% else %}
+            {% if selected_token %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        {% if submissions %}
+        <div class="table-wrap">
+            <table class="resizable sortable">
+                <thead>
+                    <tr>
+                        <th>Processed</th>
+                        <th>Date/Time</th>
+                        <th>Company</th>
+                        <th>Job Name</th>
+                        <th>Vendor</th>
+                        <th>$</th>
+                        <th>Status</th>
+                        <th data-no-sort></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sub in submissions %}
+                    <tr class="{{ 'row-processed' if sub.processed else '' }}">
+                        <td class="td-checkbox">
+                            <input type="checkbox" class="processed-checkbox" data-id="{{ sub.id }}"
+                                   {{ 'checked' if sub.processed else '' }}>
+                        </td>
+                        <td>{{ sub.timestamp|fmt_datetime }}</td>
+                        <td>{{ sub.company_name }}</td>
+                        <td>{{ sub.job_name or '' }}</td>
+                        <td>{{ sub.vendor or '' }}</td>
+                        <td>{% if sub.total_amount %}${{ '{:,.2f}'.format(sub.total_amount) }}{% endif %}</td>
+                        <td>
+                            {% if sub.status == 'complete' %}
+                            <span class="badge badge-complete">Complete</span>
+                            {% elif sub.status == 'processing' %}
+                            <span class="badge badge-processing">Processing</span>
+                            {% elif sub.status == 'transcribing' %}
+                            <span class="badge badge-processing">Transcribing</span>
+                            {% elif sub.status == 'error' %}
+                            <span class="badge badge-inactive">Error</span>
+                            {% else %}
+                            <span class="badge badge-inactive">{{ sub.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td style="display: flex; gap: 6px;">
+                            <a href="{{ url_for('receipt_admin.receipt_detail', submission_id=sub.id) }}" class="btn btn-blue btn-sm">View</a>
+                            <button class="btn btn-red btn-sm delete-submission" data-id="{{ sub.id }}">Delete</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500);">No submissions yet.{% if not selected_token %} Select a company above to filter.{% endif %}</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tokens — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Create New Token</h2>
+        <form method="POST" action="{{ url_for('admin.admin_token_create') }}" enctype="multipart/form-data" style="margin-bottom: 32px;">
+            <div class="form-group">
+                <label for="company_name">Company Name</label>
+                <input type="text" id="company_name" name="company_name" placeholder="Acme Construction LLC" required>
+            </div>
+            <div class="form-group">
+                <label for="logo">Company Logo (optional — PNG, JPG, SVG, or WebP)</label>
+                <input type="file" id="logo" name="logo" accept=".png,.jpg,.jpeg,.svg,.webp">
+            </div>
+            <div class="form-group">
+                <label for="custom_token">Custom Token (optional — leave blank for random)</label>
+                <input type="text" id="custom_token" name="custom_token" placeholder="ACME2026" maxlength="20"
+                       pattern="[A-Za-z0-9]+" title="Letters and numbers only">
+            </div>
+            <div class="form-group">
+                <label for="labor_burden_pct">Labor Burden % (optional — e.g. 30 for 30%)</label>
+                <input type="number" id="labor_burden_pct" name="labor_burden_pct" placeholder="0" step="0.1" min="0" max="100" value="0">
+            </div>
+            <button type="submit" class="btn btn-green">Create Token</button>
+        </form>
+
+        <div style="margin-bottom: 32px; padding: 12px 16px; background: var(--gray-50); border: 1px dashed var(--gray-300); border-radius: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <strong style="font-size: 13px; color: var(--gray-600);">Admin Login URL:</strong>
+            <code id="admin-login-url">{{ request.host_url.replace('http://', 'https://') }}company-admin/login</code>
+            <button type="button" class="btn btn-blue btn-sm" onclick="copyUrl('admin-login-url', this)" style="padding: 2px 10px; font-size: 11px;">Copy</button>
+        </div>
+
+        <h2>All Tokens</h2>
+        {% if tokens %}
+        {% for t in tokens %}
+        <div class="meta-card">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap;">
+                {# Left: logo + name #}
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    {% if t.logo_file %}
+                    <img src="/static/logos/{{ t.logo_file }}" alt="{{ t.company_name }}"
+                         style="width: 48px; height: 48px; object-fit: contain; border-radius: 6px; border: 1px solid var(--gray-200);">
+                    {% else %}
+                    <div style="width: 48px; height: 48px; background: var(--gray-100); border-radius: 6px; border: 1px solid var(--gray-200); display: flex; align-items: center; justify-content: center; color: var(--gray-400); font-size: 20px;">?</div>
+                    {% endif %}
+                    <div>
+                        <strong style="font-size: 16px;">{{ t.company_name }}</strong>
+                        <div style="font-size: 13px; color: var(--gray-500); margin-top: 2px;">
+                            Token: <code>{{ t.token }}</code>
+                            {% if t.is_active %}
+                            <span class="badge badge-active" style="margin-left: 6px;">Active</span>
+                            {% else %}
+                            <span class="badge badge-inactive" style="margin-left: 6px;">Inactive</span>
+                            {% endif %}
+                            | Created {{ t.created_at[:10] }}
+                        </div>
+                        <div style="font-size: 12px; color: var(--gray-500); margin-top: 2px;">
+                            Labor Burden: <strong id="burden-display-{{ t.id }}">{{ t.labor_burden_pct or 0 }}%</strong>
+                            <input type="number" id="burden-input-{{ t.id }}" value="{{ t.labor_burden_pct or 0 }}"
+                                   step="0.1" min="0" max="100" style="display:none; width:70px; font-size:12px; padding:1px 4px;">
+                            <button type="button" class="btn btn-blue btn-sm" id="burden-edit-{{ t.id }}"
+                                    onclick="editBurden('{{ t.id }}', '{{ t.token }}')" style="padding:1px 6px; font-size:11px; margin-left:4px;">Edit</button>
+                            <button type="button" class="btn btn-green btn-sm" id="burden-save-{{ t.id }}"
+                                    onclick="saveBurden('{{ t.id }}', '{{ t.token }}')" style="display:none; padding:1px 6px; font-size:11px; margin-left:4px;">Save</button>
+                        </div>
+                        <div style="font-size: 12px; color: var(--gray-500); margin-top: 2px;">
+                            Company Home: <code id="home-url-{{ t.id }}">{{ request.host_url.replace('http://', 'https://') }}c/{{ t.token }}</code>
+                            <button type="button" class="btn btn-blue btn-sm" onclick="copyUrl('home-url-{{ t.id }}', this)" style="margin-left: 4px; padding: 1px 6px; font-size: 11px;">Copy</button>
+                        </div>
+                    </div>
+                </div>
+
+                {# Right: action buttons #}
+                <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+                    <button type="button" class="btn btn-blue btn-sm" onclick="toggleEdit({{ t.id }})">Edit</button>
+                    {% if current_user.is_admin %}
+                    <form method="POST" action="{{ url_for('admin.admin_token_regenerate', token_id=t.id) }}"
+                          onsubmit="return confirm('Regenerate token for {{ t.company_name }}? The current clock-in link will stop working immediately.');" style="display:inline;">
+                        <button type="submit" class="btn btn-blue btn-sm">New Token</button>
+                    </form>
+                    <form method="POST" action="{{ url_for('admin.admin_token_toggle', token_id=t.id) }}" style="display:inline;">
+                        {% if t.is_active %}
+                        <button type="submit" class="btn btn-red btn-sm">Deactivate</button>
+                        {% else %}
+                        <button type="submit" class="btn btn-green btn-sm">Activate</button>
+                        {% endif %}
+                    </form>
+                    <form method="POST" action="{{ url_for('admin.admin_token_delete', token_id=t.id) }}"
+                          onsubmit="return confirm('Delete {{ t.company_name }} and ALL its data? This cannot be undone.');" style="display:inline;">
+                        <button type="submit" class="btn btn-red btn-sm">Delete</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+
+            {# Collapsible edit form #}
+            <div id="edit-{{ t.id }}" style="display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--gray-200);">
+                <form method="POST" action="{{ url_for('admin.admin_token_update', token_id=t.id) }}" enctype="multipart/form-data">
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 2;">
+                            <label>Company Name</label>
+                            <input type="text" name="company_name" value="{{ t.company_name }}" required>
+                        </div>
+                        <div class="form-group" style="flex: 2;">
+                            <label>Upload Logo (PNG, JPG, SVG, WebP)</label>
+                            <input type="file" name="logo" accept=".png,.jpg,.jpeg,.svg,.webp">
+                            {% if t.logo_file %}
+                            <label style="font-size: 12px; color: var(--gray-500); margin-top: 4px;">
+                                <input type="checkbox" name="remove_logo" value="1"> Remove current logo
+                            </label>
+                            {% endif %}
+                        </div>
+                        <div class="form-group" style="align-self: flex-end;">
+                            <button type="submit" class="btn btn-green btn-sm">Save</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            {# Company Users section — BDB admin only #}
+            {% if current_user.is_admin %}
+            <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--gray-200);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <strong style="font-size: 14px;">Company Users</strong>
+                    <button type="button" class="btn btn-blue btn-sm" onclick="toggleUsers({{ t.id }})">
+                        {% if token_users.get(t.id) %}{{ token_users[t.id]|length }} user{{ 's' if token_users[t.id]|length != 1 }}{% else %}0 users{% endif %} &darr;
+                    </button>
+                </div>
+                <div id="users-{{ t.id }}" style="display: none;">
+                    {% if token_users.get(t.id) %}
+                    <table style="width: 100%; font-size: 13px; margin-bottom: 12px;">
+                        <thead>
+                            <tr>
+                                <th style="text-align: left; padding: 4px 8px;">Username</th>
+                                <th style="text-align: left; padding: 4px 8px;">Role</th>
+                                <th style="text-align: right; padding: 4px 8px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for u in token_users[t.id] %}
+                            <tr>
+                                <td style="padding: 4px 8px;">{{ u.username }}</td>
+                                <td style="padding: 4px 8px;"><span class="badge badge-active" style="font-size: 10px;">{{ u.role }}</span></td>
+                                <td style="padding: 4px 8px; text-align: right;">
+                                    <form method="POST" action="{{ url_for('admin.admin_company_user_reset_password', user_id=u.id) }}" style="display: inline;">
+                                        <input type="text" name="new_password" placeholder="New password" required style="width: 120px; font-size: 12px; padding: 2px 6px;">
+                                        <button type="submit" class="btn btn-blue btn-sm" style="font-size: 11px; padding: 2px 6px;">Reset</button>
+                                    </form>
+                                    <form method="POST" action="{{ url_for('admin.admin_company_user_delete', user_id=u.id) }}"
+                                          onsubmit="return confirm('Delete user {{ u.username }}?');" style="display: inline; margin-left: 4px;">
+                                        <button type="submit" class="btn btn-red btn-sm" style="font-size: 11px; padding: 2px 6px;">Delete</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <p style="color: var(--gray-500); font-size: 13px; margin-bottom: 12px;">No company users yet.</p>
+                    {% endif %}
+
+                    <form method="POST" action="{{ url_for('admin.admin_company_user_create', token_id=t.id) }}" style="display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap;">
+                        <div class="form-group" style="flex: 1; min-width: 120px; margin-bottom: 0;">
+                            <label style="font-size: 12px;">Username <span style="font-weight: 400; color: var(--gray-400);">(case sensitive)</span></label>
+                            <input type="text" name="username" placeholder="company_admin" required style="font-size: 13px;" class="check-username-token">
+                            <span class="username-status-token" style="font-size: 12px; display: none;"></span>
+                        </div>
+                        <div class="form-group" style="flex: 1; min-width: 120px; margin-bottom: 0;">
+                            <label style="font-size: 12px;">Password</label>
+                            <input type="text" name="password" placeholder="initial password" required style="font-size: 13px;">
+                        </div>
+                        <div class="form-group" style="min-width: 100px; margin-bottom: 0;">
+                            <label style="font-size: 12px;">Role</label>
+                            <select name="role" style="font-size: 13px;">
+                                <option value="admin">Admin</option>
+                                <option value="viewer">Viewer</option>
+                                <option value="scheduler">Scheduler</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-green btn-sm">Add User</button>
+                    </form>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+        {% else %}
+        <p style="color: var(--gray-500);">No tokens yet. Create one above.</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script>
+    function toggleUsers(id) {
+        var el = document.getElementById("users-" + id);
+        if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+    }
+
+    function editBurden(id, token) {
+        document.getElementById('burden-display-' + id).style.display = 'none';
+        document.getElementById('burden-input-' + id).style.display = '';
+        document.getElementById('burden-edit-' + id).style.display = 'none';
+        document.getElementById('burden-save-' + id).style.display = '';
+    }
+
+    function saveBurden(id, token) {
+        var pct = document.getElementById('burden-input-' + id).value;
+        fetch('/admin/labor-burden/update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({token: token, labor_burden_pct: pct})
+        }).then(function(resp) {
+            if (resp.ok) { window._guardBypass = true; window.location.reload(); }
+            else { alert('Error saving labor burden.'); }
+        });
+    }
+
+    // Live username availability check for company user creation
+    var _checkTimer = null;
+    document.querySelectorAll('.check-username-token').forEach(function(input) {
+        var statusEl = input.parentElement.querySelector('.username-status-token');
+        if (!statusEl) return;
+        input.addEventListener('input', function() {
+            clearTimeout(_checkTimer);
+            var val = input.value.trim();
+            if (!val) { statusEl.style.display = 'none'; return; }
+            _checkTimer = setTimeout(function() {
+                fetch('/api/check-username?username=' + encodeURIComponent(val))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    statusEl.style.display = '';
+                    if (data.available) {
+                        statusEl.textContent = 'Available';
+                        statusEl.style.color = 'var(--green)';
+                        input.setCustomValidity('');
+                    } else {
+                        statusEl.textContent = 'Username is taken';
+                        statusEl.style.color = 'var(--red)';
+                        input.setCustomValidity('Username is taken');
+                    }
+                });
+            }, 400);
+        });
+    });
+    </script>
+</body>
+</html>

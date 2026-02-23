@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Users — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Admin Users</h2>
+        <p style="color: var(--gray-500); font-size: 14px; margin-bottom: 16px;">
+            Manage BDB admin and viewer accounts. Company-specific users are managed on the Tokens page.
+        </p>
+
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Add New User</h3>
+            <form method="POST" action="{{ url_for('admin.admin_user_create') }}">
+                <div class="form-row">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="username">Username <span style="font-weight: 400; font-size: 12px; color: var(--gray-400);">(case sensitive)</span></label>
+                        <input type="text" id="username" name="username" placeholder="username" required>
+                        <span id="username-status" style="font-size: 12px; display: none;"></span>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="password">Password</label>
+                        <input type="text" id="password" name="password" placeholder="password" required>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="role">Role</label>
+                        <select id="role" name="role">
+                            <option value="admin">Admin</option>
+                            <option value="viewer">Viewer</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="align-self: flex-end;">
+                        <button type="submit" class="btn btn-green">Add User</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        {% if users %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Role</th>
+                        <th>Change Password</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td><strong>{{ u.username }}</strong></td>
+                        <td>
+                            {% if u.role == 'admin' %}
+                            <span class="badge badge-active">Admin</span>
+                            {% else %}
+                            <span class="badge badge-processing">Viewer</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <form method="POST" action="{{ url_for('admin.admin_user_change_password', user_id=u.id) }}" style="display: flex; gap: 6px; align-items: center;">
+                                <input type="text" name="new_password" placeholder="new password" style="width: 160px; padding: 6px 10px; font-size: 13px; border: 1px solid var(--gray-300); border-radius: 6px;" required>
+                                <button type="submit" class="btn btn-blue btn-sm">Update</button>
+                            </form>
+                        </td>
+                        <td>
+                            <form method="POST" action="{{ url_for('admin.admin_user_delete', user_id=u.id) }}"
+                                  onsubmit="return confirm('Delete user {{ u.username }}?');" style="display: inline;">
+                                <button type="submit" class="btn btn-red btn-sm">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500);">No users found.</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script>
+    var _checkTimer = null;
+    var input = document.getElementById('username');
+    var statusEl = document.getElementById('username-status');
+    if (input && statusEl) {
+        input.addEventListener('input', function() {
+            clearTimeout(_checkTimer);
+            var val = input.value.trim();
+            if (!val) { statusEl.style.display = 'none'; return; }
+            _checkTimer = setTimeout(function() {
+                fetch('/api/check-username?username=' + encodeURIComponent(val))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    statusEl.style.display = '';
+                    if (data.available) {
+                        statusEl.textContent = 'Available';
+                        statusEl.style.color = 'var(--green)';
+                        input.setCustomValidity('');
+                    } else {
+                        statusEl.textContent = 'Username is taken';
+                        statusEl.style.color = 'var(--red)';
+                        input.setCustomValidity('Username is taken');
+                    }
+                });
+            }, 400);
+        });
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scheduler — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        <nav class="admin-nav">
+            <a href="{{ url_for('scheduling.scheduler_dashboard') }}" class="active">Schedule</a>
+            <span class="spacer"></span>
+            <span class="user-info">{{ current_user.username }} <span class="badge badge-active" style="font-size: 10px;">{{ current_user.role }}</span></span>
+            <a href="{{ url_for('logout') }}">Logout</a>
+        </nav>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Scheduler</h2>
+
+        {% if current_user.is_bdb %}
+            {% if tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    <option value="">Select Company</option>
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if token_data and token_data.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        {% else %}
+            {% if token_data %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ token_data.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        {% if token_data %}
+        {# Week navigation #}
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <button type="button" class="btn btn-blue btn-sm" id="prev-week">&larr; Previous Week</button>
+            <strong id="week-label" style="font-size: 16px;"></strong>
+            <button type="button" class="btn btn-blue btn-sm" id="next-week">Next Week &rarr;</button>
+        </div>
+
+        {# Schedule grid #}
+        <div class="table-wrap">
+            <table id="schedule-table" style="table-layout: fixed; width: 100%;">
+                <thead>
+                    <tr id="schedule-header">
+                        <th>Employee</th>
+                    </tr>
+                </thead>
+                <tbody id="schedule-body">
+                </tbody>
+            </table>
+        </div>
+
+        {# Add schedule + quick-add employees/jobs #}
+        <div style="margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-green" id="add-schedule-btn">Add Schedule</button>
+            <button type="button" class="btn btn-blue btn-sm" onclick="toggleQuickAdd('employee')">+ Employee</button>
+            <button type="button" class="btn btn-blue btn-sm" onclick="toggleQuickAdd('job')">+ Job</button>
+        </div>
+
+        {# Quick-add employee form #}
+        <div id="quick-add-employee" class="meta-card" style="display: none; margin-top: 12px;">
+            <h3 style="margin-top: 0;">Quick Add Employee</h3>
+            <div class="form-row">
+                <div class="form-group" style="flex: 1;">
+                    <label>Name</label>
+                    <input type="text" id="qa-emp-name" placeholder="John Smith">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Employee ID</label>
+                    <input type="text" id="qa-emp-id" placeholder="EMP-001">
+                </div>
+                <div class="form-group" style="align-self: flex-end;">
+                    <button type="button" class="btn btn-green btn-sm" onclick="quickAddEmployee()">Add</button>
+                </div>
+            </div>
+        </div>
+
+        {# Quick-add job form #}
+        <div id="quick-add-job" class="meta-card" style="display: none; margin-top: 12px;">
+            <h3 style="margin-top: 0;">Quick Add Job</h3>
+            <div class="form-row">
+                <div class="form-group" style="flex: 1;">
+                    <label>Job Name</label>
+                    <input type="text" id="qa-job-name" placeholder="Main St Renovation">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Address</label>
+                    <input type="text" id="qa-job-address" placeholder="123 Main St">
+                </div>
+                <div class="form-group" style="align-self: flex-end;">
+                    <button type="button" class="btn btn-green btn-sm" onclick="quickAddJob()">Add</button>
+                </div>
+            </div>
+        </div>
+
+        {# Add/Edit Modal #}
+        <div id="schedule-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000;">
+            <div style="background: white; max-width: 480px; margin: 80px auto; padding: 24px; border-radius: 12px;">
+                <h3 id="modal-title" style="margin-top: 0;">Add Schedule</h3>
+                <div class="form-group">
+                    <label for="sched-employee">Employee</label>
+                    <select id="sched-employee">
+                        <option value="">Select Employee</option>
+                        {% for emp in employees %}
+                        <option value="{{ emp.id }}">{{ emp.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="sched-job">Job</label>
+                    <select id="sched-job">
+                        <option value="">Select Job</option>
+                        {% for job in jobs %}
+                        <option value="{{ job.id }}">{{ job.job_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="sched-date">Date</label>
+                    <input type="date" id="sched-date">
+                </div>
+                <div class="form-group">
+                    <label for="sched-shift">Shift</label>
+                    <select id="sched-shift" onchange="onShiftChange()">
+                        {% for st in shift_types %}
+                        <option value="{{ st.id }}" data-start="{{ st.start_time }}" data-end="{{ st.end_time }}">{{ st.name }} ({{ st.start_time[:5] }} - {{ st.end_time[:5] }})</option>
+                        {% endfor %}
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+                <div id="custom-times" style="display: none;">
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="sched-start">Start Time</label>
+                            <input type="time" id="sched-start" value="07:00">
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label for="sched-end">End Time</label>
+                            <input type="time" id="sched-end" value="17:00">
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="sched-common-task">Standard Task (optional)</label>
+                    <select id="sched-common-task">
+                        <option value="">-- None --</option>
+                    </select>
+                </div>
+                <div class="form-group" id="job-task-group" style="display: none;">
+                    <label for="sched-job-task">Job-Specific Task (optional)</label>
+                    <select id="sched-job-task">
+                        <option value="">-- None --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="sched-custom-note">Custom Note (optional)</label>
+                    <textarea id="sched-custom-note" rows="8" placeholder="e.g. Bring safety gear" style="width: 100%; resize: vertical;"></textarea>
+                </div>
+                <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;">
+                    <button type="button" class="btn btn-sm" style="background: var(--gray-400);" onclick="closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-green btn-sm" onclick="saveSchedule()">Save</button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        var TOKEN = "{{ selected_token }}";
+        var currentWeekStart = null;
+        var editingId = null;
+
+        var DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            var div = document.createElement('div');
+            div.appendChild(document.createTextNode(str));
+            return div.innerHTML;
+        }
+
+        function getMondayOfWeek(d) {
+            d = new Date(d);
+            var day = d.getDay() || 7;
+            d.setDate(d.getDate() - day + 1);
+            d.setHours(0, 0, 0, 0);
+            return d;
+        }
+
+        function formatDate(d) {
+            return d.toISOString().slice(0, 10);
+        }
+
+        function formatShort(d) {
+            var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            return months[d.getMonth()] + ' ' + d.getDate();
+        }
+
+        function loadWeek() {
+            var sun = new Date(currentWeekStart);
+            sun.setDate(sun.getDate() + 6);
+            document.getElementById('week-label').textContent = formatShort(currentWeekStart) + ' - ' + formatShort(sun);
+
+            var header = document.getElementById('schedule-header');
+            header.innerHTML = '<th style="background: var(--gray-100); border-bottom: 2px solid var(--gray-300); width: 120px;">Employee</th>';
+            var today = formatDate(new Date());
+            for (var i = 0; i < 7; i++) {
+                var d = new Date(currentWeekStart);
+                d.setDate(d.getDate() + i);
+                var isToday = formatDate(d) === today;
+                var bg = isToday ? 'background: #dbeafe; border-bottom: 2px solid var(--blue);' : 'background: var(--gray-100); border-bottom: 2px solid var(--gray-300);';
+                header.innerHTML += '<th style="' + bg + ' font-size: 12px; padding: 6px 4px; text-align: center;">' + DAY_NAMES[i] + '<br><span style="font-weight: 400; font-size: 11px;">' + formatShort(d) + '</span></th>';
+            }
+
+            var weekEnd = formatDate(sun);
+            fetch('/scheduler/api/schedules?week_start=' + formatDate(currentWeekStart) + '&week_end=' + weekEnd + '&token=' + TOKEN)
+                .then(function(r) { return r.json(); })
+                .then(function(schedules) { renderSchedule(schedules); });
+        }
+
+        function renderSchedule(schedules) {
+            var body = document.getElementById('schedule-body');
+            body.innerHTML = '';
+
+            var byEmployee = {};
+            schedules.forEach(function(s) {
+                var key = s.employee_id + '|' + (s.employee_name || 'Unknown');
+                if (!byEmployee[key]) byEmployee[key] = {};
+                if (!byEmployee[key][s.date]) byEmployee[key][s.date] = [];
+                byEmployee[key][s.date].push(s);
+            });
+
+            var keys = Object.keys(byEmployee).sort();
+            if (keys.length === 0) {
+                body.innerHTML = '<tr><td colspan="8" style="color: var(--gray-500); text-align: center;">No schedules for this week.</td></tr>';
+                return;
+            }
+
+            keys.forEach(function(key) {
+                var empName = key.split('|')[1];
+                var tr = document.createElement('tr');
+                tr.innerHTML = '<td><strong>' + empName + '</strong></td>';
+
+                for (var i = 0; i < 7; i++) {
+                    var d = new Date(currentWeekStart);
+                    d.setDate(d.getDate() + i);
+                    var dateStr = formatDate(d);
+                    var td = document.createElement('td');
+                    td.style.verticalAlign = 'top';
+                    td.style.fontSize = '12px';
+                    td.style.overflow = 'hidden';
+
+                    if (byEmployee[key][dateStr]) {
+                        byEmployee[key][dateStr].forEach(function(s) {
+                            var div = document.createElement('div');
+                            div.style.cssText = 'background: var(--blue-50, #eff6ff); border: 1px solid var(--blue, #2563eb); border-radius: 4px; padding: 4px 6px; margin-bottom: 4px; cursor: pointer; word-break: break-word;';
+                            div.innerHTML = '<strong>' + escapeHtml(s.job_name) + '</strong><br>' + (s.start_time || '') + ' - ' + (s.end_time || '');
+                            if (s.notes) div.innerHTML += '<br><em style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word;">' + escapeHtml(s.notes) + '</em>';
+                            div.innerHTML += '<br><span style="color: var(--red); cursor: pointer;" onclick="event.stopPropagation(); deleteSchedule(' + s.id + ')">Delete</span>';
+                            div.onclick = function() { editScheduleEntry(s); };
+                            td.appendChild(div);
+                        });
+                    }
+                    tr.appendChild(td);
+                }
+                body.appendChild(tr);
+            });
+        }
+
+        function onShiftChange() {
+            var sel = document.getElementById('sched-shift');
+            var val = sel.value;
+            var isCustom = val === 'custom';
+            document.getElementById('custom-times').style.display = isCustom ? '' : 'none';
+            if (!isCustom) {
+                var opt = sel.options[sel.selectedIndex];
+                var st = opt.getAttribute('data-start');
+                var et = opt.getAttribute('data-end');
+                if (st) document.getElementById('sched-start').value = st;
+                if (et) document.getElementById('sched-end').value = et;
+            }
+        }
+
+        function openModal(title) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('schedule-modal').style.display = '';
+            onShiftChange();
+        }
+
+        function closeModal() {
+            document.getElementById('schedule-modal').style.display = 'none';
+            editingId = null;
+            document.getElementById('sched-employee').value = '';
+            document.getElementById('sched-job').value = '';
+            document.getElementById('sched-date').value = '';
+            var shiftSel = document.getElementById('sched-shift');
+            shiftSel.selectedIndex = 0;
+            var firstOpt = shiftSel.options[0];
+            var defStart = firstOpt && firstOpt.getAttribute('data-start') ? firstOpt.getAttribute('data-start') : '07:00';
+            var defEnd = firstOpt && firstOpt.getAttribute('data-end') ? firstOpt.getAttribute('data-end') : '17:00';
+            document.getElementById('sched-start').value = defStart;
+            document.getElementById('sched-end').value = defEnd;
+            document.getElementById('sched-common-task').value = '';
+            document.getElementById('sched-job-task').value = '';
+            document.getElementById('sched-custom-note').value = '';
+            document.getElementById('job-task-group').style.display = 'none';
+            onShiftChange();
+        }
+
+        // Load common tasks for dropdown
+        function loadCommonTasks() {
+            if (!TOKEN) return;
+            fetch('/api/common-tasks?token=' + TOKEN)
+                .then(function(r) { return r.json(); })
+                .then(function(tasks) {
+                    var sel = document.getElementById('sched-common-task');
+                    sel.innerHTML = '<option value="">-- None --</option>';
+                    tasks.forEach(function(t) {
+                        var opt = document.createElement('option');
+                        opt.value = t.id;
+                        opt.textContent = t.name;
+                        sel.appendChild(opt);
+                    });
+                });
+        }
+
+        // Load job-specific tasks when job changes
+        function loadJobTasks(jobId) {
+            var group = document.getElementById('job-task-group');
+            var sel = document.getElementById('sched-job-task');
+            sel.innerHTML = '<option value="">-- None --</option>';
+            if (!jobId) { group.style.display = 'none'; return; }
+            fetch('/api/job-tasks?job_id=' + jobId)
+                .then(function(r) { return r.json(); })
+                .then(function(tasks) {
+                    if (tasks.length > 0) {
+                        tasks.forEach(function(t) {
+                            var opt = document.createElement('option');
+                            opt.value = t.id;
+                            opt.textContent = t.name;
+                            sel.appendChild(opt);
+                        });
+                        group.style.display = '';
+                    } else {
+                        group.style.display = 'none';
+                    }
+                });
+        }
+
+        document.getElementById('sched-job').addEventListener('change', function() {
+            loadJobTasks(this.value);
+        });
+
+        document.getElementById('add-schedule-btn').onclick = function() {
+            editingId = null;
+            openModal('Add Schedule');
+        };
+
+        function editScheduleEntry(s) {
+            editingId = s.id;
+            document.getElementById('sched-employee').value = s.employee_id;
+            document.getElementById('sched-job').value = s.job_id;
+            document.getElementById('sched-date').value = s.date;
+            document.getElementById('sched-shift').value = s.shift_type || 'custom';
+            document.getElementById('sched-start').value = s.start_time || '07:00';
+            document.getElementById('sched-end').value = s.end_time || '17:00';
+            // Set 3-tier fields
+            document.getElementById('sched-common-task').value = s.common_task_id || '';
+            document.getElementById('sched-custom-note').value = s.custom_note || '';
+            if (s.job_id) {
+                loadJobTasks(s.job_id);
+                setTimeout(function() {
+                    document.getElementById('sched-job-task').value = s.job_task_id || '';
+                }, 300);
+            }
+            onShiftChange();
+            openModal('Edit Schedule');
+        }
+
+        function saveSchedule() {
+            var empVal = document.getElementById('sched-employee').value;
+            var jobVal = document.getElementById('sched-job').value;
+            var dateVal = document.getElementById('sched-date').value;
+
+            if (!empVal) { alert('Please select an employee.'); return; }
+            if (!jobVal) { alert('Please select a job.'); return; }
+            if (!dateVal) { alert('Please select a date.'); return; }
+
+            var data = {
+                employee_id: parseInt(empVal),
+                job_id: parseInt(jobVal),
+                token: TOKEN,
+                date: dateVal,
+                shift_type: document.getElementById('sched-shift').value,
+                start_time: document.getElementById('sched-start').value,
+                end_time: document.getElementById('sched-end').value,
+                common_task_id: document.getElementById('sched-common-task').value || null,
+                job_task_id: document.getElementById('sched-job-task').value || null,
+                custom_note: document.getElementById('sched-custom-note').value
+            };
+
+            var url = '/scheduler/api/schedules';
+            var method = 'POST';
+            if (editingId) {
+                url += '/' + editingId;
+                method = 'PUT';
+            }
+
+            fetch(url, {
+                method: method,
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin',
+                body: JSON.stringify(data)
+            }).then(function(resp) {
+                if (resp.redirected) { alert('Session expired. Please refresh and log in again.'); return; }
+                if (resp.ok) { closeModal(); loadWeek(); }
+                else { resp.text().then(function(t) { try { var d = JSON.parse(t); alert(d.error || 'Error saving.'); } catch(e) { alert('Error saving schedule (status ' + resp.status + ').'); } }); }
+            }).catch(function(err) { alert('Network error: ' + err.message); });
+        }
+
+        function deleteSchedule(id) {
+            if (!confirm('Delete this schedule entry?')) return;
+            fetch('/scheduler/api/schedules/' + id, {method: 'DELETE'})
+                .then(function(resp) { if (resp.ok) loadWeek(); else alert('Error deleting.'); });
+        }
+
+        function toggleQuickAdd(type) {
+            var el = document.getElementById('quick-add-' + type);
+            el.style.display = el.style.display === 'none' ? '' : 'none';
+        }
+
+        function quickAddEmployee() {
+            var name = document.getElementById('qa-emp-name').value.trim();
+            var empId = document.getElementById('qa-emp-id').value.trim();
+            if (!name || !empId) { alert('Name and Employee ID are required.'); return; }
+            fetch('/scheduler/api/employees', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: name, employee_id: empId, token: TOKEN})
+            }).then(function(resp) {
+                if (resp.ok) { window._guardBypass = true; window.location.reload(); }
+                else { resp.json().then(function(d) { alert(d.error || 'Error.'); }); }
+            });
+        }
+
+        function quickAddJob() {
+            var name = document.getElementById('qa-job-name').value.trim();
+            var addr = document.getElementById('qa-job-address').value.trim();
+            if (!name || !addr) { alert('Job name and address are required.'); return; }
+            fetch('/scheduler/api/jobs', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({job_name: name, job_address: addr, token: TOKEN})
+            }).then(function(resp) {
+                if (resp.ok) { window._guardBypass = true; window.location.reload(); }
+                else { resp.json().then(function(d) { alert(d.error || 'Error.'); }); }
+            });
+        }
+
+        // Navigation
+        document.getElementById('prev-week').onclick = function() { currentWeekStart.setDate(currentWeekStart.getDate() - 7); loadWeek(); };
+        document.getElementById('next-week').onclick = function() { currentWeekStart.setDate(currentWeekStart.getDate() + 7); loadWeek(); };
+
+        // Init
+        currentWeekStart = getMondayOfWeek(new Date());
+        loadWeek();
+        loadCommonTasks();
+        </script>
+        {% else %}
+        <p style="color: var(--gray-500);">Select a company above to manage schedules.</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+</body>
+</html>

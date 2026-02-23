@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guide — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        <h2>{% if current_user.is_bdb %}BDB Tools — Admin Guide{% else %}Admin Guide{% endif %}</h2>
+
+        <div class="guide-content">
+
+            <div class="meta-card" style="background: var(--gray-50);">
+                <h3 style="margin-top: 0;">Quick Navigation</h3>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 24px; font-size: 14px; line-height: 2;">
+                    <a href="#getting-started">Getting Started</a>
+                    {% if current_user.is_bdb %}
+                    <a href="#tokens">Tokens</a>
+                    <a href="#users">Users</a>
+                    {% endif %}
+                    <a href="#employees">Employee Management</a>
+                    <a href="#jobs">Job Management</a>
+                    <a href="#categories">Expense Categories</a>
+                    <a href="#scheduled-tasks">Scheduled Tasks</a>
+                    <a href="#message-snippets">Message Snippets</a>
+                    <a href="#products-services">Products &amp; Services</a>
+                    <a href="#time-tracking">Time Tracking</a>
+                    <a href="#manual-entries">Manual Entries</a>
+                    <a href="#scheduling">Scheduling</a>
+                    <a href="#receipts">Receipt Capture</a>
+                    <a href="#job-photos">Job Photos &amp; Files</a>
+                    <a href="#estimates">Estimates &amp; Projects</a>
+                    {% if not current_user.is_scheduler or current_user.is_bdb %}
+                    <a href="#finance">Finance Dashboard</a>
+                    {% endif %}
+                    <a href="#export">Export</a>
+                    <a href="#audit-log">Audit Log</a>
+                    <a href="#table-features">Table Features</a>
+                </div>
+            </div>
+
+            <div class="meta-card" id="getting-started">
+                <h3 style="margin-top: 0;">1. Getting Started</h3>
+                <p>BDB Tools is a unified platform combining GPS-based time tracking, receipt capture with
+                   voice memos, employee scheduling, job site photo documentation, estimation tools, and
+                   financial reporting. Each company gets a unique token that links all their tools together
+                   under one login.</p>
+                <p><strong>How it works:</strong></p>
+                <ul>
+                    {% if current_user.is_bdb %}
+                    <li>A BDB admin creates a company token, then adds employees, job sites, and expense categories.</li>
+                    {% endif %}
+                    <li>Employees log in at the Company Home URL (<code>/c/&lt;token&gt;</code>) to access their enabled tools: Timekeeper, Receipt Capture, Schedule, Job Photos, and Estimates.</li>
+                    <li>Admins review entries, receipts, schedules, photos, estimates, and financials from the admin dashboard.</li>
+                </ul>
+                <p><strong>User Roles:</strong></p>
+                <ul>
+                    {% if current_user.is_bdb %}
+                    <li><strong>BDB Admin</strong> — Full access to all companies, tokens, users, and system-wide settings. Can delete time entries, job photos, and manage all destructive operations.</li>
+                    <li><strong>BDB Viewer</strong> — Bookkeeper/setup role. Can view and edit all company data, create and edit tokens, but cannot delete or deactivate tokens, manage BDB users, or manage company admin users.</li>
+                    {% endif %}
+                    <li><strong>Company Admin</strong> — Manages employees, jobs, categories, time entries, receipts, schedules, photos, estimates, and finances for their company. Can delete time entries and job photos.</li>
+                    <li><strong>Company Viewer</strong> — Bookkeeper/setup role for a single company. Can view, create, and edit employees, jobs, categories, schedules, receipts, and time entries. Cannot delete time entries or job photos.</li>
+                    <li><strong>Company Scheduler</strong> — Limited access: can view and edit time entries, create and manage schedules, and view the audit log. Cannot access employees, jobs, receipts, photos, categories, estimates, finances, or export.</li>
+                    <li><strong>Employee</strong> — Uses the mobile tools. Each employee can be granted access to specific tools via checkboxes in Employee Management.</li>
+                </ul>
+            </div>
+
+            {% if current_user.is_bdb %}
+            <div class="meta-card" id="tokens">
+                <h3 style="margin-top: 0;">2. Tokens</h3>
+                <p>Navigate to <strong>Tokens</strong> to manage company accounts.</p>
+                <ul>
+                    <li><strong>Create Token:</strong> Enter a company name and optionally a custom token string. Upload a company logo (shown on the employee-facing pages and admin panel header).</li>
+                    <li><strong>Company Home URL:</strong> Each token generates a URL (<code>/c/&lt;token&gt;</code>) — this is the single link employees use to access all tools.</li>
+                    <li><strong>Update:</strong> Change the company name or upload a new logo at any time.</li>
+                    <li><strong>Regenerate:</strong> Creates a new token string (old links stop working). Receipt and photo files are moved to the new token folder. <em>BDB Admin only.</em></li>
+                    <li><strong>Activate / Deactivate:</strong> Deactivated tokens block all employee access. Admin access is preserved. <em>BDB Admin only.</em></li>
+                    <li><strong>Delete:</strong> Permanently removes the token and all associated data. <em>BDB Admin only.</em></li>
+                </ul>
+                <p><strong>Permissions:</strong> BDB Admins have full token control. BDB Viewers can create and edit tokens (name, logo) but cannot toggle, regenerate, or delete them.</p>
+            </div>
+
+            <div class="meta-card" id="users">
+                <h3 style="margin-top: 0;">3. Users (BDB Admin Only)</h3>
+                <p>Navigate to <strong>Users</strong> to manage admin accounts. Only BDB Admins can access this page.</p>
+                <ul>
+                    <li><strong>BDB Users:</strong> Create additional BDB admin or viewer accounts. The last admin account cannot be deleted.</li>
+                    <li><strong>Company Users:</strong> On the Tokens page, create company admin, viewer, or scheduler accounts tied to a specific company.</li>
+                    <li><strong>Change Password:</strong> Reset any user's password from their respective management page.</li>
+                </ul>
+                <p><strong>Permissions:</strong> BDB Viewers cannot see the Users page or create/delete any user accounts (BDB or company).</p>
+            </div>
+            {% endif %}
+
+            <div class="meta-card" id="employees">
+                <h3 style="margin-top: 0;">4. Employee Management</h3>
+                <p>Navigate to <strong>Employees</strong> to manage your workforce.</p>
+                <ul>
+                    <li><strong>Add Employee:</strong> Select a company, enter the employee name and an optional
+                        employee ID, then click Add Employee. Optionally set a username and password for login.</li>
+                    <li><strong>Feature Access:</strong> Each employee has five access toggles that control which tools they see on their home screen:
+                        <ul>
+                            <li><strong>Timekeeper</strong> (on by default) — Clock in/out with GPS tracking.</li>
+                            <li><strong>Photos</strong> (on by default) — Job site photos, photo library, and job files.</li>
+                            <li><strong>Schedule</strong> (on by default) — View their upcoming work schedule.</li>
+                            <li><strong>Receipts</strong> (off by default) — Receipt capture with voice memos and receipt library.</li>
+                            <li><strong>Estimates</strong> (off by default) — On-site job estimation with voice recording and estimate management.</li>
+                        </ul>
+                        Toggle these checkboxes in the employee list to enable or disable features instantly.
+                    </li>
+                    <li><strong>Edit:</strong> Click the Edit button on any employee row to update their name
+                        or employee ID inline. Click Save to confirm.</li>
+                    <li><strong>Hourly Wage:</strong> Set each employee's hourly wage for payroll calculations and labor cost tracking. This feeds into the Finance Dashboard labor statistics.</li>
+                    <li><strong>Set Login / Reset Password:</strong> Employees need a username and password to use any of the tools.
+                        Use the Set Login or Reset PW buttons to manage their credentials.</li>
+                    <li><strong>Copy Credentials:</strong> After setting login credentials, use the Copy Credentials
+                        button to copy the username and login URL — ready to paste into a text or email to the employee.</li>
+                    <li><strong>Activate / Deactivate:</strong> Deactivated employees cannot log in or appear in
+                        dropdowns. Their historical data is preserved.</li>
+                </ul>
+            </div>
+
+            <div class="meta-card" id="jobs">
+                <h3 style="margin-top: 0;">5. Job Management</h3>
+                <p>Navigate to <strong>Jobs</strong> to manage job sites. Jobs are shared across all tools — timekeeper,
+                   receipt capture, scheduling, job photos, and estimates all use the same job list.</p>
+                <ul>
+                    <li><strong>Add Job:</strong> Enter a job name and street address. Click the
+                        <strong>Geocode</strong> button to auto-fill latitude and longitude from the address.</li>
+                    <li><strong>GPS Coordinates:</strong> Accurate coordinates are important — they are used to calculate
+                        the distance between an employee's clock-in location and the job site. Entries farther than
+                        the configured threshold are flagged for review.</li>
+                    <li><strong>Edit:</strong> Click Edit to update the job name or address inline.</li>
+                    <li><strong>Activate / Deactivate:</strong> Deactivated jobs will not appear in any dropdowns
+                        but existing records are preserved.</li>
+                </ul>
+            </div>
+
+            <div class="meta-card" id="categories">
+                <h3 style="margin-top: 0;">6. Expense Categories</h3>
+                <p>Navigate to <strong>Lists &gt; Expense Categories</strong> to manage categories for receipt capture.</p>
+                <ul>
+                    <li>When employees submit a receipt, they select a job and up to two categories to classify the expense.</li>
+                    <li><strong>Add Category:</strong> Enter a name and sort order. Sort order controls the display position in dropdowns.</li>
+                    <li><strong>Edit:</strong> Click Edit to rename or reorder categories inline.</li>
+                    <li><strong>Activate / Deactivate:</strong> Deactivated categories are hidden from dropdowns but preserved on existing records.</li>
+                </ul>
+            </div>
+
+            <div class="meta-card" id="scheduled-tasks">
+                <h3 style="margin-top: 0;">7. Scheduled Tasks</h3>
+                <p>Navigate to <strong>Lists &gt; Scheduled Tasks</strong> to manage common task descriptions.</p>
+                <ul>
+                    <li>These are predefined task names that schedulers can select when creating employee schedules (e.g., "Bring safety gear", "Load truck").</li>
+                    <li><strong>Add Task:</strong> Enter a task name and sort order.</li>
+                    <li><strong>Activate / Deactivate:</strong> Controls whether the task appears in scheduler dropdowns.</li>
+                </ul>
+            </div>
+
+            <div class="meta-card" id="message-snippets">
+                <h3 style="margin-top: 0;">8. Message Snippets</h3>
+                <p>Navigate to <strong>Lists &gt; Message Snippets</strong> to manage reusable customer communication templates.</p>
+                <ul>
+                    <li>Message snippets are pre-written text blocks you can insert into estimate customer messages with one click instead of retyping common language.</li>
+                    <li><strong>Add Snippet:</strong> Enter the message text and a sort order to control display position.</li>
+                    <li><strong>Edit:</strong> Click Edit to update snippet text or sort order inline.</li>
+                    <li><strong>Activate / Deactivate:</strong> Deactivated snippets are hidden from the estimate detail dropdown but preserved in the system.</li>
+                    <li><strong>Usage:</strong> On the Estimate Detail page, select a snippet from the dropdown to insert it into the customer message field.</li>
+                </ul>
+            </div>
+
+            <div class="meta-card" id="products-services">
+                <h3 style="margin-top: 0;">9. Products &amp; Services</h3>
+                <p>Navigate to <strong>Lists &gt; Products &amp; Services</strong> to manage a reusable pricing library for estimates.</p>
+                <ul>
+                    <li>Products and services are pre-priced line items you can add to estimates with one click instead of entering descriptions and prices from scratch each time.</li>
+                    <li><strong>Add Item:</strong> Enter a name, unit price, and sort order.</li>
+                    <li><strong>Edit:</strong> Click Edit to update the name, price, or sort order inline.</li>
+                    <li><strong>Activate / Deactivate:</strong> Deactivated items are hidden from the estimate line item dropdown.</li>
+                    <li><strong>Save from Estimate:</strong> When building an estimate, you can save any line item back to this library for future reuse using the "Save as Product" button.</li>
+                </ul>
+            </div>
+
+            <div class="meta-card" id="time-tracking">
+                <h3 style="margin-top: 0;">10. Time Tracking</h3>
+                <p>The <strong>Time Entries</strong> page shows all clock-in/out records.</p>
+                <ul>
+                    <li><strong>Filters:</strong> Filter by employee, job, status, and date range to find specific entries.</li>
+                    <li><strong>Status types:</strong>
+                        <ul>
+                            <li><span class="badge badge-active">Active</span> — Employee is currently clocked in.</li>
+                            <li><span class="badge badge-complete">Completed</span> — Employee has clocked out normally.</li>
+                            <li><span class="badge badge-review">Needs Review</span> — Flagged entry (GPS too far from job, missing clock-out, etc.).</li>
+                        </ul>
+                    </li>
+                    <li><strong>GPS Distance:</strong> Each entry shows the distance between the employee's clock-in GPS and the job site.
+                        Entries exceeding the threshold are flagged with a warning icon.</li>
+                    <li><strong>Entry Detail:</strong> Click View to see a map showing job location, clock-in, and clock-out positions.
+                        From here you can update status, add admin notes, and apply manual time overrides.
+                        A full audit trail is shown at the bottom.</li>
+                    <li><strong>Delete:</strong> Entries can be deleted from the list or detail page. Deletion details are recorded in the audit log.
+                        <em>Admins only — viewers and schedulers cannot delete time entries.</em></li>
+                </ul>
+                <p><strong>Permissions:</strong> Admins, viewers, and schedulers can view and edit time entries (update status, notes, manual times). Only admins can delete entries.</p>
+            </div>
+
+            <div class="meta-card" id="manual-entries">
+                <h3 style="margin-top: 0;">11. Manual Time Entries</h3>
+                <p>Create manual entries from the <strong>Dashboard</strong> for forgotten clock-ins, paper timesheets, or corrections.</p>
+                <ul>
+                    <li>Select the employee and job, enter start and end times, and provide a reason in the notes field.</li>
+                    <li>Manual entries are logged with method "admin" and appear in the audit log.</li>
+                    <li><strong>Manual Time Override:</strong> On the entry detail page, you can override clock-in or clock-out times
+                        for an existing entry. A reason is required and the change is audited.</li>
+                </ul>
+            </div>
+
+            <div class="meta-card" id="scheduling">
+                <h3 style="margin-top: 0;">12. Scheduling</h3>
+                <p>The <strong>Schedules</strong> page provides a weekly view of employee shifts.</p>
+                <ul>
+                    <li><strong>Week View:</strong> Navigate between weeks using the previous/next controls. Each day shows scheduled shifts.</li>
+                    <li><strong>Create Shift:</strong> Select an employee, job, date, and shift type. Quick-select presets:
+                        <ul>
+                            <li><strong>Full Day:</strong> 7:00 AM – 5:00 PM</li>
+                            <li><strong>Morning:</strong> 7:00 AM – 12:00 PM</li>
+                            <li><strong>Afternoon:</strong> 12:00 PM – 5:00 PM</li>
+                            <li><strong>Custom:</strong> Set any start and end time</li>
+                        </ul>
+                    </li>
+                    <li><strong>Edit / Delete:</strong> Modify or remove existing shifts from the schedule view.</li>
+                    <li><strong>Employee View:</strong> Employees see their upcoming 14-day schedule from the "Your Schedule" button on the Company Home page.</li>
+                </ul>
+                <p><strong>Permissions:</strong> Admins and schedulers can create, edit, and delete shifts. Viewers can view schedules but cannot modify them. Schedulers also have access to time entries and the audit log, but cannot access other admin areas (employees, jobs, receipts, photos, categories, or export).</p>
+            </div>
+
+            <div class="meta-card" id="receipts">
+                <h3 style="margin-top: 0;">13. Receipt Capture</h3>
+                <p>The <strong>Receipts</strong> section manages submitted receipt images and voice memos.</p>
+                <p><strong>Employee Workflow (4 steps):</strong></p>
+                <ol>
+                    <li><strong>Photo:</strong> Take a photo of the receipt using the device camera. Review and confirm the image.</li>
+                    <li><strong>Details:</strong> Select the job (required) and up to two expense categories (optional) from dropdowns.</li>
+                    <li><strong>Voice Memo:</strong> Record a voice description of the receipt — the job, trade, credit card or bank account used, amounts for category splits, and any other missing information. For contactless payments, the bank account must be specified.</li>
+                    <li><strong>Processing:</strong> The receipt is uploaded. The system generates a PDF and transcribes the voice memo automatically.</li>
+                </ol>
+                <p><strong>Admin Features:</strong></p>
+                <ul>
+                    <li><strong>Dashboard:</strong> Shows the 50 most recent submissions with processed checkbox, date, status, and transcription preview.</li>
+                    <li><strong>Browse:</strong> Navigate by company and month to find specific receipts.</li>
+                    <li><strong>Detail View:</strong> See the receipt image, transcription, job, categories. Toggle processed status. Download the PDF (image + transcription), original image, or audio file.</li>
+                    <li><strong>Processed Checkbox:</strong> Mark receipts as processed — the row turns green on the list view.</li>
+                    <li><strong>Download ZIP:</strong> Download all PDFs for a company/month as a ZIP archive.</li>
+                    <li><strong>Delete:</strong> Remove a receipt and all associated files (image, audio, PDF).</li>
+                </ul>
+                <p><strong>Employee Libraries:</strong> Employees with receipt access can also browse their submitted receipts from the Receipt Library, accessible via the "View Receipt Library" button on the capture page.</p>
+            </div>
+
+            <div class="meta-card" id="job-photos">
+                <h3 style="margin-top: 0;">14. Job Photos &amp; Files</h3>
+                <p>The <strong>Job Photos / Files</strong> section manages photos and documents for job sites.</p>
+                <p><strong>Employee Workflow:</strong></p>
+                <ol>
+                    <li>Select the job from the dropdown.</li>
+                    <li>Take a photo using the device camera, or upload from the photo library. Batch upload is supported — select multiple photos at once.</li>
+                    <li>GPS location is captured automatically and embedded in the photo.</li>
+                    <li>Optionally add a caption describing the photo.</li>
+                    <li>Submit — the photo is saved and a thumbnail is generated.</li>
+                </ol>
+                <p><strong>Admin Features:</strong></p>
+                <ul>
+                    <li><strong>Browse:</strong> Navigate by job, then by week folder (ISO week format, e.g. 2026-W07).</li>
+                    <li><strong>Gallery View:</strong> See thumbnails, dates, captions, and GPS coordinates in a table.</li>
+                    <li><strong>Photo Detail:</strong> View the full-size photo with an interactive map showing the geotagged location, job details, caption, and download options.</li>
+                    <li><strong>Download ZIP:</strong> Download all photos for a job/week as a ZIP archive.</li>
+                    <li><strong>Download PDF:</strong> Download a formatted PDF report with all photos for a job/week, including captions, GPS coordinates, and Google Maps links.</li>
+                    <li><strong>Delete:</strong> Remove a photo and its files. <em>Admins only — viewers cannot delete job photos.</em></li>
+                </ul>
+                <p><strong>Employee Libraries:</strong> Employees with photo access can browse their uploaded photos from the Photo Library and view non-image files (PDFs, documents) from the Job Files view. Both are accessible from buttons on the capture page.</p>
+            </div>
+
+            <div class="meta-card" id="estimates">
+                <h3 style="margin-top: 0;">15. Estimates &amp; Projects</h3>
+                <p>The <strong>Estimates / Projects</strong> section provides a full estimation and project management workflow.</p>
+                <p><strong>Employee Workflow:</strong></p>
+                <ol>
+                    <li>From the home screen, tap <strong>Job Estimate</strong> to start a new estimate.</li>
+                    <li>Select an existing job or create a new one on the spot (with address and GPS geocoding).</li>
+                    <li>Optionally take photos of the job site — they are attached to the job for admin review.</li>
+                    <li>Add a title and any notes describing the scope of work.</li>
+                    <li>Optionally record a voice memo — the system will transcribe it automatically.</li>
+                    <li>Submit the estimate. Employees can view and edit their estimates from <strong>View Estimates</strong>.</li>
+                </ol>
+                <p><strong>Admin Estimate List:</strong></p>
+                <ul>
+                    <li>Navigate to <strong>Jobs &gt; Estimates / Projects</strong> to see all estimates.</li>
+                    <li>Search by transcription content, job name, or estimate number.</li>
+                    <li>Table shows estimate number, job, date, status, value, costs, collected, and margin.</li>
+                </ul>
+                <p><strong>Estimate Detail (Admin):</strong></p>
+                <ul>
+                    <li><strong>Customer Info:</strong> Enter customer name, phone, email, and a customer-facing message.</li>
+                    <li><strong>Estimate Number:</strong> Assign a unique estimate number for your records. Numbers are validated for uniqueness within the company.</li>
+                    <li><strong>Approval Status:</strong> Track the estimate through five stages: Pending, Accepted, In Progress, Completed, or Declined. Changing status from Pending to Accepted promotes the estimate to a "Project." Declined estimates are excluded from pipeline calculations.</li>
+                    <li><strong>Completion %:</strong> Set the percentage of work completed. This drives earned revenue recognition and WIP calculations across the Finance Dashboard.</li>
+                    <li><strong>Financial Fields:</strong> Enter estimate value, estimated materials and labor costs, estimated labor hours, actual materials cost, actual collected payments, and sales tax rate.</li>
+                    <li><strong>Line Items:</strong> Build a detailed line-item breakdown with description, quantity, unit price, taxable flag, and calculated totals. Use the Products &amp; Services dropdown to quickly add pre-priced items. Save new items back to the library with "Save as Product."</li>
+                    <li><strong>Job Tasks:</strong> Create and manage a task checklist for the job. Tasks can be toggled active/inactive and appear in reports.</li>
+                    <li><strong>Transcription &amp; Notes:</strong> View and edit the AI-transcribed voice memo and add internal notes.</li>
+                    <li><strong>Job Photos:</strong> View all photos attached to the job directly from the estimate detail page.</li>
+                    <li><strong>Job Reassignment:</strong> Move an estimate to a different job if needed.</li>
+                </ul>
+                <p><strong>Reports:</strong></p>
+                <ul>
+                    <li><strong>Financial Report PDF:</strong> Internal report with all estimate details, job photos, tasks, and financial data.</li>
+                    <li><strong>Financial Report Excel:</strong> Two-tab spreadsheet — Tab 1: Financial Summary with estimated vs. WIP vs. actual costs and variance analysis. Tab 2: Estimate Details with line items, totals, transcription, notes, and tasks.</li>
+                    <li><strong>Scope of Work PDF:</strong> Job scope document with line items and company branding. Can be sent directly to the job's file folder using the "Send to Job Folder" button.</li>
+                    <li><strong>Client Estimate PDF:</strong> Clean, client-facing estimate document with line items, totals, and sales tax.</li>
+                </ul>
+            </div>
+
+            {% if not current_user.is_scheduler or current_user.is_bdb %}
+            <div class="meta-card" id="finance">
+                <h3 style="margin-top: 0;">16. Finance Dashboard</h3>
+                <p>The <strong>Finance</strong> tab provides a CFO-level view of your company's financial health, aggregating data from all estimates, projects, and labor tracking.</p>
+
+                <p><strong>Company Targets (Editable Inputs):</strong></p>
+                <ul>
+                    <li><strong>Income Target %</strong> — Your net income goal as a percentage of earned revenue. This is the profit margin you want to achieve after covering all costs and overhead.</li>
+                    <li><strong>Monthly Overhead $</strong> — Your total fixed monthly costs: rent, insurance, office staff, truck payments, utilities, and other expenses that stay the same regardless of how much work you do.</li>
+                    <li><strong>Cash on Hand $</strong> — The total liquid cash across all your bank accounts right now. Used to calculate your survival runway.</li>
+                </ul>
+
+                <p><strong>Calculated Target Metrics (display only):</strong></p>
+                <ul>
+                    <li><strong>Overhead %</strong> — Your annualized monthly overhead as a percentage of earned revenue. Calculated as: (Monthly Overhead &times; 12) &divide; Earned Revenue. This tells you what percentage of every dollar earned goes to keeping the lights on.</li>
+                    <li><strong>Margin Target</strong> — Overhead % + Income Target %. This is the minimum gross margin you need on every job to cover overhead and hit your income goal.</li>
+                    <li><strong>Markup Required</strong> — The cost markup needed to achieve your margin target. Calculated as: Margin &divide; (1 &minus; Margin). For example, a 40% margin target requires a 67% markup on costs.</li>
+                </ul>
+
+                <p><strong>Executive KPI Cards (10 metrics):</strong></p>
+                <ul>
+                    <li><strong>Pipeline Value</strong> — Total dollar value of estimates still waiting for customer approval. This is potential future work.</li>
+                    <li><strong>Contracted Revenue</strong> — Total value of accepted and in-progress projects. This is committed work you have under contract.</li>
+                    <li><strong>Cash Collected</strong> — Total payments received across all projects to date.</li>
+                    <li><strong>Earned Revenue</strong> — Revenue you have actually earned based on how much work is complete. Calculated as: Budget &times; Completion %. You only "earn" revenue as you do the work, regardless of how much the customer has paid.</li>
+                    <li><strong>Unearned Liability</strong> — Cash the customer has paid you that you haven't earned yet (work not yet done). This is a liability — you owe that work. Shows a warning when greater than zero.</li>
+                    <li><strong>Total Costs</strong> — Actual materials plus labor costs incurred across all projects.</li>
+                    <li><strong>Net Income</strong> — What's left after subtracting costs and overhead from earned revenue. Green when positive, red when negative.</li>
+                    <li><strong>Net Income %</strong> — Net income as a percentage of earned revenue. Green when you're at or above your income target, red when below.</li>
+                    <li><strong>Days Cash on Hand</strong> — How many days you can cover your fixed costs with zero revenue coming in. Calculated as: Cash on Hand &divide; (Monthly Overhead &divide; 30). This is your survival runway. Green at 60+ days, yellow at 30-60, red below 30.</li>
+                    <li><strong>Billing Position</strong> — Whether you are overbilled or underbilled across all projects. Overbilled means customers have paid more than you've earned (you owe work). Underbilled means you've done work you haven't invoiced yet (customers owe you). Green for overbilled, red for underbilled.</li>
+                </ul>
+
+                <p><strong>Health Gauges (6 visual indicators):</strong></p>
+                <ul>
+                    <li><strong>Overall Margin</strong> — Your current profit margin across all projects. The needle moves from red (low margin) through orange to green (healthy margin). Based on earned revenue minus actual costs.</li>
+                    <li><strong>WIP Income vs Progress</strong> — Compares cash collected against how much you should have collected based on completion percentage. Shows actual dollars collected vs. expected dollars. If the needle is to the right of center, you're collecting ahead of schedule. Left of center means you're behind on collections.</li>
+                    <li><strong>WIP Costs vs Progress</strong> — Compares actual spending against how much you should have spent based on completion percentage. Shows actual cost vs. expected cost. This gauge is inverted: needle to the right means you're under budget (good), needle to the left means you're over budget (bad).</li>
+                    <li><strong>Budget Consumption</strong> — How much of your total estimated costs you've actually spent. The needle starts green (low spending) and moves toward red as you approach or exceed 100% of budget.</li>
+                    <li><strong>Collection Rate</strong> — Cash collected as a percentage of total contracted revenue. Moves from red (low collections) to green (fully collected).</li>
+                    <li><strong>Backlog Months</strong> — How many months of work you have lined up to cover your fixed costs. Calculated as: Contracted Revenue &divide; Monthly Overhead. Red below 3 months (need to sell more), yellow 3-6 months, green above 6 months. Above 8-12 months may signal a capacity concern.</li>
+                </ul>
+
+                <p><strong>Estimate Pipeline — YTD:</strong></p>
+                <ul>
+                    <li>Four summary cards showing year-to-date counts and total values for each estimate stage: Pending, Accepted, In Progress, and Completed.</li>
+                </ul>
+
+                <p><strong>Active Projects Table:</strong></p>
+                <ul>
+                    <li>Row-by-row breakdown of every active project showing budget, estimated cost, actual cost, collected, earned revenue, budget percentage, margin, completion progress bar, and a health indicator dot.</li>
+                    <li>The health dot is green when your margin exceeds the margin target, yellow when it's close, and red when you're below target.</li>
+                    <li>A totals row sums all numeric columns. If an income target is set, a "Required Revenue" row shows the revenue needed to hit your target given current costs.</li>
+                </ul>
+
+                <p><strong>Payroll &amp; Labor:</strong></p>
+                <ul>
+                    <li>Shows weekly and year-to-date labor costs with hours, base pay, and burden cost breakdowns.</li>
+                </ul>
+
+                <p><strong>Completed Projects Table:</strong></p>
+                <ul>
+                    <li>Historical summary of finished projects with final budget, cost, collected, margin, and margin percentage.</li>
+                </ul>
+            </div>
+            {% endif %}
+
+            <div class="meta-card" id="export">
+                <h3 style="margin-top: 0;">17. Export</h3>
+                <p>Navigate to <strong>Employees &gt; Payroll Export</strong> to download time data for payroll processing.</p>
+                <ul>
+                    <li>Select a company and date range (or use the pay week quick-select buttons).</li>
+                    <li><strong>Excel Export:</strong> Downloads a spreadsheet with four sections:
+                        <ul>
+                            <li><strong>Time Entries:</strong> Every entry with employee, job, clock-in/out times, GPS, hours, status, and notes.</li>
+                            <li><strong>Employee Summary:</strong> Total hours per employee with a company grand total.</li>
+                            <li><strong>Employee Hours by Job:</strong> Hours broken down by employee and job.</li>
+                            <li><strong>Company Hours by Job:</strong> Total hours per job with a company grand total.</li>
+                        </ul>
+                    </li>
+                    <li><strong>PDF Export:</strong> A landscape payroll report with the same four sections.</li>
+                    <li>All spreadsheet tabs open at 140% zoom for easier reading.</li>
+                </ul>
+            </div>
+
+            <div class="meta-card" id="audit-log">
+                <h3 style="margin-top: 0;">18. Audit Log</h3>
+                <p>The <strong>Audit Log</strong> provides an immutable record of every change made to time entries and system actions.</p>
+                <ul>
+                    <li>Records clock-ins, clock-outs, manual overrides, status changes, deletions, and password resets.</li>
+                    <li>Each entry shows the timestamp, action, field changed, old/new values, and who made the change.</li>
+                    <li>The audit log cannot be edited or deleted.</li>
+                </ul>
+            </div>
+
+            <div class="meta-card" id="table-features">
+                <h3 style="margin-top: 0;">19. Table Features</h3>
+                <p>All admin tables include:</p>
+                <ul>
+                    <li><strong>Resizable Columns:</strong> Drag the right edge of any column header to resize it.</li>
+                    <li><strong>Inline Editing:</strong> Most tables support click-to-edit for quick updates without leaving the page.</li>
+                </ul>
+            </div>
+
+        </div>
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>

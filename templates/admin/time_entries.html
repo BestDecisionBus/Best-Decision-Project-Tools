@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Time Entries — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Time Entries</h2>
+
+        {% if current_user.is_bdb %}
+            {% if tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    <option value="">All Companies</option>
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+        {% else %}
+            {% if selected_token %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <form method="GET" action="{{ url_for('time_admin.admin_time_entries') }}">
+                {% if selected_token %}
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+                {% endif %}
+                <div class="form-row">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="employee_id">Employee</label>
+                        <select id="employee_id" name="employee_id">
+                            <option value="">All Employees</option>
+                            {% for emp in employees %}
+                            <option value="{{ emp.id }}" {% if filters.employee_id == emp.id|string %}selected{% endif %}>{{ emp.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="job_id">Job</label>
+                        <select id="job_id" name="job_id">
+                            <option value="">All Jobs</option>
+                            {% for job in jobs %}
+                            <option value="{{ job.id }}" {% if filters.job_id == job.id|string %}selected{% endif %}>{{ job.job_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="status">Status</label>
+                        <select id="status" name="status">
+                            <option value="">All</option>
+                            <option value="active" {% if filters.status == 'active' %}selected{% endif %}>Active</option>
+                            <option value="completed" {% if filters.status == 'completed' %}selected{% endif %}>Completed</option>
+                            <option value="needs_review" {% if filters.status == 'needs_review' %}selected{% endif %}>Needs Review</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="date_from">Date From</label>
+                        <input type="date" id="date_from" name="date_from" value="{{ filters.date_from or '' }}">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="date_to">Date To</label>
+                        <input type="date" id="date_to" name="date_to" value="{{ filters.date_to or '' }}">
+                    </div>
+                    <div class="form-group" style="align-self: flex-end;">
+                        <button type="submit" class="btn btn-blue">Filter</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        {% if entries %}
+        <div class="table-wrap">
+            <table class="resizable">
+                <thead>
+                    <tr>
+                        <th>Employee</th>
+                        <th>Job</th>
+                        <th>Date</th>
+                        <th>Clock In</th>
+                        <th>Method</th>
+                        <th>Clock Out</th>
+                        <th>Hours</th>
+                        <th>Status</th>
+                        <th>Distance</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in entries %}
+                    <tr {% if entry.clock_in_flagged %}class="row-flagged"{% endif %}>
+                        <td>{{ entry.employee_name }}</td>
+                        <td>{{ entry.job_name }}</td>
+                        <td>{{ (entry.manual_time_in or entry.clock_in_time)|fmt_date }}</td>
+                        <td>{{ (entry.manual_time_in or entry.clock_in_time)|fmt_time }}</td>
+                        <td>
+                            <span class="badge badge-{{ entry.clock_in_method }}">{{ entry.clock_in_method }}</span>
+                        </td>
+                        <td>{{ (entry.manual_time_out or entry.clock_out_time)|fmt_time }}</td>
+                        <td>{{ entry.total_hours if entry.total_hours else '' }}</td>
+                        <td>
+                            {% if entry.status == 'active' %}
+                            <span class="badge badge-active">Active</span>
+                            {% elif entry.status == 'completed' %}
+                            <span class="badge badge-complete">Completed</span>
+                            {% elif entry.status == 'needs_review' %}
+                            <span class="badge badge-review">Needs Review</span>
+                            {% else %}
+                            <span class="badge badge-inactive">{{ entry.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if entry.clock_in_distance is not none %}
+                            {{ entry.clock_in_distance }}m
+                            {% if entry.clock_in_flagged %}
+                            <span title="Distance exceeds threshold" style="color: var(--red); cursor: help;">&#9873;</span>
+                            {% endif %}
+                            {% else %}
+                            <span style="color: var(--gray-400);">--</span>
+                            {% endif %}
+                        </td>
+                        <td style="white-space: nowrap;">
+                            <a href="{{ url_for('time_admin.admin_time_entry_detail', entry_id=entry.id) }}" class="btn btn-blue btn-sm">View</a>
+                            {% if current_user.is_admin or current_user.is_bdb %}
+                            <form method="POST" action="{{ url_for('time_admin.admin_entry_delete', entry_id=entry.id) }}"
+                                  onsubmit="return confirm('Delete time entry #{{ entry.id }} for {{ entry.employee_name }}?');" style="display: inline;">
+                                <button type="submit" class="btn btn-red btn-sm">Delete</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500);">No time entries match your filters.</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>

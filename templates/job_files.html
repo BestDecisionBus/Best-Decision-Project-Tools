@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Files — {{ token.company_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="capture-container">
+        <div class="capture-header">
+            {% if token.logo_file %}
+            <div class="header-row">
+                <img src="/static/logos/{{ token.logo_file }}" alt="{{ token.company_name }}" class="company-logo">
+                <div class="header-text">
+                    <div class="company-name">{{ token.company_name }}</div>
+                    <h1>Job Files</h1>
+                </div>
+            </div>
+            {% else %}
+            <div class="company-name">{{ token.company_name }}</div>
+            <h1>Job Files</h1>
+            {% endif %}
+            <a href="/c/{{ token.token }}" class="back-to-home">Back to Home</a>
+        </div>
+
+        {% if not job_id %}
+        {# Job selection screen #}
+        <p style="color: var(--gray-500); font-size: 14px; margin-bottom: 12px;">Select a job to view its files:</p>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            {% for job in jobs %}
+            <a href="/job-files?token={{ token.token }}&job_id={{ job.id }}"
+               style="display: block; padding: 14px 16px; background: #fff; border: 2px solid var(--gray-200); border-radius: 8px; font-size: 15px; font-weight: 600; color: var(--gray-800); text-decoration: none;">
+                {{ job.job_name }}
+                {% if job.job_address %}
+                <span style="display: block; font-weight: 400; font-size: 13px; color: var(--gray-500); margin-top: 2px;">{{ job.job_address }}</span>
+                {% endif %}
+            </a>
+            {% endfor %}
+            {% if not jobs %}
+            <div style="text-align: center; padding: 32px; color: var(--gray-500);">
+                <p>No jobs found.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        {% else %}
+        {# Job selected — show files #}
+        <div style="margin-bottom: 12px;">
+            <a href="/job-files?token={{ token.token }}" style="color: var(--blue); font-size: 14px; text-decoration: none;">&larr; All Jobs</a>
+            {% if selected_job %}
+            <h3 style="margin: 4px 0 0;">{{ selected_job.job_name }}</h3>
+            {% endif %}
+        </div>
+
+        {% if files %}
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            {% for f in files %}
+            <a href="/job-files/{{ f.id }}?token={{ token.token }}" style="display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: #fff; border: 2px solid var(--gray-200); border-radius: 8px; text-decoration: none; color: inherit;">
+                <div style="flex-shrink: 0; width: 44px; height: 44px; background: #fee2e2; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px;">&#128196;</div>
+                <div style="min-width: 0; flex: 1;">
+                    <div style="font-weight: 600; color: var(--gray-800); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        {{ f.caption if f.caption else f.image_file.split('/')[-1] }}
+                    </div>
+                    <div style="font-size: 13px; color: var(--gray-500); margin-top: 2px;">
+                        {{ f.created_at[:10] if f.created_at else '' }}
+                        &middot; {{ f.image_file.split('/')[-1].split('.')[-1] | upper }}
+                    </div>
+                </div>
+                <div style="flex-shrink: 0; color: var(--blue); font-size: 13px; font-weight: 600;">View &rarr;</div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="text-align: center; padding: 32px; color: var(--gray-500);">
+            <p>No files found for this job.</p>
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+</body>
+</html>

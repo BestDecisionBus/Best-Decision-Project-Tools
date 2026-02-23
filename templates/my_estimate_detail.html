@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estimate Detail — {{ token.company_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="capture-container">
+        <div class="capture-header">
+            {% if token.logo_file %}
+            <div class="header-row">
+                <img src="/static/logos/{{ token.logo_file }}" alt="{{ token.company_name }}" class="company-logo">
+                <div class="header-text">
+                    <div class="company-name">{{ token.company_name }}</div>
+                    <h1>Estimate Detail</h1>
+                </div>
+            </div>
+            {% else %}
+            <div class="company-name">{{ token.company_name }}</div>
+            <h1>Estimate Detail</h1>
+            {% endif %}
+            <div style="display: flex; gap: 8px;">
+                <a href="/my-estimates?token={{ token.token }}" class="back-to-home">All Estimates</a>
+                <a href="/c/{{ token.token }}" class="back-to-home">Home</a>
+            </div>
+        </div>
+
+        {# Job & Status #}
+        <div class="meta-card" style="padding: 12px; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <strong style="font-size: 16px;">{{ job.job_name if job else 'Unknown Job' }}</strong>
+                {% if estimate.status == 'complete' %}
+                <span class="badge badge-active">Complete</span>
+                {% elif estimate.status == 'error' %}
+                <span class="badge" style="background: #fee2e2; color: #991b1b;">Error</span>
+                {% elif estimate.status in ('appending', 'transcribing_append') %}
+                <span class="badge" style="background: #e0e7ff; color: #3730a3;">Adding Memo</span>
+                {% else %}
+                <span class="badge" style="background: #fef3c7; color: #92400e;">Processing</span>
+                {% endif %}
+            </div>
+            {% if job and job.job_address %}
+            <div style="font-size: 13px; color: var(--gray-500); margin-top: 4px;">{{ job.job_address }}</div>
+            {% endif %}
+            <div style="font-size: 12px; color: var(--gray-400); margin-top: 4px;">{{ estimate.created_at[:16] if estimate.created_at else '' }}</div>
+        </div>
+
+        {# Customer Info — always visible #}
+        <div class="form-group">
+            <label style="font-weight: 600; font-size: 15px;">Customer Info</label>
+            <input type="text" id="cust-name" value="{{ estimate.customer_name or '' }}"
+                   placeholder="Customer name" style="margin-bottom: 8px;">
+            <input type="tel" inputmode="tel" id="cust-phone" value="{{ estimate.customer_phone or '' }}"
+                   placeholder="(555) 555-5555" style="margin-bottom: 8px;"
+                   oninput="formatPhone(this)">
+            <input type="email" inputmode="email" id="cust-email" value="{{ estimate.customer_email or '' }}"
+                   placeholder="email@example.com" style="margin-bottom: 8px;"
+                   oninput="validateEmail(this)" onblur="validateEmail(this)">
+            <button type="button" class="btn btn-blue btn-sm" onclick="saveCustomerInfo()">Save Customer Info</button>
+            <div id="cust-save-status" style="display:none; font-size: 13px; margin-top: 6px;"></div>
+        </div>
+
+        {# Existing Photos #}
+        {% if photos %}
+        <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="margin: 0;">Job Site Photos ({{ photos|length }}) <span style="font-size: 12px; color: var(--gray-500); font-weight: 400;">— tap to select for PDF</span></label>
+                <div style="display: flex; gap: 6px;">
+                    <button type="button" class="btn btn-sm" style="background: var(--gray-200); color: var(--gray-700); font-size: 12px; padding: 4px 8px;" onclick="toggleAllPhotos(true)">All</button>
+                    <button type="button" class="btn btn-sm" style="background: var(--gray-200); color: var(--gray-700); font-size: 12px; padding: 4px 8px;" onclick="toggleAllPhotos(false)">None</button>
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                {% for p in photos %}
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="position: relative; height: 90px;">
+                        <label style="position: absolute; top: 4px; left: 4px; z-index: 1; background: rgba(255,255,255,0.9); border-radius: 4px; padding: 2px 4px; cursor: pointer;">
+                            <input type="checkbox" class="photo-select" value="{{ p.id }}" checked>
+                        </label>
+                        <img src="/api/job-photos/{{ p.id }}?thumb=1" alt="Photo"
+                             style="width: 100%; height: 100%; object-fit: cover; border-radius: 6px; border: 1px solid var(--gray-200); cursor: pointer;"
+                             onclick="window.open('/api/job-photos/{{ p.id }}', '_blank')">
+                    </div>
+                    <input type="text" value="{{ p.caption or '' }}" placeholder="Caption..."
+                           style="width: 100%; padding: 4px 6px; font-size: 11px; border: 1px solid var(--gray-300); border-radius: 4px; box-sizing: border-box;"
+                           oninput="scheduleCaption({{ p.id }}, this.value)">
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {# Add Photos — always visible #}
+        <div class="form-group">
+            <label style="font-weight: 600; font-size: 15px;">Add Photos</label>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
+                <label class="btn btn-blue" style="cursor: pointer; padding: 12px 16px; font-size: 15px;">
+                    Take Photo
+                    <input type="file" accept="image/*" capture="environment" id="photo-camera"
+                           style="display:none" onchange="uploadPhoto(this)">
+                </label>
+                <label class="btn btn-green" style="cursor: pointer; padding: 12px 16px; font-size: 15px;">
+                    Upload from Library
+                    <input type="file" accept="image/*" id="photo-library"
+                           style="display:none" onchange="uploadPhoto(this)">
+                </label>
+            </div>
+            <div id="new-photo-preview" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 8px;"></div>
+            <div id="photo-upload-status" style="display:none; font-size: 13px; margin-top: 6px;"></div>
+        </div>
+
+        {# Products & Services #}
+        <div class="form-group" style="margin-bottom: 0;">
+            <label style="font-weight:600; font-size:15px;">Products & Services</label>
+
+            {% if products_services %}
+            <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+                <select id="ps-select" style="flex:1; min-width:0; padding:8px; font-size:14px; border:1px solid var(--gray-300); border-radius:6px;">
+                    <option value="">Add from catalog...</option>
+                    {% for ps in products_services %}
+                    <option value="{{ ps.name }}" data-price="{{ '{:.2f}'.format(ps.unit_price or 0) }}">
+                        {{ ps.name }} (${{ '{:.2f}'.format(ps.unit_price or 0) }})
+                    </option>
+                    {% endfor %}
+                </select>
+                <button type="button" class="btn btn-green btn-sm" onclick="addFromPS()">Add</button>
+            </div>
+            {% endif %}
+
+            <div id="li-cards">
+                {% for item in items %}
+                <div class="li-card" data-item-id="{{ item.id }}" style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:8px; padding:10px; margin-bottom:8px;">
+                    <input type="text" class="li-desc" value="{{ item.description }}" placeholder="Description"
+                           style="width:100%; padding:8px; font-size:14px; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"
+                           onchange="saveItem(this)">
+                    <div style="display:flex; gap:8px; margin-top:6px; align-items:center; flex-wrap:wrap;">
+                        <input type="text" inputmode="decimal" class="li-qty" value="{{ item.quantity }}" placeholder="Qty"
+                               style="width:65px; padding:6px; text-align:center; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"
+                               onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)"
+                               onblur="applyCalc(this,2,function(el){calcRow(el);})"
+                               onkeydown="if(event.key==='Enter'){applyCalc(this,2,function(el){calcRow(el);});}">
+                        <span style="color:var(--gray-500);">×</span>
+                        <label style="white-space:nowrap; font-size:13px; color:var(--gray-600);">
+                            <input type="checkbox" class="li-taxable" {% if item.taxable %}checked{% endif %}
+                                   onchange="saveItem(this); calcTotals();"> Tax
+                        </label>
+                        <input type="text" inputmode="decimal" class="li-price" value="{{ '{:.2f}'.format(item.unit_price) }}" placeholder="Unit Price"
+                               style="flex:1; min-width:80px; padding:6px; text-align:right; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"
+                               onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)"
+                               onblur="applyCalc(this,2,function(el){calcRow(el);})"
+                               onkeydown="if(event.key==='Enter'){applyCalc(this,2,function(el){calcRow(el);});}">
+                        <button type="button" class="btn btn-red btn-sm" onclick="deleteItem(this)" style="padding:4px 8px;">✕</button>
+                    </div>
+                    <div style="text-align:right; font-weight:600; font-size:15px; margin-top:6px; color:var(--gray-700);">
+                        = <span class="li-total-display">{{ '${:,.2f}'.format(item.total) }}</span>
+                        <input type="hidden" class="li-total" value="{{ item.total }}">
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <button type="button" class="btn" style="width:100%; padding:12px; font-size:15px; background:var(--gray-100); color:var(--gray-700); border:2px dashed var(--gray-400); margin-bottom:12px;" onclick="addLineItem('','')">
+                + Add Line Item
+            </button>
+
+            <div style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:8px; padding:12px;">
+                <div style="display:flex; justify-content:space-between; padding:4px 0; font-size:15px;">
+                    <span>Subtotal:</span>
+                    <strong id="li-subtotal">$0.00</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0; font-size:15px;">
+                    <span style="display:flex; align-items:center; gap:6px;">
+                        Tax Rate:
+                        <input type="number" id="li-tax-rate" value="{{ '{:.2f}'.format(estimate.sales_tax_rate or 0) }}"
+                               step="0.01" min="0" max="100"
+                               style="width:65px; text-align:right; padding:4px 6px; font-size:14px; background:#fefce8; border:1px solid var(--gray-300); border-radius:4px;"
+                               onfocus="this.select()" oninput="calcTotals(); saveTaxRate();">%
+                    </span>
+                    <span>Sales Tax: <strong id="li-sales-tax">$0.00</strong></span>
+                </div>
+                <div style="display:flex; justify-content:space-between; padding:8px 0; font-size:18px; font-weight:700; border-top:2px solid var(--gray-300); margin-top:4px;">
+                    <span>Grand Total:</span>
+                    <span id="li-grand-total">$0.00</span>
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                <div>
+                    <label style="font-size:12px; color:var(--gray-500); display:block; margin-bottom:3px;">Est. Materials Cost</label>
+                    <input type="text" inputmode="decimal" id="li-mat-cost"
+                           value="{{ '{:.2f}'.format(estimate.est_materials_cost or 0) }}"
+                           style="width:100%; padding:6px 8px; font-size:14px; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8; box-sizing:border-box;"
+                           onfocus="this.select()" oninput="onCostInput()">
+                </div>
+                <div>
+                    <label style="font-size:12px; color:var(--gray-500); display:block; margin-bottom:3px;">Est. Labor Cost</label>
+                    <input type="text" inputmode="decimal" id="li-lab-cost"
+                           value="{{ '{:.2f}'.format(estimate.est_labor_cost or 0) }}"
+                           style="width:100%; padding:6px 8px; font-size:14px; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8; box-sizing:border-box;"
+                           onfocus="this.select()" oninput="onCostInput()">
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                <div style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:8px; padding:10px; text-align:center;">
+                    <div style="font-size:12px; color:var(--gray-500); margin-bottom:2px;">Margin</div>
+                    <div id="li-margin" style="font-size:20px; font-weight:700; color:var(--gray-700);">—</div>
+                </div>
+                <div style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:8px; padding:10px; text-align:center;">
+                    <div style="font-size:12px; color:var(--gray-500); margin-bottom:2px;">Markup</div>
+                    <div id="li-markup" style="font-size:20px; font-weight:700; color:var(--gray-700);">—</div>
+                </div>
+            </div>
+        </div>
+
+        {# Description/Caption #}
+        {% if estimate.title %}
+        <div class="form-group">
+            <label>Description</label>
+            <div class="meta-card" style="padding: 12px; line-height: 1.6; font-size: 14px;">
+                {{ estimate.title }}
+            </div>
+        </div>
+        {% endif %}
+
+        {# Transcription block — status dependent #}
+        {% if estimate.status == 'complete' %}
+        <div class="form-group">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label for="transcription-edit" style="margin:0;">Transcription</label>
+                <button type="button" onclick="refreshTranscription()"
+                        style="font-size:12px; padding:3px 10px; background:var(--gray-100); border:1px solid var(--gray-300); border-radius:4px; color:var(--gray-600); cursor:pointer;">
+                    ↻ Refresh
+                </button>
+            </div>
+            {% if estimate.transcription %}
+            <textarea id="transcription-edit" rows="6" style="width: 100%; resize: vertical; font-size: 14px; line-height: 1.6;">{{ estimate.transcription }}</textarea>
+            {% else %}
+            <textarea id="transcription-edit" rows="6" placeholder="No voice memo was recorded." style="width: 100%; resize: vertical; font-size: 14px; line-height: 1.6; color: var(--gray-400);"></textarea>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label for="notes-edit">Additional Notes</label>
+            <textarea id="notes-edit" rows="3" placeholder="Add any additional notes..." style="width: 100%; resize: vertical; font-size: 14px;">{{ estimate.notes or '' }}</textarea>
+        </div>
+
+        <button type="button" id="btn-save" class="btn btn-green" style="width: 100%; padding: 14px; font-size: 16px; border: 2px solid var(--green-dark, #1a8c3a);" onclick="saveEstimate()">
+            Save Changes
+        </button>
+        <button type="button" onclick="downloadScopePDF()" class="btn" style="width: 100%; padding: 14px; font-size: 16px; background: var(--purple); color: #fff; margin-top: 10px; font-weight: 600;">
+            Export Scope of Work PDF
+        </button>
+        <button type="button" onclick="viewClientPDF()" class="btn btn-blue" style="width: 100%; padding: 14px; font-size: 16px; margin-top: 8px; font-weight: 600;">
+            View Client Estimate
+        </button>
+        <button type="button" onclick="sendClientPDFByEmail()" class="btn btn-green" style="width: 100%; padding: 14px; font-size: 16px; margin-top: 8px; font-weight: 600;">
+            Send Client Estimate by Email
+        </button>
+        <div id="save-status" style="display: none; text-align: center; margin-top: 8px; font-size: 14px;"></div>
+
+        {# Add Voice Memo #}
+        <div class="form-group" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--gray-200);">
+            <label style="font-weight: 600; font-size: 15px;">Add Voice Memo</label>
+            <p style="color: var(--gray-500); font-size: 13px; margin: 4px 0 12px;">
+                Record an additional note — it will be transcribed and appended to the existing transcription.
+            </p>
+            <div id="memo-mic-unsupported" style="display:none; color: var(--gray-500); font-size: 13px; padding: 8px; background: var(--gray-50); border-radius: 6px;">
+                Voice recording is not available on this device/browser.
+            </div>
+            <div id="memo-record-section">
+                <button type="button" id="memo-record-btn" class="btn" style="width: 100%; padding: 14px; font-size: 16px; background: var(--red); color: #fff; border: 2px solid var(--red-dark, #b91c1c);" onclick="toggleMemoRecording()">
+                    Start Recording
+                </button>
+                <div id="memo-recording-status" style="display:none; text-align:center; margin-top: 8px;">
+                    <div style="color: var(--red); font-weight: 600;">Recording...</div>
+                    <div id="memo-timer" style="font-size: 20px; font-weight: 600; margin: 4px 0;">0:00</div>
+                </div>
+            </div>
+            <div id="memo-audio-preview" style="display:none; margin-top: 8px;">
+                <audio id="memo-playback" controls style="width: 100%;"></audio>
+                <div style="display: flex; gap: 8px; margin-top: 6px;">
+                    <button type="button" class="btn btn-sm" style="background: var(--gray-400); color: #fff;" onclick="discardMemo()">Re-record</button>
+                    <button type="button" id="memo-submit-btn" class="btn btn-blue btn-sm" onclick="submitMemo()">Submit Memo</button>
+                </div>
+            </div>
+            <div id="memo-submit-status" style="display:none; margin-top: 8px; font-size: 13px; text-align: center;"></div>
+        </div>
+
+        {% elif estimate.status in ('appending', 'transcribing_append') %}
+        {% if estimate.transcription %}
+        <div class="form-group">
+            <label>Transcription</label>
+            <div class="meta-card" style="padding: 12px; line-height: 1.6; font-size: 14px; white-space: pre-wrap;">{{ estimate.transcription }}</div>
+        </div>
+        {% endif %}
+        <div class="meta-card" style="padding: 16px; text-align: center;">
+            <div style="color: var(--blue); font-weight: 600;">Adding voice memo...</div>
+            <div style="font-size: 13px; color: var(--gray-500); margin-top: 4px;">The new recording is being transcribed and appended. Check back shortly.</div>
+        </div>
+
+        {% elif estimate.status == 'processing' or estimate.status == 'transcribing' %}
+        <div class="meta-card" style="padding: 16px; text-align: center;">
+            <div style="color: var(--blue); font-weight: 600;">Voice memo is being processed...</div>
+            <div style="font-size: 13px; color: var(--gray-500); margin-top: 4px;">Check back shortly for the transcription.</div>
+        </div>
+        {% elif estimate.status == 'error' %}
+        <div class="meta-card" style="padding: 16px;">
+            <div style="color: var(--red); font-weight: 600;">Processing Error</div>
+            <div style="font-size: 13px; color: var(--gray-500); margin-top: 4px;">{{ estimate.transcription }}</div>
+        </div>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+
+    <script>
+    var TOKEN = "{{ token.token }}";
+    var ESTIMATE_ID = {{ estimate.id }};
+    var JOB_ID = {{ estimate.job_id or 'null' }};
+    var JOB_NAME = "{{ (job.job_name if job else '') | replace('"', '') }}";
+    var EST_DATE = "{{ (estimate.created_at or '')[:10] }}";
+    function getEstCost() {
+        var mat = parseFloat(document.getElementById('li-mat-cost').value) || 0;
+        var lab = parseFloat(document.getElementById('li-lab-cost').value) || 0;
+        return mat + lab;
+    }
+
+    var _costSaveTimer = null;
+    function onCostInput() {
+        calcTotals();
+        clearTimeout(_costSaveTimer);
+        _costSaveTimer = setTimeout(function() {
+            var fd = new FormData();
+            fd.append('token', TOKEN);
+            fd.append('est_materials_cost', document.getElementById('li-mat-cost').value || '0');
+            fd.append('est_labor_cost', document.getElementById('li-lab-cost').value || '0');
+            fetch('/api/estimate/' + ESTIMATE_ID + '/update', {method: 'POST', body: fd});
+        }, 800);
+    }
+    var _transcEl = document.getElementById('transcription-edit');
+    var _origTranscription = _transcEl ? _transcEl.value : '';
+
+    // ---- Phone formatting ----
+    function formatPhone(el) {
+        var digits = el.value.replace(/\D/g, '').slice(0, 10);
+        if (digits.length === 0) { el.value = ''; return; }
+        if (digits.length <= 3) { el.value = '(' + digits; return; }
+        if (digits.length <= 6) { el.value = '(' + digits.slice(0,3) + ') ' + digits.slice(3); return; }
+        el.value = '(' + digits.slice(0,3) + ') ' + digits.slice(3,6) + '-' + digits.slice(6,10);
+    }
+
+    // ---- Email validation ----
+    function validateEmail(el) {
+        if (el.value && !el.validity.valid) {
+            el.style.borderColor = 'var(--red, #dc2626)';
+        } else {
+            el.style.borderColor = '';
+        }
+    }
+
+    // ---- Math helpers ----
+    function evalMathExpr(raw) {
+        var s = String(raw).trim();
+        if (!/^[\d\s\.\+\-\*\/\(\)]+$/.test(s)) return null;
+        try {
+            var result = Function('return (' + s + ')')();
+            return (typeof result === 'number' && isFinite(result)) ? result : null;
+        } catch(e) { return null; }
+    }
+    function applyCalc(el, decimals, afterFn) {
+        var result = evalMathExpr(el.value);
+        if (result !== null) {
+            el.value = Math.max(0, result).toFixed(decimals);
+        } else {
+            var plain = parseFloat(el.value);
+            el.value = (isNaN(plain) ? 0 : Math.max(0, plain)).toFixed(decimals);
+        }
+        if (afterFn) afterFn(el);
+    }
+    function fmtMoney(n) {
+        return '$' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
+    // ---- Line item calculations ----
+    function calcRow(el) {
+        var card = el.closest('.li-card');
+        var qty = parseFloat(card.querySelector('.li-qty').value) || 0;
+        var price = parseFloat(card.querySelector('.li-price').value) || 0;
+        var total = qty * price;
+        card.querySelector('.li-total').value = total.toFixed(2);
+        card.querySelector('.li-total-display').textContent = fmtMoney(total);
+        calcTotals();
+    }
+
+    function calcTotals() {
+        var cards = document.querySelectorAll('#li-cards .li-card');
+        var subtotal = 0, taxable = 0;
+        cards.forEach(function(card) {
+            var total = parseFloat(card.querySelector('.li-total').value) || 0;
+            subtotal += total;
+            if (card.querySelector('.li-taxable').checked) taxable += total;
+        });
+        var taxRate = parseFloat(document.getElementById('li-tax-rate').value) || 0;
+        var salesTax = taxable * (taxRate / 100);
+        var grandTotal = subtotal + salesTax;
+        document.getElementById('li-subtotal').textContent = fmtMoney(subtotal);
+        document.getElementById('li-sales-tax').textContent = fmtMoney(salesTax);
+        document.getElementById('li-grand-total').textContent = fmtMoney(grandTotal);
+
+        var marginEl = document.getElementById('li-margin');
+        var markupEl = document.getElementById('li-markup');
+        var estCost = getEstCost();
+        if (estCost > 0 && grandTotal > 0) {
+            var grossProfit = grandTotal - estCost;
+            var margin = (grossProfit / grandTotal) * 100;
+            var markup = (grossProfit / estCost) * 100;
+            var positive = grossProfit >= 0;
+            marginEl.textContent = margin.toFixed(1) + '%';
+            markupEl.textContent = markup.toFixed(1) + '%';
+            marginEl.style.color = positive ? 'var(--green)' : 'var(--red)';
+            markupEl.style.color = positive ? 'var(--green)' : 'var(--red)';
+        } else {
+            marginEl.textContent = '—';
+            markupEl.textContent = '—';
+            marginEl.style.color = 'var(--gray-700)';
+            markupEl.style.color = 'var(--gray-700)';
+        }
+    }
+
+    // ---- Save single item ----
+    function saveItem(el) {
+        var card = el.closest('.li-card');
+        var itemId = card.getAttribute('data-item-id');
+        var desc = card.querySelector('.li-desc').value.trim();
+        var qty = parseFloat(card.querySelector('.li-qty').value) || 0;
+        var price = parseFloat(card.querySelector('.li-price').value) || 0;
+        var total = parseFloat(card.querySelector('.li-total').value) || 0;
+        var taxable = card.querySelector('.li-taxable').checked;
+        if (!desc) return;
+
+        if (itemId) {
+            fetch('/api/estimate/items/' + itemId + '/update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, total: total, taxable: taxable})
+            });
+        } else {
+            fetch('/api/estimate/' + ESTIMATE_ID + '/items/create', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, total: total, taxable: taxable})
+            }).then(function(r) { return r.json(); }).then(function(data) {
+                if (data.ok && data.item) card.setAttribute('data-item-id', String(data.item.id));
+            });
+        }
+    }
+
+    // ---- Delete item ----
+    function deleteItem(btn) {
+        var card = btn.closest('.li-card');
+        var itemId = card.getAttribute('data-item-id');
+        if (itemId) {
+            fetch('/api/estimate/items/' + itemId + '/delete', {method: 'POST'});
+        }
+        card.remove();
+        calcTotals();
+    }
+
+    // ---- Add blank line item ----
+    function addLineItem(desc, price) {
+        var container = document.getElementById('li-cards');
+        var card = document.createElement('div');
+        card.className = 'li-card';
+        card.setAttribute('data-item-id', '');
+        card.style.cssText = 'background:var(--gray-50); border:1px solid var(--gray-200); border-radius:8px; padding:10px; margin-bottom:8px;';
+        card.innerHTML =
+            '<input type="text" class="li-desc" value="' + (desc || '').replace(/"/g, '&quot;') + '" placeholder="Description"' +
+            ' style="width:100%; padding:8px; font-size:14px; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"' +
+            ' onchange="saveItem(this)">' +
+            '<div style="display:flex; gap:8px; margin-top:6px; align-items:center; flex-wrap:wrap;">' +
+            '<input type="text" inputmode="decimal" class="li-qty" value="1" placeholder="Qty"' +
+            ' style="width:65px; padding:6px; text-align:center; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"' +
+            ' onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)"' +
+            ' onblur="applyCalc(this,2,function(el){calcRow(el);})"' +
+            ' onkeydown="if(event.key===\'Enter\'){applyCalc(this,2,function(el){calcRow(el);});}">' +
+            '<span style="color:var(--gray-500);">×</span>' +
+            '<label style="white-space:nowrap; font-size:13px; color:var(--gray-600);">' +
+            '<input type="checkbox" class="li-taxable" onchange="saveItem(this); calcTotals();"> Tax</label>' +
+            '<input type="text" inputmode="decimal" class="li-price" value="' + (price || '') + '" placeholder="Unit Price"' +
+            ' style="flex:1; min-width:80px; padding:6px; text-align:right; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"' +
+            ' onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)"' +
+            ' onblur="applyCalc(this,2,function(el){calcRow(el);})"' +
+            ' onkeydown="if(event.key===\'Enter\'){applyCalc(this,2,function(el){calcRow(el);});}">' +
+            '<button type="button" class="btn btn-red btn-sm" onclick="deleteItem(this)" style="padding:4px 8px;">✕</button>' +
+            '</div>' +
+            '<div style="text-align:right; font-weight:600; font-size:15px; margin-top:6px; color:var(--gray-700);">' +
+            '= <span class="li-total-display">$0.00</span>' +
+            '<input type="hidden" class="li-total" value="0"></div>';
+        container.appendChild(card);
+        card.querySelector('.li-desc').focus();
+        calcTotals();
+    }
+
+    // ---- Add from P&S catalog ----
+    function addFromPS() {
+        var sel = document.getElementById('ps-select');
+        if (!sel || !sel.value) return;
+        var opt = sel.options[sel.selectedIndex];
+        var name = sel.value;
+        var price = opt.getAttribute('data-price') || '';
+        addLineItem(name, price);
+        // Auto-save the new card
+        var cards = document.querySelectorAll('#li-cards .li-card');
+        var lastCard = cards[cards.length - 1];
+        if (lastCard) saveItem(lastCard.querySelector('.li-desc'));
+        sel.value = '';
+    }
+
+    // ---- Save tax rate to estimate ----
+    var _taxRateTimer = null;
+    function saveTaxRate() {
+        clearTimeout(_taxRateTimer);
+        _taxRateTimer = setTimeout(function() {
+            var fd = new FormData();
+            fd.append('token', TOKEN);
+            fd.append('sales_tax_rate', document.getElementById('li-tax-rate').value || '0');
+            fetch('/api/estimate/' + ESTIMATE_ID + '/update', {method: 'POST', body: fd});
+        }, 800);
+    }
+
+    // Init totals on page load
+    calcTotals();
+
+    // ---- Save transcription/notes ----
+    function saveEstimate() {
+        var fd = new FormData();
+        fd.append('token', TOKEN);
+        var transcEl = document.getElementById('transcription-edit');
+        if (transcEl) fd.append('transcription', transcEl.value);
+        var notesEl = document.getElementById('notes-edit');
+        if (notesEl) fd.append('notes', notesEl.value);
+
+        document.getElementById('btn-save').disabled = true;
+        document.getElementById('btn-save').textContent = 'Saving...';
+
+        fetch('/api/estimate/' + ESTIMATE_ID + '/update', {method: 'POST', body: fd})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var status = document.getElementById('save-status');
+                if (data.ok) {
+                    _origTranscription = _transcEl ? _transcEl.value : '';
+                    status.style.display = '';
+                    status.style.color = 'var(--green)';
+                    status.textContent = 'Changes saved!';
+                    setTimeout(function() { status.style.display = 'none'; }, 3000);
+                } else {
+                    status.style.display = '';
+                    status.style.color = 'var(--red)';
+                    status.textContent = data.error || 'Save failed';
+                }
+                document.getElementById('btn-save').disabled = false;
+                document.getElementById('btn-save').textContent = 'Save Changes';
+            })
+            .catch(function(err) {
+                alert('Error: ' + err.message);
+                document.getElementById('btn-save').disabled = false;
+                document.getElementById('btn-save').textContent = 'Save Changes';
+            });
+    }
+
+    // ---- Save customer info ----
+    function saveCustomerInfo() {
+        var fd = new FormData();
+        fd.append('token', TOKEN);
+        fd.append('customer_name', document.getElementById('cust-name').value.trim());
+        fd.append('customer_phone', document.getElementById('cust-phone').value.trim());
+        fd.append('customer_email', document.getElementById('cust-email').value.trim());
+
+        var statusEl = document.getElementById('cust-save-status');
+        statusEl.style.display = '';
+        statusEl.style.color = 'var(--blue)';
+        statusEl.textContent = 'Saving...';
+
+        fetch('/api/estimate/' + ESTIMATE_ID + '/update', {method: 'POST', body: fd})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    statusEl.style.color = 'var(--green)';
+                    statusEl.textContent = 'Saved!';
+                    setTimeout(function() { statusEl.style.display = 'none'; }, 3000);
+                } else {
+                    statusEl.style.color = 'var(--red)';
+                    statusEl.textContent = data.error || 'Save failed';
+                }
+            })
+            .catch(function(err) {
+                statusEl.style.color = 'var(--red)';
+                statusEl.textContent = 'Error: ' + err.message;
+            });
+    }
+
+    // ---- Photo selection for PDF ----
+    function _selectedPhotoIds() {
+        var checks = document.querySelectorAll('.photo-select');
+        var ids = [];
+        checks.forEach(function(cb) { if (cb.checked) ids.push(cb.value); });
+        return { ids: ids, total: checks.length };
+    }
+
+    function toggleAllPhotos(checked) {
+        document.querySelectorAll('.photo-select').forEach(function(cb) { cb.checked = checked; });
+    }
+
+    // ---- Save photo caption (debounced) ----
+    var _captionTimers = {};
+    function scheduleCaption(photoId, val) {
+        clearTimeout(_captionTimers[photoId]);
+        _captionTimers[photoId] = setTimeout(function() {
+            fetch('/api/job-photos/' + photoId + '/caption', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({caption: val})
+            });
+        }, 800);
+    }
+
+    function downloadScopePDF() {
+        var sel = _selectedPhotoIds();
+        var url = '/my-estimates/' + ESTIMATE_ID + '/scope-pdf?token=' + TOKEN;
+        if (sel.ids.length < sel.total) {
+            url += '&photos=' + sel.ids.join(',');
+        }
+        window.location.href = url;
+    }
+
+    // ---- Upload photo ----
+    function uploadPhoto(input) {
+        if (!input.files || !input.files.length) return;
+        var file = input.files[0];
+        input.value = '';
+
+        var statusEl = document.getElementById('photo-upload-status');
+        statusEl.style.display = '';
+        statusEl.style.color = 'var(--blue)';
+        statusEl.textContent = 'Uploading photo...';
+
+        var fd = new FormData();
+        fd.append('token', TOKEN);
+        fd.append('job_id', JOB_ID);
+        fd.append('image', file);
+
+        fetch('/api/job-photos/upload', {method: 'POST', body: fd})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.photo_id) {
+                    statusEl.style.color = 'var(--green)';
+                    statusEl.textContent = 'Photo uploaded!';
+                    setTimeout(function() { statusEl.style.display = 'none'; }, 3000);
+
+                    // Build a selectable thumbnail tile matching the existing photos grid
+                    var outer = document.createElement('div');
+                    outer.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+
+                    var wrap = document.createElement('div');
+                    wrap.style.cssText = 'position:relative; height:90px;';
+
+                    var lbl = document.createElement('label');
+                    lbl.style.cssText = 'position:absolute; top:4px; left:4px; z-index:1; background:rgba(255,255,255,0.9); border-radius:4px; padding:2px 4px; cursor:pointer;';
+                    var cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.className = 'photo-select';
+                    cb.value = data.photo_id;
+                    cb.checked = true;
+                    lbl.appendChild(cb);
+                    wrap.appendChild(lbl);
+
+                    var img = document.createElement('img');
+                    img.src = '/api/job-photos/' + data.photo_id + '?thumb=1';
+                    img.style.cssText = 'width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--gray-200); cursor:pointer;';
+                    img.onclick = function() { window.open('/api/job-photos/' + data.photo_id, '_blank'); };
+                    wrap.appendChild(img);
+                    outer.appendChild(wrap);
+
+                    var cap = document.createElement('input');
+                    cap.type = 'text';
+                    cap.placeholder = 'Caption...';
+                    cap.style.cssText = 'width:100%; padding:4px 6px; font-size:11px; border:1px solid var(--gray-300); border-radius:4px; box-sizing:border-box;';
+                    (function(pid) {
+                        cap.oninput = function() { scheduleCaption(pid, this.value); };
+                    })(data.photo_id);
+                    outer.appendChild(cap);
+
+                    document.getElementById('new-photo-preview').appendChild(outer);
+                } else {
+                    statusEl.style.color = 'var(--red)';
+                    statusEl.textContent = data.error || 'Upload failed';
+                }
+            })
+            .catch(function(err) {
+                statusEl.style.color = 'var(--red)';
+                statusEl.textContent = 'Error: ' + err.message;
+            });
+    }
+
+    // ---- Voice memo append recording ----
+    var memoMediaRecorder = null;
+    var memoAudioChunks = [];
+    var memoAudioBlob = null;
+    var memoRecordingInterval = null;
+    var memoRecordingSeconds = 0;
+    var hasMicSupport = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+    if (!hasMicSupport) {
+        var unsupEl = document.getElementById('memo-mic-unsupported');
+        var recEl = document.getElementById('memo-record-section');
+        if (unsupEl) unsupEl.style.display = '';
+        if (recEl) recEl.style.display = 'none';
+    }
+
+    function getSupportedMimeType() {
+        var types = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg','audio/mp4','audio/mpeg'];
+        for (var i = 0; i < types.length; i++) {
+            if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(types[i])) return types[i];
+        }
+        return '';
+    }
+
+    function toggleMemoRecording() {
+        if (memoMediaRecorder && memoMediaRecorder.state === 'recording') {
+            stopMemoRecording();
+        } else {
+            startMemoRecording();
+        }
+    }
+
+    function startMemoRecording() {
+        if (!hasMicSupport) { alert('Microphone not available on this device/browser.'); return; }
+        navigator.mediaDevices.getUserMedia({audio: true}).then(function(stream) {
+            memoAudioChunks = [];
+            var mimeType = getSupportedMimeType();
+            var options = mimeType ? {mimeType: mimeType} : {};
+            try {
+                memoMediaRecorder = new MediaRecorder(stream, options);
+            } catch(e) {
+                memoMediaRecorder = new MediaRecorder(stream);
+            }
+            memoMediaRecorder.ondataavailable = function(e) {
+                if (e.data && e.data.size > 0) memoAudioChunks.push(e.data);
+            };
+            memoMediaRecorder.onstop = function() {
+                stream.getTracks().forEach(function(t) { t.stop(); });
+                var blobType = memoMediaRecorder.mimeType || 'audio/webm';
+                memoAudioBlob = new Blob(memoAudioChunks, {type: blobType});
+                document.getElementById('memo-playback').src = URL.createObjectURL(memoAudioBlob);
+                document.getElementById('memo-audio-preview').style.display = '';
+                document.getElementById('memo-record-section').style.display = 'none';
+            };
+            memoMediaRecorder.start(1000);
+
+            var btn = document.getElementById('memo-record-btn');
+            btn.textContent = 'Stop Recording';
+            btn.style.cssText = 'width:100%; padding:14px; font-size:16px; background:var(--red); color:#fff; border:2px solid var(--red-dark, #b91c1c);';
+            document.getElementById('memo-recording-status').style.display = '';
+            memoRecordingSeconds = 0;
+            memoRecordingInterval = setInterval(function() {
+                memoRecordingSeconds++;
+                var m = Math.floor(memoRecordingSeconds / 60);
+                var s = memoRecordingSeconds % 60;
+                document.getElementById('memo-timer').textContent = m + ':' + (s < 10 ? '0' : '') + s;
+            }, 1000);
+        }).catch(function(err) {
+            alert('Microphone access denied: ' + err.message);
+        });
+    }
+
+    function stopMemoRecording() {
+        if (memoMediaRecorder && memoMediaRecorder.state === 'recording') memoMediaRecorder.stop();
+        clearInterval(memoRecordingInterval);
+        document.getElementById('memo-recording-status').style.display = 'none';
+    }
+
+    function discardMemo() {
+        memoAudioBlob = null;
+        document.getElementById('memo-audio-preview').style.display = 'none';
+        document.getElementById('memo-record-section').style.display = '';
+        var btn = document.getElementById('memo-record-btn');
+        btn.textContent = 'Start Recording';
+        btn.style.cssText = 'width:100%; padding:14px; font-size:16px; background:var(--red); color:#fff; border:2px solid var(--red-dark, #b91c1c);';
+        document.getElementById('memo-submit-status').style.display = 'none';
+    }
+
+    // ---- Build PDF filename matching server convention ----
+    function _buildPdfName() {
+        var cust = (document.getElementById('cust-name').value || '').trim().replace(/[^a-zA-Z0-9 \-]/g, '').slice(0, 25);
+        var job = JOB_NAME.replace(/[^a-zA-Z0-9 \-]/g, '').slice(0, 30);
+        var parts = [cust, job, EST_DATE].filter(Boolean);
+        return (parts.length ? parts.join('-') : 'estimate') + '.pdf';
+    }
+
+    // ---- Client estimate PDF ----
+    function viewClientPDF() {
+        var sel = _selectedPhotoIds();
+        var url = '/my-estimates/' + ESTIMATE_ID + '/client-pdf?token=' + TOKEN;
+        if (sel.ids.length < sel.total) {
+            url += '&photos=' + sel.ids.join(',');
+        }
+        window.open(url, '_blank');
+    }
+
+    function sendClientPDFByEmail() {
+        var email = document.getElementById('cust-email').value.trim();
+        if (!email) {
+            alert('No customer email saved. Add a customer email address first.');
+            return;
+        }
+        var sel = _selectedPhotoIds();
+        var pdfUrl = '/my-estimates/' + ESTIMATE_ID + '/client-pdf?token=' + TOKEN;
+        if (sel.ids.length < sel.total) {
+            pdfUrl += '&photos=' + sel.ids.join(',');
+        }
+
+        if (!navigator.share) {
+            // Desktop fallback — no file attachment possible via mailto
+            var subject = encodeURIComponent('Your Estimate');
+            var body = encodeURIComponent('Please find your estimate attached.');
+            window.location.href = 'mailto:' + email + '?subject=' + subject + '&body=' + body;
+            return;
+        }
+
+        fetch(pdfUrl + '&share=1')
+            .then(function(r) { return r.blob(); })
+            .then(function(blob) {
+                var file = new File([blob], _buildPdfName(), {type: 'application/pdf'});
+                return navigator.share({
+                    files: [file],
+                    title: 'Client Estimate',
+                    text: 'Your estimate is attached.'
+                });
+            })
+            .catch(function(err) {
+                // Only fall back if it wasn't a user cancel
+                if (!err || err.name !== 'AbortError') {
+                    var subject = encodeURIComponent('Your Estimate');
+                    var body = encodeURIComponent('Please find your estimate attached.');
+                    window.location.href = 'mailto:' + email + '?subject=' + subject + '&body=' + body;
+                }
+            });
+    }
+
+    // ---- Refresh transcription ----
+    function refreshTranscription() {
+        var transcEl = document.getElementById('transcription-edit');
+        if (!transcEl) return;
+        var hasChanges = transcEl.value !== _origTranscription;
+        if (hasChanges) {
+            if (!confirm('You have unsaved changes to the transcription.\n\nRefresh anyway and lose your edits?')) return;
+        }
+        fetch('/api/estimate/status/' + ESTIMATE_ID + '?token=' + TOKEN)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === 'complete' && data.transcription !== undefined) {
+                    transcEl.value = data.transcription;
+                    _origTranscription = data.transcription;
+                } else if (data.status !== 'complete') {
+                    alert('Transcription is still processing. Check back shortly.');
+                }
+            })
+            .catch(function() { alert('Could not reach server. Try again.'); });
+    }
+
+    function submitMemo() {
+        if (!memoAudioBlob) { alert('No recording to submit.'); return; }
+        var submitBtn = document.getElementById('memo-submit-btn');
+        var statusEl = document.getElementById('memo-submit-status');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Uploading...';
+        statusEl.style.display = '';
+        statusEl.style.color = 'var(--blue)';
+        statusEl.textContent = 'Uploading voice memo...';
+
+        var ext = 'webm';
+        if (memoAudioBlob.type.indexOf('ogg') !== -1) ext = 'ogg';
+        else if (memoAudioBlob.type.indexOf('mp4') !== -1) ext = 'mp4';
+
+        var fd = new FormData();
+        fd.append('token', TOKEN);
+        fd.append('audio', memoAudioBlob, 'memo.' + ext);
+
+        fetch('/api/estimate/' + ESTIMATE_ID + '/add-audio', {method: 'POST', body: fd})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    statusEl.style.color = 'var(--green)';
+                    statusEl.textContent = 'Voice memo submitted! Transcription will be appended in the background — check back in a minute.';
+                    submitBtn.style.display = 'none';
+                    document.getElementById('memo-record-section').style.display = 'none';
+                    document.getElementById('memo-audio-preview').querySelector('audio').style.display = 'none';
+                } else {
+                    statusEl.style.color = 'var(--red)';
+                    statusEl.textContent = data.error || 'Upload failed';
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Submit Memo';
+                }
+            })
+            .catch(function(err) {
+                statusEl.style.color = 'var(--red)';
+                statusEl.textContent = 'Error: ' + err.message;
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit Memo';
+            });
+    }
+    {% if estimate.status in ('processing', 'transcribing', 'appending', 'transcribing_append') %}
+    // Auto-poll until transcription is ready, then reload
+    (function() {
+        function poll() {
+            fetch('/api/estimate/status/' + ESTIMATE_ID + '?token=' + TOKEN)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.status === 'complete' || data.status === 'error') {
+                        window.location.reload();
+                    } else {
+                        setTimeout(poll, 6000);
+                    }
+                })
+                .catch(function() { setTimeout(poll, 12000); });
+        }
+        setTimeout(poll, 6000);
+    })();
+    {% endif %}
+    </script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ token.company_name }} — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="home-container">
+        <div class="home-header">
+            {% if token.logo_file %}
+            <div class="header-row">
+                <img src="/static/logos/{{ token.logo_file }}" alt="{{ token.company_name }}" class="company-logo">
+                <h1>{{ token.company_name }}</h1>
+            </div>
+            {% else %}
+            <h1>{{ token.company_name }}</h1>
+            {% endif %}
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        {% if employee %}
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: #fff; border: 1px solid var(--gray-200); border-radius: 8px; margin-bottom: 12px;">
+            <span style="font-weight: 600; color: var(--gray-800);">{{ employee.name }}{% if admin_session %} <span class="badge" style="background:#fef3c7; color:#92400e; font-size:11px; margin-left:6px;">ADMIN</span>{% endif %}</span>
+            <a href="/c/{{ token.token }}/logout" style="font-size: 13px; color: var(--red);">Logout</a>
+        </div>
+
+        <div class="home-tools">
+            {% if employee.timekeeper_access %}
+            <a href="/timekeeper?token={{ token.token }}" class="home-tool-btn">
+                <span class="tool-icon">&#9201;</span>
+                <span class="tool-label">Timekeeper</span>
+            </a>
+            {% endif %}
+            {% if employee.schedule_access %}
+            <a href="/schedule?token={{ token.token }}" class="home-tool-btn">
+                <span class="tool-icon">&#128197;</span>
+                <span class="tool-label">Your Schedule</span>
+            </a>
+            {% endif %}
+            {% if employee.job_photos_access %}
+            <div style="display: flex; flex-direction: column; gap: 0;">
+                <a href="/job-photos?token={{ token.token }}" class="home-tool-btn" style="border-radius: 12px 12px 0 0; border-bottom: none;">
+                    <span class="tool-icon">&#128248;</span>
+                    <span class="tool-label">Job Photos / Files</span>
+                </a>
+                <a href="/photo-library?token={{ token.token }}" style="display: block; text-align: center; padding: 8px; font-size: 13px; font-weight: 600; color: var(--purple); background: #f3f0ff; border: 2px solid var(--gray-200); border-top: 1px solid var(--gray-200); border-radius: 0 0 12px 12px; text-decoration: none;">
+                    View Files
+                </a>
+            </div>
+            {% endif %}
+            {% if employee.receipt_access %}
+            <div style="display: flex; flex-direction: column; gap: 0;">
+                <a href="/capture?token={{ token.token }}" class="home-tool-btn" style="border-radius: 12px 12px 0 0; border-bottom: none;">
+                    <span class="tool-icon">&#128247;</span>
+                    <span class="tool-label">Receipt Capture</span>
+                </a>
+                <a href="/receipt-library?token={{ token.token }}" style="display: block; text-align: center; padding: 8px; font-size: 13px; font-weight: 600; color: var(--purple); background: #f3f0ff; border: 2px solid var(--gray-200); border-top: 1px solid var(--gray-200); border-radius: 0 0 12px 12px; text-decoration: none;">
+                    View Receipts
+                </a>
+            </div>
+            {% endif %}
+            {% if employee.estimate_access %}
+            <div style="display: flex; flex-direction: column; gap: 0;">
+                <a href="/estimate?token={{ token.token }}" class="home-tool-btn" style="border-radius: 12px 12px 0 0; border-bottom: none;">
+                    <span class="tool-icon">&#128221;</span>
+                    <span class="tool-label">Job Estimate</span>
+                </a>
+                <a href="/my-estimates?token={{ token.token }}" style="display: block; text-align: center; padding: 8px; font-size: 13px; font-weight: 600; color: var(--purple); background: #f3f0ff; border: 2px solid var(--gray-200); border-top: 1px solid var(--gray-200); border-radius: 0 0 12px 12px; text-decoration: none;">
+                    View Estimates
+                </a>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="home-tools" style="grid-template-columns: 1fr; margin-top: 12px;">
+            <a href="/help?token={{ token.token }}" class="home-tool-btn" style="flex-direction: row; min-height: auto; padding: 14px 16px;">
+                <span class="tool-icon" style="font-size: 22px;">&#10067;</span>
+                <span class="tool-label">Help</span>
+                <span class="tool-icon" style="font-size: 22px;">&#10067;</span>
+            </a>
+        </div>
+        {% else %}
+        <div style="text-align: center; margin-top: 24px; padding: 10px 16px; background: var(--blue); color: #fff; border-radius: 8px; font-weight: 600; font-size: 15px;">
+            Employee Login
+        </div>
+        <div class="login-container" style="margin-top: 12px; box-shadow: none; padding: 0;">
+            <form method="POST" action="/c/{{ token.token }}">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required autocomplete="username">
+                    <span style="display: block; font-size: 11px; color: var(--gray-400); margin-top: 3px;">Case sensitive</span>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-green" style="width: 100%;">Log In</button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+</body>
+</html>

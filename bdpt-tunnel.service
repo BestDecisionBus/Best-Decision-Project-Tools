@@ -1,0 +1,12 @@
+[Unit]
+Description=Cloudflare Tunnel for Best Decision Project Tools
+After=network.target
+
+[Service]
+User=joemack
+ExecStart=/usr/local/bin/cloudflared tunnel --config /home/joemack/.cloudflared/config-bdpt.yml run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

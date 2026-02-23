@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Estimate — {{ token.company_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="capture-container">
+        <div class="capture-header">
+            {% if token.logo_file %}
+            <div class="header-row">
+                <img src="/static/logos/{{ token.logo_file }}" alt="{{ token.company_name }}" class="company-logo">
+                <div class="header-text">
+                    <div class="company-name">{{ token.company_name }}</div>
+                    <h1>Job Estimate</h1>
+                </div>
+            </div>
+            {% else %}
+            <div class="company-name">{{ token.company_name }}</div>
+            <h1>Job Estimate</h1>
+            {% endif %}
+            <a href="/c/{{ token.token }}" class="back-to-home">Back to Home</a>
+        </div>
+
+        <div id="estimate-form">
+        {# Step 1: Select Job #}
+        <div class="form-group">
+            <label for="job-select">Select Job</label>
+            <select id="job-select" required>
+                <option value="">-- Choose Job --</option>
+                {% for job in jobs %}
+                <option value="{{ job.id }}">{{ job.job_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        {# Quick Add Job #}
+        <div id="add-job-section" style="display:none; margin-bottom: 16px;">
+            <div style="background: var(--gray-50); padding: 12px; border-radius: 8px; border: 1px solid var(--gray-200);">
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label>New Job Name</label>
+                    <input type="text" id="new-job-name" placeholder="Job name">
+                </div>
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label>Address (optional)</label>
+                    <input type="text" id="new-job-address" placeholder="Job address">
+                </div>
+                <div class="form-group" style="margin-bottom: 8px;">
+                    <label>GPS Location</label>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 6px;">
+                        <button type="button" class="btn btn-sm" style="background: var(--blue); color: #fff; white-space: nowrap;" onclick="captureJobGPS()">
+                            Use My Location
+                        </button>
+                        <button type="button" class="btn btn-sm" style="background: var(--gray-500); color: #fff; white-space: nowrap;" onclick="geocodeNewJobAddress()">
+                            Lookup from Address
+                        </button>
+                        <span id="gps-status" style="font-size: 12px; color: var(--gray-500);"></span>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="number" id="new-job-lat" step="any" placeholder="Latitude" style="flex:1; font-size: 13px;">
+                        <input type="number" id="new-job-lng" step="any" placeholder="Longitude" style="flex:1; font-size: 13px;">
+                    </div>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button type="button" class="btn btn-green btn-sm" onclick="createJob()">Create Job</button>
+                    <button type="button" class="btn btn-sm" style="background: var(--gray-400); color: #fff;" onclick="toggleAddJob()">Cancel</button>
+                </div>
+            </div>
+        </div>
+        <div style="margin-bottom: 16px;">
+            <button type="button" class="btn" style="width: 100%; padding: 12px; font-size: 15px; background: var(--gray-100, #f3f4f6); color: var(--gray-700); border: 2px dashed var(--gray-400);" onclick="toggleAddJob()">+ Add New Job</button>
+        </div>
+
+        {# Customer Info #}
+        <div class="form-group">
+            <label for="customer-name">Customer Name</label>
+            <input type="text" id="customer-name" placeholder="Full name" autocomplete="name">
+        </div>
+        <div class="form-group">
+            <label for="customer-phone">Customer Phone</label>
+            <input type="tel" inputmode="tel" id="customer-phone" placeholder="(555) 555-5555" autocomplete="tel"
+                   oninput="formatPhone(this)">
+        </div>
+        <div class="form-group">
+            <label for="customer-email">Customer Email</label>
+            <input type="email" inputmode="email" id="customer-email" placeholder="email@example.com" autocomplete="email"
+                   oninput="validateEmail(this)" onblur="validateEmail(this)">
+        </div>
+
+        {# Step 2: Take Photos #}
+        <div class="form-group">
+            <label>Job Site Photos (optional)</label>
+            <input type="file" id="camera-input" accept="image/*" capture="environment" style="display:none;" onchange="onPhotosSelected(this)">
+            <input type="file" id="library-input" accept="image/*" style="display:none;" multiple onchange="onPhotosSelected(this)">
+            <button type="button" class="btn btn-blue" style="width: 100%; padding: 14px; font-size: 16px; border: 2px solid var(--blue-dark, #1a6fc4);" onclick="document.getElementById('camera-input').click()">
+                Take Photo
+            </button>
+            <button type="button" class="btn btn-green" style="width: 100%; padding: 14px; font-size: 16px; border: 2px solid var(--green-dark, #1a8c3a); margin-top: 8px;" onclick="document.getElementById('library-input').click()">
+                Upload from Library
+            </button>
+            <span id="photo-count" style="color: var(--gray-500); font-size: 13px; display: block; margin-top: 6px;"></span>
+            <div id="photo-preview" style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;"></div>
+            <span id="gps-indicator" style="font-size: 12px; color: var(--gray-400); display: block; margin-top: 4px;">Getting location...</span>
+        </div>
+
+        {# Step 3: Caption #}
+        <div class="form-group">
+            <label for="estimate-caption">Notes / Description</label>
+            <textarea id="estimate-caption" rows="3" placeholder="Describe the job site conditions, scope of work, materials needed, etc." style="width: 100%; resize: vertical;"></textarea>
+        </div>
+
+        {# Step 4: Record Voice Memo (optional) #}
+        <div class="form-group">
+            <label>Voice Memo (optional)</label>
+            <div id="mic-unsupported" style="display:none; color: var(--gray-500); font-size: 13px; padding: 8px; background: var(--gray-50); border-radius: 6px;">
+                Voice recording is not available on this device/browser.
+            </div>
+            <div id="record-section">
+                <button type="button" id="btn-record" class="btn" style="width: 100%; padding: 14px; font-size: 16px; background: var(--red); color: #fff; border: 2px solid var(--red-dark, #b91c1c);" onclick="toggleRecording()">
+                    Start Recording
+                </button>
+                <div id="recording-status" style="display:none; text-align:center; margin-top: 8px;">
+                    <div style="color: var(--red); font-weight: 600;">Recording...</div>
+                    <div id="recording-timer" style="font-size: 20px; font-weight: 600; margin: 4px 0;">0:00</div>
+                </div>
+            </div>
+            <div id="audio-preview" style="display:none; margin-top: 8px;">
+                <audio id="audio-playback" controls style="width: 100%;"></audio>
+                <button type="button" class="btn btn-sm" style="background: var(--gray-400); color: #fff; margin-top: 4px;" onclick="discardRecording()">Re-record</button>
+            </div>
+        </div>
+
+        {# Submit #}
+        <button type="button" id="btn-submit" class="btn btn-blue" style="width: 100%; margin-top: 8px; padding: 16px; font-size: 18px; font-weight: 700; border: 2px solid var(--blue-dark, #1a6fc4);" onclick="submitEstimate()">
+            Submit Estimate
+        </button>
+
+        {# Status #}
+        <div id="status-area" style="display:none; margin-top: 16px;">
+            <div id="status-msg" class="meta-card" style="text-align: center; padding: 16px;"></div>
+        </div>
+        </div>{# end estimate-form #}
+
+        {# Success Confirmation #}
+        <div id="result-area" style="display:none; margin-top: 16px;">
+            <div class="meta-card" style="padding: 20px; text-align: center;">
+                <div style="font-size: 40px; margin-bottom: 8px;">&#10003;</div>
+                <div style="color: var(--green); font-weight: 700; font-size: 18px; margin-bottom: 8px;">Estimate Uploaded</div>
+                <div id="result-detail" style="font-size: 14px; color: var(--gray-500);"></div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 16px;">
+                <a href="/my-estimates?token={{ token.token }}" class="btn btn-blue" style="width: 100%; padding: 14px; font-size: 16px; text-align: center; border: 2px solid var(--blue-dark, #1a6fc4);">
+                    View Estimates
+                </a>
+                <button type="button" class="btn btn-green" style="width: 100%; padding: 14px; font-size: 16px; border: 2px solid var(--green-dark, #1a8c3a);" onclick="resetForm()">
+                    New Estimate
+                </button>
+                <a href="/c/{{ token.token }}" class="btn" style="width: 100%; padding: 14px; font-size: 16px; text-align: center; background: var(--gray-100, #f3f4f6); color: var(--gray-700); border: 2px solid var(--gray-300);">
+                    Go Home
+                </a>
+            </div>
+        </div>
+        <a href="/my-estimates?token={{ token.token }}" class="btn" style="display: block; width: 100%; margin-top: 24px; padding: 14px; font-size: 16px; text-align: center; background: var(--purple); color: #fff; font-weight: 600;">
+            View All Estimates
+        </a>
+    </div>
+    {% include '_footer.html' %}
+
+    <script>
+    function formatPhone(el) {
+        var digits = el.value.replace(/\D/g, '').slice(0, 10);
+        if (digits.length === 0) { el.value = ''; return; }
+        if (digits.length <= 3) { el.value = '(' + digits; return; }
+        if (digits.length <= 6) { el.value = '(' + digits.slice(0,3) + ') ' + digits.slice(3); return; }
+        el.value = '(' + digits.slice(0,3) + ') ' + digits.slice(3,6) + '-' + digits.slice(6,10);
+    }
+
+    function validateEmail(el) {
+        if (el.value && !el.validity.valid) {
+            el.style.borderColor = 'var(--red, #dc2626)';
+        } else {
+            el.style.borderColor = '';
+        }
+    }
+
+    var TOKEN = "{{ token.token }}";
+    var mediaRecorder = null;
+    var audioChunks = [];
+    var audioBlob = null;
+    var photoFiles = [];
+    var recordingInterval = null;
+    var recordingSeconds = 0;
+    var hasMicSupport = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    var currentLat = null;
+    var currentLng = null;
+
+    // Request GPS on page load
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            function(pos) {
+                currentLat = pos.coords.latitude;
+                currentLng = pos.coords.longitude;
+                var el = document.getElementById('gps-indicator');
+                if (el) { el.textContent = 'Location captured'; el.style.color = 'var(--green)'; }
+            },
+            function() {
+                var el = document.getElementById('gps-indicator');
+                if (el) { el.textContent = 'Location unavailable'; el.style.color = 'var(--gray-400)'; }
+            },
+            {enableHighAccuracy: true, timeout: 10000}
+        );
+    }
+
+    // Check microphone support on load
+    if (!hasMicSupport) {
+        document.getElementById('record-section').style.display = 'none';
+        document.getElementById('mic-unsupported').style.display = '';
+    }
+
+    // --- GPS for job creation ---
+    function captureJobGPS() {
+        var statusEl = document.getElementById('gps-status');
+        if (!navigator.geolocation) {
+            statusEl.textContent = 'GPS not available — enter coordinates manually or use Lookup from Address';
+            statusEl.style.color = 'var(--red)';
+            return;
+        }
+        statusEl.textContent = 'Getting location...';
+        statusEl.style.color = 'var(--blue)';
+        navigator.geolocation.getCurrentPosition(
+            function(pos) {
+                document.getElementById('new-job-lat').value = pos.coords.latitude;
+                document.getElementById('new-job-lng').value = pos.coords.longitude;
+                statusEl.textContent = 'Location captured';
+                statusEl.style.color = 'var(--green)';
+            },
+            function(err) {
+                statusEl.textContent = 'GPS unavailable — use Lookup from Address or enter manually';
+                statusEl.style.color = 'var(--red)';
+            },
+            {enableHighAccuracy: true, timeout: 10000}
+        );
+    }
+
+    function geocodeNewJobAddress() {
+        var address = document.getElementById('new-job-address').value.trim();
+        if (!address) { alert('Enter an address first'); return; }
+        var statusEl = document.getElementById('gps-status');
+        statusEl.textContent = 'Looking up address...';
+        statusEl.style.color = 'var(--blue)';
+        fetch('/api/estimate/geocode?token=' + TOKEN + '&address=' + encodeURIComponent(address))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.lat != null && data.lng != null) {
+                    document.getElementById('new-job-lat').value = data.lat;
+                    document.getElementById('new-job-lng').value = data.lng;
+                    statusEl.textContent = 'Address found';
+                    statusEl.style.color = 'var(--green)';
+                } else {
+                    statusEl.textContent = data.error || 'Could not find that address';
+                    statusEl.style.color = 'var(--red)';
+                }
+            })
+            .catch(function() {
+                statusEl.textContent = 'Lookup failed';
+                statusEl.style.color = 'var(--red)';
+            });
+    }
+
+    // --- Job creation ---
+    function toggleAddJob() {
+        var s = document.getElementById('add-job-section');
+        s.style.display = s.style.display === 'none' ? '' : 'none';
+    }
+
+    function createJob() {
+        var name = document.getElementById('new-job-name').value.trim();
+        if (!name) { alert('Job name required'); return; }
+        var addr = document.getElementById('new-job-address').value.trim();
+        var lat = document.getElementById('new-job-lat').value;
+        var lng = document.getElementById('new-job-lng').value;
+        var fd = new FormData();
+        fd.append('token', TOKEN);
+        fd.append('job_name', name);
+        if (addr) fd.append('job_address', addr);
+        if (lat) fd.append('latitude', lat);
+        if (lng) fd.append('longitude', lng);
+        fetch('/api/estimate/add-job', {method:'POST', body:fd})
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    var sel = document.getElementById('job-select');
+                    var opt = document.createElement('option');
+                    opt.value = data.job.id;
+                    opt.textContent = data.job.job_name;
+                    sel.appendChild(opt);
+                    sel.value = data.job.id;
+                    toggleAddJob();
+                    document.getElementById('new-job-name').value = '';
+                    document.getElementById('new-job-address').value = '';
+                    document.getElementById('new-job-lat').value = '';
+                    document.getElementById('new-job-lng').value = '';
+                    document.getElementById('gps-status').textContent = '';
+                } else {
+                    alert(data.error || 'Failed');
+                }
+            });
+    }
+
+    // --- Photo handling (FileReader for mobile compatibility) ---
+    var photoDataUrls = []; // parallel array of data URLs for previews
+
+    function onPhotosSelected(input) {
+        for (var i = 0; i < input.files.length; i++) {
+            (function(file) {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    photoFiles.push(file);
+                    photoDataUrls.push(e.target.result);
+                    updatePhotoPreview();
+                };
+                reader.readAsDataURL(file);
+            })(input.files[i]);
+        }
+        input.value = '';
+    }
+
+    function updatePhotoPreview() {
+        var container = document.getElementById('photo-preview');
+        container.innerHTML = '';
+        document.getElementById('photo-count').textContent = photoFiles.length ? photoFiles.length + ' photo(s)' : '';
+        photoFiles.forEach(function(file, idx) {
+            var div = document.createElement('div');
+            div.style.cssText = 'position:relative; width:80px; height:80px;';
+            var img = document.createElement('img');
+            img.src = photoDataUrls[idx];
+            img.style.cssText = 'width:80px; height:80px; object-fit:cover; border-radius:6px; border:2px solid #ddd;';
+            div.appendChild(img);
+            var btn = document.createElement('button');
+            btn.textContent = '\u00d7';
+            btn.style.cssText = 'position:absolute; top:-4px; right:-4px; background:#e53e3e; color:#fff; border:none; border-radius:50%; width:22px; height:22px; font-size:14px; cursor:pointer; line-height:22px; padding:0;';
+            btn.onclick = function() { photoFiles.splice(idx, 1); photoDataUrls.splice(idx, 1); updatePhotoPreview(); };
+            div.appendChild(btn);
+            container.appendChild(div);
+        });
+    }
+
+    // --- Audio recording ---
+    function getSupportedMimeType() {
+        var types = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/ogg;codecs=opus',
+            'audio/ogg',
+            'audio/mp4',
+            'audio/mpeg'
+        ];
+        for (var i = 0; i < types.length; i++) {
+            if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(types[i])) {
+                return types[i];
+            }
+        }
+        return '';
+    }
+
+    function toggleRecording() {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            stopRecording();
+        } else {
+            startRecording();
+        }
+    }
+
+    function startRecording() {
+        if (!hasMicSupport) {
+            alert('Microphone access is not supported on this device or browser. Try using Chrome or Safari.');
+            return;
+        }
+
+        var constraints = {audio: true};
+        navigator.mediaDevices.getUserMedia(constraints).then(function(stream) {
+            audioChunks = [];
+
+            var mimeType = getSupportedMimeType();
+            var options = {};
+            if (mimeType) {
+                options.mimeType = mimeType;
+            }
+
+            try {
+                mediaRecorder = new MediaRecorder(stream, options);
+            } catch (e) {
+                // Fallback: no options
+                mediaRecorder = new MediaRecorder(stream);
+            }
+
+            mediaRecorder.ondataavailable = function(e) {
+                if (e.data && e.data.size > 0) {
+                    audioChunks.push(e.data);
+                }
+            };
+            mediaRecorder.onstop = function() {
+                stream.getTracks().forEach(function(t) { t.stop(); });
+                var blobType = mediaRecorder.mimeType || 'audio/webm';
+                audioBlob = new Blob(audioChunks, {type: blobType});
+                document.getElementById('audio-playback').src = URL.createObjectURL(audioBlob);
+                document.getElementById('audio-preview').style.display = '';
+                document.getElementById('record-section').style.display = 'none';
+            };
+            mediaRecorder.onerror = function(e) {
+                alert('Recording error: ' + (e.error ? e.error.message : 'unknown'));
+                stream.getTracks().forEach(function(t) { t.stop(); });
+                clearInterval(recordingInterval);
+                document.getElementById('recording-status').style.display = 'none';
+                document.getElementById('btn-record').textContent = 'Start Recording';
+                document.getElementById('btn-record').className = 'btn';
+                document.getElementById('btn-record').style.cssText = 'width:100%; padding:14px; font-size:16px; background:var(--red); color:#fff; border:2px solid var(--red-dark, #b91c1c);';
+            };
+            mediaRecorder.start(1000); // collect data every 1s for reliability
+            document.getElementById('btn-record').textContent = 'Stop Recording';
+            document.getElementById('btn-record').className = 'btn btn-sm';
+            document.getElementById('btn-record').style.cssText = 'width:100%; background:var(--red); color:#fff;';
+            document.getElementById('recording-status').style.display = '';
+            recordingSeconds = 0;
+            recordingInterval = setInterval(function() {
+                recordingSeconds++;
+                var m = Math.floor(recordingSeconds / 60);
+                var s = recordingSeconds % 60;
+                document.getElementById('recording-timer').textContent = m + ':' + (s < 10 ? '0' : '') + s;
+            }, 1000);
+        }).catch(function(err) {
+            alert('Microphone access denied or not available. Error: ' + err.message);
+        });
+    }
+
+    function stopRecording() {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+        }
+        clearInterval(recordingInterval);
+        document.getElementById('recording-status').style.display = 'none';
+    }
+
+    function discardRecording() {
+        audioBlob = null;
+        document.getElementById('audio-preview').style.display = 'none';
+        document.getElementById('record-section').style.display = '';
+        document.getElementById('btn-record').textContent = 'Start Recording';
+        document.getElementById('btn-record').className = 'btn';
+        document.getElementById('btn-record').style.cssText = 'width:100%; padding:14px; font-size:16px; background:var(--red); color:#fff; border:2px solid var(--red-dark, #b91c1c);';
+    }
+
+    // --- Submit ---
+    function submitEstimate() {
+        var jobId = document.getElementById('job-select').value;
+        if (!jobId) { alert('Please select a job'); return; }
+
+        var caption = document.getElementById('estimate-caption').value.trim();
+
+        // At least one of caption, audio, or photos should be provided
+        if (!caption && !audioBlob && photoFiles.length === 0) {
+            alert('Please add at least a description, voice memo, or photos');
+            return;
+        }
+
+        document.getElementById('btn-submit').disabled = true;
+        document.getElementById('btn-submit').textContent = 'Submitting...';
+
+        showStatus('Uploading...');
+
+        function doEstimateUpload() {
+            // Upload photos first (reuse existing job photos API)
+            var photoPromises = photoFiles.map(function(file) {
+                var fd = new FormData();
+                fd.append('token', TOKEN);
+                fd.append('job_id', jobId);
+                fd.append('image', file);
+                if (currentLat !== null) fd.append('latitude', currentLat);
+                if (currentLng !== null) fd.append('longitude', currentLng);
+                return fetch('/api/job-photos/upload', {method: 'POST', body: fd}).then(function(r) { return r.json(); });
+            });
+
+            Promise.all(photoPromises).then(function() {
+            // Upload estimate (with or without audio)
+            var fd = new FormData();
+            fd.append('token', TOKEN);
+            fd.append('job_id', jobId);
+            fd.append('title', caption);
+            fd.append('customer_name', document.getElementById('customer-name').value.trim());
+            fd.append('customer_phone', document.getElementById('customer-phone').value.trim());
+            fd.append('customer_email', document.getElementById('customer-email').value.trim());
+            if (audioBlob) {
+                var ext = 'webm';
+                if (audioBlob.type.indexOf('ogg') !== -1) ext = 'ogg';
+                else if (audioBlob.type.indexOf('mp4') !== -1) ext = 'mp4';
+                fd.append('audio', audioBlob, 'estimate.' + ext);
+            }
+            return fetch('/api/estimate/upload', {method: 'POST', body: fd});
+        }).then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                // Go straight to the estimate detail page
+                window.location.href = '/my-estimates/' + data.estimate_id + '?token=' + TOKEN;
+            } else {
+                alert(data.error || 'Upload failed');
+                document.getElementById('status-area').style.display = 'none';
+                document.getElementById('btn-submit').disabled = false;
+                document.getElementById('btn-submit').textContent = 'Submit Estimate';
+            }
+        }).catch(function(err) {
+            alert('Error: ' + err.message);
+            document.getElementById('status-area').style.display = 'none';
+            document.getElementById('btn-submit').disabled = false;
+            document.getElementById('btn-submit').textContent = 'Submit Estimate';
+        });
+        }
+
+        // Get fresh GPS before uploading
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                function(pos) {
+                    currentLat = pos.coords.latitude;
+                    currentLng = pos.coords.longitude;
+                    doEstimateUpload();
+                },
+                function() { doEstimateUpload(); },
+                {enableHighAccuracy: true, timeout: 5000}
+            );
+        } else {
+            doEstimateUpload();
+        }
+    }
+
+    function showStatus(msg) {
+        document.getElementById('status-area').style.display = '';
+        document.getElementById('status-msg').innerHTML = '<div style="color:var(--blue); font-weight:600;">' + msg + '</div>';
+    }
+
+    function showResult(detail) {
+        document.getElementById('estimate-form').style.display = 'none';
+        document.getElementById('result-area').style.display = '';
+        document.getElementById('result-detail').textContent = detail;
+    }
+
+    function resetForm() {
+        document.getElementById('job-select').value = '';
+        document.getElementById('customer-name').value = '';
+        document.getElementById('customer-phone').value = '';
+        document.getElementById('customer-email').value = '';
+        photoFiles = [];
+        photoDataUrls = [];
+        updatePhotoPreview();
+        discardRecording();
+        document.getElementById('estimate-caption').value = '';
+        document.getElementById('btn-submit').disabled = false;
+        document.getElementById('btn-submit').textContent = 'Submit Estimate';
+        document.getElementById('status-area').style.display = 'none';
+        document.getElementById('result-area').style.display = 'none';
+        document.getElementById('estimate-form').style.display = '';
+    }
+    </script>
+</body>
+</html>

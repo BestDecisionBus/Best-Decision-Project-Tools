@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipt Library — {{ token_data.company_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+</head>
+<body>
+    <div class="capture-container">
+        <div class="capture-header">
+            {% if logo_url %}
+            <div class="header-row">
+                <img src="{{ logo_url }}" alt="{{ token_data.company_name }}" class="company-logo">
+                <div class="header-text">
+                    <div class="company-name">{{ token_data.company_name }}</div>
+                    <h1>Receipt Library</h1>
+                </div>
+            </div>
+            {% else %}
+            <div class="company-name">{{ token_data.company_name }}</div>
+            <h1>Receipt Library</h1>
+            {% endif %}
+            <a href="/c/{{ token }}" class="back-to-home">Back to Home</a>
+        </div>
+
+        {% if not job_id %}
+        {# Job selection screen #}
+        <p style="color: var(--gray-500); font-size: 14px; margin-bottom: 12px;">Select a job to view its receipts:</p>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            {% for job in jobs %}
+            <a href="/receipt-library?token={{ token }}&job_id={{ job.id }}"
+               style="display: block; padding: 14px 16px; background: #fff; border: 2px solid var(--gray-200); border-radius: 8px; font-size: 15px; font-weight: 600; color: var(--gray-800); text-decoration: none;">
+                {{ job.job_name }}
+                {% if job.job_address %}
+                <span style="display: block; font-weight: 400; font-size: 13px; color: var(--gray-500); margin-top: 2px;">{{ job.job_address }}</span>
+                {% endif %}
+            </a>
+            {% endfor %}
+            {% if not jobs %}
+            <div style="text-align: center; padding: 32px; color: var(--gray-500);">
+                <p>No jobs found.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        {% else %}
+        {# Job selected — show search + results #}
+        <div style="margin-bottom: 12px;">
+            <a href="/receipt-library?token={{ token }}" style="color: var(--blue); font-size: 14px; text-decoration: none;">&larr; All Jobs</a>
+            {% if selected_job %}
+            <h3 style="margin: 4px 0 0;">{{ selected_job.job_name }}</h3>
+            {% endif %}
+        </div>
+
+        <div style="margin-bottom: 16px;">
+            <form method="GET" action="/receipt-library" style="display: block; min-width: 0; width: 100%;">
+                <input type="hidden" name="token" value="{{ token }}">
+                <input type="hidden" name="job_id" value="{{ job_id }}">
+                <input type="text" name="search" placeholder="Search transcriptions..." value="{{ search }}"
+                       style="display: block; width: 100%; padding: 10px 12px; border: 1px solid var(--gray-300); border-radius: 6px; font-size: 15px; margin-bottom: 8px; box-sizing: border-box;">
+                <label style="display: block; font-size: 13px; font-weight: 600; color: var(--gray-600); margin-bottom: 4px;">From Date</label>
+                <input type="date" name="date_from" value="{{ date_from }}"
+                       style="display: block; padding: 10px 12px; border: 1px solid var(--gray-300); border-radius: 6px; font-size: 15px; margin-bottom: 8px; box-sizing: border-box; -webkit-appearance: none; appearance: none;">
+                <label style="display: block; font-size: 13px; font-weight: 600; color: var(--gray-600); margin-bottom: 4px;">To Date</label>
+                <input type="date" name="date_to" value="{{ date_to }}"
+                       style="display: block; padding: 10px 12px; border: 1px solid var(--gray-300); border-radius: 6px; font-size: 15px; margin-bottom: 8px; box-sizing: border-box; -webkit-appearance: none; appearance: none;">
+                <div style="display: flex; gap: 8px;">
+                    <button type="submit" class="btn btn-blue" style="flex: 1; padding: 10px; font-size: 15px;">Search</button>
+                    {% if search or date_from or date_to %}
+                    <a href="/receipt-library?token={{ token }}&job_id={{ job_id }}" class="btn" style="flex: 1; padding: 10px; font-size: 15px; background: var(--gray-400); color: #fff; text-align: center;">Clear</a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+
+        {% if receipts %}
+        <div class="library-grid">
+            {% for r in receipts %}
+            <a href="/receipt-library/{{ r.id }}?token={{ token }}" class="library-card">
+                <img src="/api/receipt-image/{{ r.id }}?token={{ token }}&thumb=1" alt="Receipt" loading="lazy">
+                <div class="library-card-info">
+                    <div style="font-weight: 600; color: var(--gray-800);">{{ r.job_name or 'No job' }}</div>
+                    <div style="color: var(--gray-500);">{{ r.timestamp[:10] if r.timestamp else '' }}</div>
+                    {% if r.transcription %}
+                    <div style="color: var(--gray-400); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ r.transcription[:60] }}</div>
+                    {% endif %}
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="text-align: center; padding: 32px; color: var(--gray-500);">
+            <p>No receipts found{% if search or date_from or date_to %} matching your filters{% endif %}.</p>
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+</body>
+</html>
