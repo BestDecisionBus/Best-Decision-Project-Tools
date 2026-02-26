@@ -348,6 +348,12 @@ def init_db():
     _add_column_if_missing(conn, "estimates", "client_budget", "REAL DEFAULT 0")
     _add_column_if_missing(conn, "estimates", "append_audio_file", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "submissions", "vendor", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "products_services", "unit_cost", "REAL DEFAULT 0")
+    _add_column_if_missing(conn, "products_services", "item_type", "TEXT DEFAULT 'product'")
+    _add_column_if_missing(conn, "estimate_items", "item_type", "TEXT DEFAULT 'product'")
+    _add_column_if_missing(conn, "estimate_items", "unit_cost", "REAL DEFAULT 0")
+    _add_column_if_missing(conn, "jobs", "is_archived", "INTEGER DEFAULT 0")
+    _add_column_if_missing(conn, "estimates", "completed_at", "TEXT DEFAULT ''")
     conn.commit()
 
     # Migrate legacy category_1_id / category_2_id into junction table
@@ -881,6 +887,28 @@ def toggle_job(job_id):
     conn = get_db()
     conn.execute(
         "UPDATE jobs SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?",
+        (job_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def archive_job(job_id):
+    """Archive a job: marks it inactive and sets is_archived=1."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE jobs SET is_archived = 1, is_active = 0 WHERE id = ?",
+        (job_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def unarchive_job(job_id):
+    """Unarchive a job: clears is_archived (leaves is_active unchanged)."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE jobs SET is_archived = 0 WHERE id = ?",
         (job_id,),
     )
     conn.commit()
@@ -1925,10 +1953,71 @@ def get_weekly_job_costs(token_str):
     }
 
 
+def get_alltime_job_costs(token_str):
+    """Same as get_weekly_job_costs but covers all completed time entries (no date filter)."""
+    conn = get_db()
+
+    token_row = conn.execute(
+        "SELECT labor_burden_pct FROM tokens WHERE token = ?", (token_str,)
+    ).fetchone()
+    burden_pct = token_row["labor_burden_pct"] if token_row else 0
+
+    rows = conn.execute(
+        """SELECT te.employee_id, te.total_hours, te.clock_in_time,
+                  e.hourly_wage, j.id as job_id, j.job_name
+           FROM time_entries te
+           JOIN jobs j ON te.job_id = j.id
+           JOIN employees e ON te.employee_id = e.id
+           WHERE te.token = ? AND te.total_hours IS NOT NULL
+           ORDER BY j.job_name""",
+        (token_str,),
+    ).fetchall()
+    conn.close()
+
+    entries = [dict(r) for r in rows]
+    eff_rates = _compute_effective_rates(entries)
+
+    from collections import defaultdict
+    job_agg = defaultdict(lambda: {"hours": 0.0, "base": 0.0})
+    for e in entries:
+        hrs = float(e["total_hours"] or 0)
+        if hrs <= 0:
+            continue
+        jid = e["job_id"]
+        job_agg[jid]["job_name"] = e["job_name"]
+        job_agg[jid]["hours"] += hrs
+        week = _get_week_start_sunday(e["clock_in_time"])
+        rate_info = eff_rates.get((e["employee_id"], week))
+        if rate_info and rate_info["effective_rate"]:
+            job_agg[jid]["base"] += hrs * rate_info["effective_rate"]
+
+    jobs = []
+    total_hours = 0.0
+    total_cost = 0.0
+    for jid, jd in sorted(job_agg.items(), key=lambda x: x[1]["hours"], reverse=True):
+        hours = round(jd["hours"], 2)
+        base = round(jd["base"], 2)
+        burden = round(base * (burden_pct / 100), 2)
+        cost = round(base + burden, 2)
+        total_hours += hours
+        total_cost += cost
+        jobs.append({
+            "job_name": jd["job_name"],
+            "hours": hours,
+            "total_cost": cost,
+        })
+
+    return {
+        "jobs": jobs,
+        "total_hours": round(total_hours, 2),
+        "total_cost": round(total_cost, 2),
+    }
+
+
 def get_job_financials(token_str, active_only=None):
     """Aggregate financial data per job from accepted/completed estimates."""
     conn = get_db()
-    sql = """SELECT j.id, j.job_name, j.is_active,
+    sql = """SELECT j.id, j.job_name, j.is_active, j.is_archived,
                     COALESCE(SUM(e.estimate_value), 0) AS budget,
                     COALESCE(SUM(e.est_materials_cost), 0) AS est_materials,
                     COALESCE(SUM(e.est_labor_cost), 0) AS est_labor,
@@ -1936,7 +2025,11 @@ def get_job_financials(token_str, active_only=None):
                     COALESCE(SUM(e.actual_labor_cost), 0) AS actual_labor,
                     COALESCE(SUM(e.actual_collected), 0) AS actual_collected,
                     COALESCE(AVG(e.completion_pct), 0) AS avg_completion_pct,
-                    COUNT(e.id) AS estimate_count
+                    COUNT(e.id) AS estimate_count,
+                    COUNT(CASE WHEN e.approval_status = 'completed' THEN 1 END) AS completed_estimate_count,
+                    COUNT(CASE WHEN e.approval_status IN ('accepted','in_progress') THEN 1 END) AS active_estimate_count,
+                    MAX(CASE WHEN e.approval_status = 'completed'
+                             THEN COALESCE(NULLIF(e.completed_at,''), e.created_at) END) AS last_completed_at
              FROM jobs j
              LEFT JOIN estimates e ON e.job_id = j.id
                   AND e.approval_status IN ('accepted','in_progress','completed')
@@ -2714,6 +2807,9 @@ def update_estimate_error(estimate_id, error_msg):
 
 def update_estimate(estimate_id, **kwargs):
     """Update estimate fields. Accepts: title, transcription, notes, status."""
+    # Auto-stamp completed_at when approval_status is set to 'completed'
+    if kwargs.get("approval_status") == "completed" and not kwargs.get("completed_at"):
+        kwargs["completed_at"] = datetime.now().isoformat()
     conn = get_db()
     allowed = {"title", "transcription", "notes", "status", "approval_status", "estimate_value",
                 "est_materials_cost", "est_labor_cost", "actual_materials_cost", "actual_labor_cost",
@@ -2721,7 +2817,7 @@ def update_estimate(estimate_id, **kwargs):
                 "customer_name", "customer_phone", "customer_email",
                 "estimate_number", "date_accepted", "expected_completion",
                 "sales_tax_rate", "customer_message", "completion_pct", "job_id",
-                "client_budget", "append_audio_file"}
+                "client_budget", "append_audio_file", "completed_at"}
     sets = []
     params = []
     for k, v in kwargs.items():
@@ -2909,14 +3005,14 @@ def get_estimate_items(estimate_id):
 
 
 def create_estimate_item(estimate_id, token_str, description, quantity, unit_price,
-                         total, taxable=0, sort_order=0):
+                         total, taxable=0, sort_order=0, item_type='product', unit_cost=0):
     conn = get_db()
     now = datetime.now().isoformat()
     cur = conn.execute(
         """INSERT INTO estimate_items
-           (estimate_id, token, description, quantity, unit_price, total, taxable, sort_order, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (estimate_id, token_str, description, quantity, unit_price, total, taxable, sort_order, now),
+           (estimate_id, token, description, quantity, unit_price, unit_cost, total, taxable, sort_order, item_type, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (estimate_id, token_str, description, quantity, unit_price, unit_cost, total, taxable, sort_order, item_type, now),
     )
     item_id = cur.lastrowid
     conn.commit()
@@ -2927,7 +3023,7 @@ def create_estimate_item(estimate_id, token_str, description, quantity, unit_pri
 
 def update_estimate_item(item_id, **kwargs):
     conn = get_db()
-    allowed = {"description", "quantity", "unit_price", "total", "taxable", "sort_order"}
+    allowed = {"description", "quantity", "unit_price", "unit_cost", "total", "taxable", "sort_order", "item_type"}
     sets = []
     params = []
     for k, v in kwargs.items():
@@ -3038,12 +3134,12 @@ def get_product_service(ps_id):
     return dict(row) if row else None
 
 
-def create_product_service(name, unit_price, token_str, sort_order=0):
+def create_product_service(name, unit_price, token_str, sort_order=0, unit_cost=0, item_type='product'):
     conn = get_db()
     now = datetime.now().isoformat()
     cur = conn.execute(
-        "INSERT INTO products_services (name, unit_price, token, sort_order, created_at) VALUES (?, ?, ?, ?, ?)",
-        (name, unit_price, token_str, sort_order, now),
+        "INSERT INTO products_services (name, unit_price, unit_cost, item_type, token, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (name, unit_price, unit_cost, item_type, token_str, sort_order, now),
     )
     ps_id = cur.lastrowid
     conn.commit()
@@ -3052,25 +3148,20 @@ def create_product_service(name, unit_price, token_str, sort_order=0):
     return dict(row) if row else None
 
 
-def update_product_service(ps_id, name, unit_price=None, sort_order=None):
+def update_product_service(ps_id, **kwargs):
     conn = get_db()
-    if unit_price is not None and sort_order is not None:
-        conn.execute(
-            "UPDATE products_services SET name = ?, unit_price = ?, sort_order = ? WHERE id = ?",
-            (name, unit_price, sort_order, ps_id),
-        )
-    elif unit_price is not None:
-        conn.execute(
-            "UPDATE products_services SET name = ?, unit_price = ? WHERE id = ?",
-            (name, unit_price, ps_id),
-        )
-    elif sort_order is not None:
-        conn.execute(
-            "UPDATE products_services SET name = ?, sort_order = ? WHERE id = ?",
-            (name, sort_order, ps_id),
-        )
-    else:
-        conn.execute("UPDATE products_services SET name = ? WHERE id = ?", (name, ps_id))
+    allowed = {"name", "unit_price", "unit_cost", "sort_order", "item_type"}
+    sets = []
+    params = []
+    for k, v in kwargs.items():
+        if k in allowed:
+            sets.append(f"{k} = ?")
+            params.append(v)
+    if not sets:
+        conn.close()
+        return
+    params.append(ps_id)
+    conn.execute(f"UPDATE products_services SET {', '.join(sets)} WHERE id = ?", params)
     conn.commit()
     conn.close()
 

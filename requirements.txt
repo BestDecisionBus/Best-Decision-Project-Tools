@@ -8,3 +8,5 @@ fpdf2==2.8.3
 Pillow
 piexif
 openai-whisper
+torch==2.9.0+cu130
+--extra-index-url https://download.pytorch.org/whl/cu130

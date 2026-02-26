@@ -7,7 +7,7 @@ from functools import wraps
 
 from flask import (
     Flask, abort, flash, jsonify, redirect, render_template, request,
-    session, url_for,
+    send_from_directory, session, url_for,
 )
 from flask_login import (
     LoginManager, UserMixin, current_user, login_required, login_user,
@@ -32,6 +32,43 @@ login_manager.init_app(app)
 login_manager.login_view = "login"
 
 _cache_bust = str(int(time.time()))
+
+
+# ---------------------------------------------------------------------------
+# PWA / home screen icon routes
+# ---------------------------------------------------------------------------
+
+@app.route("/apple-touch-icon.png")
+@app.route("/apple-touch-icon-precomposed.png")
+def apple_touch_icon():
+    return send_from_directory("static/icons", "apple-touch-icon.png")
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return send_from_directory("static/icons", "apple-touch-icon.png")
+
+
+@app.route("/c/<token_str>/manifest.json")
+def company_manifest(token_str):
+    token_data = database.get_token(token_str)
+    if not token_data or not token_data["is_active"]:
+        return jsonify({}), 404
+    from flask import Response
+    import json
+    manifest = {
+        "name": token_data["company_name"],
+        "short_name": token_data["company_name"],
+        "start_url": f"/c/{token_str}",
+        "display": "standalone",
+        "background_color": "#ffffff",
+        "theme_color": "#ffffff",
+        "icons": [
+            {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        ],
+    }
+    return Response(json.dumps(manifest), mimetype="application/manifest+json")
 
 
 # ---------------------------------------------------------------------------

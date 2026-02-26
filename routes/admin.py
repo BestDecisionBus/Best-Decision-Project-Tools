@@ -101,7 +101,7 @@ def admin_dashboard():
             tokens=tokens, selected_token=None,
             stats={}, company_summaries=company_summaries,
             active_entries=[], needs_review=[], todays_schedules=[],
-            payroll_estimate=None, job_costs=None,
+            payroll_estimate=None, combined_job_costs=None,
         )
 
     # Company dashboard — operations view
@@ -110,7 +110,7 @@ def admin_dashboard():
     needs_review = []
     todays_schedules = []
     payroll_estimate = None
-    job_costs = None
+    combined_job_costs = None
     estimate_stats = None
     if token_str:
         stats = database.get_dashboard_stats(token_str)
@@ -118,10 +118,35 @@ def admin_dashboard():
         needs_review = database.get_needs_review_entries(token_str, limit=10)
         todays_schedules = database.get_todays_schedules(token_str)
         payroll_estimate = database.get_weekly_payroll_estimate(token_str)
-        job_costs = database.get_weekly_job_costs(token_str)
+        weekly_job_costs = database.get_weekly_job_costs(token_str)
+        alltime_job_costs = database.get_alltime_job_costs(token_str)
         estimate_stats = database.get_estimate_stats(token_str)
         # Add payroll total to stats for the stat card
         stats["est_weekly_payroll"] = payroll_estimate["total_cost"]
+
+        # Merge weekly and all-time job cost data into a single combined structure
+        weekly_by_name = {j["job_name"]: j for j in (weekly_job_costs.get("jobs") or [])}
+        alltime_by_name = {j["job_name"]: j for j in (alltime_job_costs.get("jobs") or [])}
+        all_job_names = set(weekly_by_name.keys()) | set(alltime_by_name.keys())
+        merged_jobs = []
+        for name in all_job_names:
+            w = weekly_by_name.get(name, {"hours": 0, "total_cost": 0})
+            a = alltime_by_name.get(name, {"hours": 0, "total_cost": 0})
+            merged_jobs.append({
+                "job_name": name,
+                "week_hours": w["hours"],
+                "week_cost": w["total_cost"],
+                "alltime_hours": a["hours"],
+                "alltime_cost": a["total_cost"],
+            })
+        merged_jobs.sort(key=lambda x: x["alltime_hours"], reverse=True)
+        combined_job_costs = {
+            "jobs": merged_jobs,
+            "total_week_hours": weekly_job_costs.get("total_hours", 0),
+            "total_week_cost": weekly_job_costs.get("total_cost", 0),
+            "total_alltime_hours": alltime_job_costs.get("total_hours", 0),
+            "total_alltime_cost": alltime_job_costs.get("total_cost", 0),
+        } if merged_jobs else None
 
     return render_template(
         "admin/dashboard.html",
@@ -131,7 +156,7 @@ def admin_dashboard():
         needs_review=needs_review,
         todays_schedules=todays_schedules,
         payroll_estimate=payroll_estimate,
-        job_costs=job_costs,
+        combined_job_costs=combined_job_costs,
         estimate_stats=estimate_stats,
     )
 
@@ -675,7 +700,14 @@ def admin_product_service_create():
             sort_order_int = int(sort_order)
         except (ValueError, TypeError):
             sort_order_int = 0
-        database.create_product_service(name, unit_price, token_str, sort_order_int)
+        try:
+            unit_cost = float(request.form.get("unit_cost", "0").strip())
+        except (ValueError, TypeError):
+            unit_cost = 0
+        item_type = request.form.get("item_type", "product").strip()
+        if item_type not in ("product", "service"):
+            item_type = "product"
+        database.create_product_service(name, unit_price, token_str, sort_order_int, unit_cost, item_type)
         flash(f"Product/service '{name}' created.", "success")
     return redirect(url_for("admin.admin_products_services", token=token_str))
 
@@ -700,10 +732,26 @@ def admin_product_service_update(ps_id):
     except (ValueError, TypeError):
         unit_price = None
     try:
+        unit_cost = float(data["unit_cost"]) if "unit_cost" in data else None
+    except (ValueError, TypeError):
+        unit_cost = None
+    try:
         sort_order_int = int(data["sort_order"]) if "sort_order" in data else None
     except (ValueError, TypeError):
         sort_order_int = None
-    database.update_product_service(ps_id, name, unit_price, sort_order_int)
+    item_type = data.get("item_type")
+    if item_type not in (None, "product", "service"):
+        item_type = "product"
+    updates = {"name": name}
+    if unit_price is not None:
+        updates["unit_price"] = unit_price
+    if unit_cost is not None:
+        updates["unit_cost"] = unit_cost
+    if sort_order_int is not None:
+        updates["sort_order"] = sort_order_int
+    if item_type is not None:
+        updates["item_type"] = item_type
+    database.update_product_service(ps_id, **updates)
     return jsonify({"success": True})
 
 

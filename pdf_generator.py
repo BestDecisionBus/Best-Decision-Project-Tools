@@ -560,20 +560,27 @@ def generate_client_estimate_pdf(output_path, estimate, job, items, token_data, 
             else:
                 fill = False
 
+            row_total = round(float(item.get("quantity", 0) or 0) * float(item.get("unit_price", 0) or 0), 2)
             pdf.set_x(pdf.l_margin)
             pdf.cell(col_num, row_h, str(i), border=1, fill=fill, align="C")
             pdf.cell(col_desc, row_h, str(item.get("description", ""))[:60], border=1, fill=fill)
             pdf.cell(col_qty, row_h, str(item.get("quantity", 0)), border=1, fill=fill, align="C")
             pdf.cell(col_price, row_h, f"${item.get('unit_price', 0):,.2f}", border=1, fill=fill, align="R")
-            pdf.cell(col_total, row_h, f"${item.get('total', 0):,.2f}", border=1, fill=fill, align="R",
+            pdf.cell(col_total, row_h, f"${row_total:,.2f}", border=1, fill=fill, align="R",
                      new_x="LMARGIN", new_y="NEXT")
 
     pdf.ln(4)
 
     # --- Totals ---
-    subtotal = sum(item.get("total", 0) for item in items)
+    subtotal = sum(
+        round(float(item.get("quantity", 0) or 0) * float(item.get("unit_price", 0) or 0), 2)
+        for item in items
+    )
     tax_rate = estimate.get("sales_tax_rate", 0) or 0
-    taxable_total = sum(item.get("total", 0) for item in items if item.get("taxable"))
+    taxable_total = sum(
+        round(float(item.get("quantity", 0) or 0) * float(item.get("unit_price", 0) or 0), 2)
+        for item in items if item.get("taxable")
+    )
     sales_tax = taxable_total * (tax_rate / 100)
     grand_total = subtotal + sales_tax
 

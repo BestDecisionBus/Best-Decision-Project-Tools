@@ -402,6 +402,30 @@ def admin_job_toggle(job_id):
     return redirect(url_for("time_admin.admin_jobs", token=job["token"] if job else ""))
 
 
+@time_admin_bp.route("/admin/jobs/<int:job_id>/archive", methods=["POST"])
+@login_required
+def admin_job_archive(job_id):
+    _app = _helpers()
+    job = database.get_job(job_id)
+    if job:
+        _app._verify_token_access(job["token"])
+    database.archive_job(job_id)
+    flash("Job archived.", "success")
+    return redirect(url_for("time_admin.admin_jobs", token=job["token"] if job else ""))
+
+
+@time_admin_bp.route("/admin/jobs/<int:job_id>/unarchive", methods=["POST"])
+@login_required
+def admin_job_unarchive(job_id):
+    _app = _helpers()
+    job = database.get_job(job_id)
+    if job:
+        _app._verify_token_access(job["token"])
+    database.unarchive_job(job_id)
+    flash("Job unarchived.", "success")
+    return redirect(url_for("time_admin.admin_jobs", token=job["token"] if job else ""))
+
+
 # ---------------------------------------------------------------------------
 # Time Entries - Admin Browse
 # ---------------------------------------------------------------------------

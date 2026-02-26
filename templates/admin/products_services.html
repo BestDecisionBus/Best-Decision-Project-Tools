@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Products & Services — BDB Tools</title>
     <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
 </head>
 <body>
     <div class="admin-layout">
@@ -51,6 +54,17 @@
                         <input type="number" id="ps-price" name="unit_price" value="0.00" step="0.01" min="0">
                     </div>
                     <div class="form-group" style="flex: 1;">
+                        <label for="ps-cost">Unit Cost ($)</label>
+                        <input type="number" id="ps-cost" name="unit_cost" value="0.00" step="0.01" min="0" placeholder="0.00">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="ps-type">Type</label>
+                        <select id="ps-type" name="item_type">
+                            <option value="product">Product</option>
+                            <option value="service">Service</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
                         <label for="ps-sort">Sort Order</label>
                         <input type="number" id="ps-sort" name="sort_order" value="0" step="1">
                     </div>
@@ -69,6 +83,8 @@
                     <tr>
                         <th>Name</th>
                         <th>Unit Price</th>
+                        <th>Unit Cost</th>
+                        <th>Type</th>
                         <th>Sort Order</th>
                         <th>Status</th>
                         <th>Actions</th>
@@ -86,6 +102,25 @@
                             <span id="psprice-display-{{ p.id }}">${{ '{:.2f}'.format(p.unit_price or 0) }}</span>
                             <input type="number" id="psprice-input-{{ p.id }}" value="{{ '{:.2f}'.format(p.unit_price or 0) }}"
                                    step="0.01" min="0" style="display: none; width: 100px;">
+                        </td>
+                        <td>
+                            <span id="pscost-display-{{ p.id }}">${{ '{:.2f}'.format(p.unit_cost or 0) }}</span>
+                            <input type="number" id="pscost-input-{{ p.id }}" value="{{ '{:.2f}'.format(p.unit_cost or 0) }}"
+                                   step="0.01" min="0" style="display: none; width: 100px;">
+                        </td>
+                        <td>
+                            {% set ptype = p.item_type or 'product' %}
+                            <span id="pstype-display-{{ p.id }}">
+                                {% if ptype == 'service' %}
+                                <span class="badge" style="background:#7c3aed; color:#fff;">Service</span>
+                                {% else %}
+                                <span class="badge" style="background:#2563eb; color:#fff;">Product</span>
+                                {% endif %}
+                            </span>
+                            <select id="pstype-input-{{ p.id }}" style="display: none;">
+                                <option value="product" {% if ptype == 'product' %}selected{% endif %}>Product</option>
+                                <option value="service" {% if ptype == 'service' %}selected{% endif %}>Service</option>
+                            </select>
                         </td>
                         <td>
                             <span id="pssort-display-{{ p.id }}">{{ p.sort_order }}</span>
@@ -130,6 +165,10 @@
         var nameInput = document.getElementById('psname-input-' + id);
         var priceDisplay = document.getElementById('psprice-display-' + id);
         var priceInput = document.getElementById('psprice-input-' + id);
+        var costDisplay = document.getElementById('pscost-display-' + id);
+        var costInput = document.getElementById('pscost-input-' + id);
+        var typeDisplay = document.getElementById('pstype-display-' + id);
+        var typeInput = document.getElementById('pstype-input-' + id);
         var sortDisplay = document.getElementById('pssort-display-' + id);
         var sortInput = document.getElementById('pssort-input-' + id);
         var editBtn = document.getElementById('psedit-btn-' + id);
@@ -139,6 +178,10 @@
         nameInput.style.display = editing ? '' : 'none';
         priceDisplay.style.display = editing ? 'none' : '';
         priceInput.style.display = editing ? '' : 'none';
+        costDisplay.style.display = editing ? 'none' : '';
+        costInput.style.display = editing ? '' : 'none';
+        typeDisplay.style.display = editing ? 'none' : '';
+        typeInput.style.display = editing ? '' : 'none';
         sortDisplay.style.display = editing ? 'none' : '';
         sortInput.style.display = editing ? '' : 'none';
         editBtn.style.display = editing ? 'none' : '';
@@ -148,11 +191,13 @@
     function savePs(id) {
         var name = document.getElementById('psname-input-' + id).value;
         var unit_price = document.getElementById('psprice-input-' + id).value;
+        var unit_cost = document.getElementById('pscost-input-' + id).value;
+        var item_type = document.getElementById('pstype-input-' + id).value;
         var sort_order = document.getElementById('pssort-input-' + id).value;
         fetch('/admin/products-services/' + id + '/update', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({name: name, unit_price: unit_price, sort_order: sort_order})
+            body: JSON.stringify({name: name, unit_price: unit_price, unit_cost: unit_cost, item_type: item_type, sort_order: sort_order})
         }).then(function(resp) {
             if (resp.ok) { window._guardBypass = true; window.location.reload(); }
             else { alert('Error saving product/service.'); }

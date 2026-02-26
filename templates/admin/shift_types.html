@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Shift Types — BDB Tools</title>
     <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
 </head>
 <body>
     <div class="admin-layout">
@@ -91,12 +94,12 @@
                                    style="display: none; width: 100%;">
                         </td>
                         <td>
-                            <span id="ststart-display-{{ s.id }}">{{ s.start_time }}</span>
+                            <span id="ststart-display-{{ s.id }}">{{ s.start_time|time12 }}</span>
                             <input type="time" id="ststart-input-{{ s.id }}" value="{{ s.start_time }}"
                                    style="display: none; width: 100%;">
                         </td>
                         <td>
-                            <span id="stend-display-{{ s.id }}">{{ s.end_time }}</span>
+                            <span id="stend-display-{{ s.id }}">{{ s.end_time|time12 }}</span>
                             <input type="time" id="stend-input-{{ s.id }}" value="{{ s.end_time }}"
                                    style="display: none; width: 100%;">
                         </td>

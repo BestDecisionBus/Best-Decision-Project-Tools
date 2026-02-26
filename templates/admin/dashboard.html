@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard — BDB Tools</title>
     <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
 </head>
 <body>
     <div class="admin-layout">
@@ -103,7 +106,40 @@
         </div>
         {% endif %}
 
-        {# Section 1: Who's Clocked In Now #}
+        {# Section 1: Today's Schedule #}
+        <div class="dash-section">
+            <h3 class="dash-section-title">Today's Schedule</h3>
+            {% if todays_schedules %}
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Employee</th>
+                            <th>Job</th>
+                            <th>Start</th>
+                            <th>End</th>
+                            <th>Shift</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in todays_schedules %}
+                        <tr>
+                            <td>{{ s.employee_name }}</td>
+                            <td>{{ s.job_name }}</td>
+                            <td>{{ s.start_time|time12 }}</td>
+                            <td>{{ s.end_time|time12 }}</td>
+                            <td><span class="shift-badge shift-badge-{{ s.shift_type }}">{{ s.shift_type }}</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="dash-empty">No schedules for today.</p>
+            {% endif %}
+        </div>
+
+        {# Section 2: Who's Clocked In Now #}
         <div class="dash-section">
             <h3 class="dash-section-title">Who's Clocked In Now</h3>
             {% if active_entries %}
@@ -135,39 +171,6 @@
             </div>
             {% else %}
             <p class="dash-empty">No one clocked in right now.</p>
-            {% endif %}
-        </div>
-
-        {# Section 2: Today's Schedule #}
-        <div class="dash-section">
-            <h3 class="dash-section-title">Today's Schedule</h3>
-            {% if todays_schedules %}
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Employee</th>
-                            <th>Job</th>
-                            <th>Start</th>
-                            <th>End</th>
-                            <th>Shift</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for s in todays_schedules %}
-                        <tr>
-                            <td>{{ s.employee_name }}</td>
-                            <td>{{ s.job_name }}</td>
-                            <td>{{ s.start_time|time12 }}</td>
-                            <td>{{ s.end_time|time12 }}</td>
-                            <td><span class="shift-badge shift-badge-{{ s.shift_type }}">{{ s.shift_type }}</span></td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <p class="dash-empty">No schedules for today.</p>
             {% endif %}
         </div>
 
@@ -218,33 +221,39 @@
         </div>
         {% endif %}
 
-        {# Section 5: Weekly Job Costs #}
-        {% if job_costs and job_costs.jobs %}
+        {# Section 5: Job Labor Costs — Week to Date + All Time #}
+        {% if combined_job_costs and combined_job_costs.jobs %}
         <div class="dash-section">
-            <h3 class="dash-section-title">Job Hours &amp; Cost Estimate — Week to Date</h3>
+            <h3 class="dash-section-title">Labor Cost by Job</h3>
             <div class="table-wrap">
                 <table>
                     <thead>
                         <tr>
                             <th>Job</th>
-                            <th style="text-align: right;">Hours</th>
-                            <th style="text-align: right;">Est. Total Cost</th>
+                            <th style="text-align: right;">This Week Hrs</th>
+                            <th style="text-align: right;">This Week Cost</th>
+                            <th style="text-align: right;">All Time Hrs</th>
+                            <th style="text-align: right;">All Time Cost</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for j in job_costs.jobs %}
+                        {% for j in combined_job_costs.jobs %}
                         <tr>
                             <td>{{ j.job_name }}</td>
-                            <td style="text-align: right;">{{ j.hours }}</td>
-                            <td style="text-align: right; font-weight: 600;">${{ '{:,.2f}'.format(j.total_cost) }}</td>
+                            <td style="text-align: right;">{{ j.week_hours }}</td>
+                            <td style="text-align: right;">${{ '{:,.2f}'.format(j.week_cost) }}</td>
+                            <td style="text-align: right;">{{ j.alltime_hours }}</td>
+                            <td style="text-align: right; font-weight: 600;">${{ '{:,.2f}'.format(j.alltime_cost) }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                     <tfoot>
                         <tr style="font-weight: 700; border-top: 2px solid var(--gray-300);">
                             <td>Total</td>
-                            <td style="text-align: right;">{{ job_costs.total_hours }}</td>
-                            <td style="text-align: right;">${{ '{:,.2f}'.format(job_costs.total_cost) }}</td>
+                            <td style="text-align: right;">{{ combined_job_costs.total_week_hours }}</td>
+                            <td style="text-align: right;">${{ '{:,.2f}'.format(combined_job_costs.total_week_cost) }}</td>
+                            <td style="text-align: right;">{{ combined_job_costs.total_alltime_hours }}</td>
+                            <td style="text-align: right;">${{ '{:,.2f}'.format(combined_job_costs.total_alltime_cost) }}</td>
                         </tr>
                     </tfoot>
                 </table>

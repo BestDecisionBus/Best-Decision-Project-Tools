@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CFO Dashboard — BDB Tools</title>
     <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
 </head>
 <body>
     <div class="admin-layout">
@@ -346,7 +349,7 @@
 
         {# ── Row 6: Payroll & Labor (condensed) ── #}
         <h3 style="margin-bottom: 12px;">Payroll & Labor</h3>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
             <div class="stat-card stat-blue">
                 <div class="stat-label">This Week</div>
                 <div class="stat-value">${{ '{:,.2f}'.format(labor_stats.weekly.total_cost) }}</div>
@@ -359,14 +362,62 @@
             </div>
         </div>
 
-        {# ── Row 7: Completed Projects ── #}
-        {% if completed_jobs %}
-        <h3 style="margin-bottom: 12px;">Completed Projects</h3>
+        {# Labor Cost by Job #}
+        {% if combined_job_costs and combined_job_costs.jobs %}
         <div class="table-responsive" style="margin-bottom: 32px;">
             <table class="admin-table">
                 <thead>
                     <tr>
                         <th>Job</th>
+                        <th style="text-align: right;">This Week Hrs</th>
+                        <th style="text-align: right;">This Week Cost</th>
+                        <th style="text-align: right;">All Time Hrs</th>
+                        <th style="text-align: right;">All Time Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for j in combined_job_costs.jobs %}
+                    <tr>
+                        <td>{{ j.job_name }}</td>
+                        <td style="text-align: right;">{{ j.week_hours }}</td>
+                        <td style="text-align: right;">${{ '{:,.2f}'.format(j.week_cost) }}</td>
+                        <td style="text-align: right;">{{ j.alltime_hours }}</td>
+                        <td style="text-align: right; font-weight: 600;">${{ '{:,.2f}'.format(j.alltime_cost) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr style="font-weight: 700; border-top: 2px solid var(--gray-300);">
+                        <td>Total</td>
+                        <td style="text-align: right;">{{ combined_job_costs.total_week_hours }}</td>
+                        <td style="text-align: right;">${{ '{:,.2f}'.format(combined_job_costs.total_week_cost) }}</td>
+                        <td style="text-align: right;">{{ combined_job_costs.total_alltime_hours }}</td>
+                        <td style="text-align: right;">${{ '{:,.2f}'.format(combined_job_costs.total_alltime_cost) }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+            <p style="font-size: 12px; color: var(--gray-400); margin-top: 8px; font-style: italic;">Estimate only — Not for bookkeeping purposes</p>
+        </div>
+        {% endif %}
+
+        {# ── Row 7: Completed Projects ── #}
+        {% if completed_jobs %}
+        <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px;">
+            <h3 style="margin: 0;">Completed Projects</h3>
+            <div style="display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap;">
+                <label style="font-size: 13px; color: var(--gray-500); margin: 0;">From</label>
+                <input type="date" id="cp-date-from" style="font-size: 13px; padding: 4px 6px;" onchange="filterCompleted()">
+                <label style="font-size: 13px; color: var(--gray-500); margin: 0;">To</label>
+                <input type="date" id="cp-date-to" style="font-size: 13px; padding: 4px 6px;" onchange="filterCompleted()">
+                <button type="button" class="btn btn-sm" style="font-size: 12px; background: var(--gray-200); color: var(--gray-700);" onclick="clearCompletedFilter()">Clear</button>
+            </div>
+        </div>
+        <div class="table-responsive" style="margin-bottom: 32px;">
+            <table class="admin-table" id="completed-projects-table">
+                <thead>
+                    <tr>
+                        <th>Job</th>
+                        <th>Completed</th>
                         <th style="text-align: right;">Budget</th>
                         <th style="text-align: right;">Final Cost</th>
                         <th style="text-align: right;">Collected</th>
@@ -376,8 +427,9 @@
                 </thead>
                 <tbody>
                     {% for j in completed_jobs %}
-                    <tr>
+                    <tr data-completed="{{ j.last_completed_at[:10] if j.last_completed_at else '' }}">
                         <td>{{ j.job_name }}</td>
+                        <td style="font-size: 12px; color: var(--gray-500);">{{ j.last_completed_at[:10] if j.last_completed_at else '—' }}</td>
                         <td style="text-align: right;">${{ '{:,.0f}'.format(j.budget) }}</td>
                         <td style="text-align: right;">${{ '{:,.0f}'.format(j.actual_total_cost) }}</td>
                         <td style="text-align: right;">${{ '{:,.0f}'.format(j.actual_collected) }}</td>
@@ -386,20 +438,49 @@
                     </tr>
                     {% endfor %}
                 </tbody>
-                {% if completed_jobs|length > 1 %}
-                <tfoot>
-                    <tr style="font-weight: 700; border-top: 2px solid var(--gray-300);">
-                        <td>Totals</td>
-                        <td style="text-align: right;">${{ '{:,.0f}'.format(completed_jobs|sum(attribute='budget')) }}</td>
-                        <td style="text-align: right;">${{ '{:,.0f}'.format(completed_jobs|sum(attribute='actual_total_cost')) }}</td>
-                        <td style="text-align: right;">${{ '{:,.0f}'.format(completed_jobs|sum(attribute='actual_collected')) }}</td>
-                        <td style="text-align: right;">${{ '{:,.0f}'.format(completed_jobs|sum(attribute='actual_margin')) }}</td>
-                        <td></td>
-                    </tr>
-                </tfoot>
-                {% endif %}
             </table>
         </div>
+        <script>
+        (function() {
+            var LS_FROM = 'cp_date_from_{{ selected_token.token if selected_token else "" }}';
+            var LS_TO   = 'cp_date_to_{{ selected_token.token if selected_token else "" }}';
+
+            function filterCompleted() {
+                var from = document.getElementById('cp-date-from').value;
+                var to   = document.getElementById('cp-date-to').value;
+                localStorage.setItem(LS_FROM, from);
+                localStorage.setItem(LS_TO, to);
+                var rows = document.querySelectorAll('#completed-projects-table tbody tr');
+                rows.forEach(function(row) {
+                    var d = row.getAttribute('data-completed');
+                    var show = true;
+                    if (from && d && d < from) show = false;
+                    if (to   && d && d > to)   show = false;
+                    if (from && !d) show = true; // no date = always show
+                    row.style.display = show ? '' : 'none';
+                });
+            }
+
+            function clearCompletedFilter() {
+                document.getElementById('cp-date-from').value = '';
+                document.getElementById('cp-date-to').value = '';
+                localStorage.removeItem(LS_FROM);
+                localStorage.removeItem(LS_TO);
+                filterCompleted();
+            }
+
+            // Expose for inline onclick
+            window.filterCompleted = filterCompleted;
+            window.clearCompletedFilter = clearCompletedFilter;
+
+            // Restore sticky values on load
+            var savedFrom = localStorage.getItem(LS_FROM) || '';
+            var savedTo   = localStorage.getItem(LS_TO)   || '';
+            if (savedFrom) document.getElementById('cp-date-from').value = savedFrom;
+            if (savedTo)   document.getElementById('cp-date-to').value   = savedTo;
+            if (savedFrom || savedTo) filterCompleted();
+        })();
+        </script>
         {% endif %}
 
         {% elif not selected_token %}

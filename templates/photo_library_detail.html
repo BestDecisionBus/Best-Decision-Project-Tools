@@ -8,6 +8,9 @@
     {% if photo.latitude and photo.longitude %}
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     {% endif %}
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/c/{{ token.token }}/manifest.json">
+    <meta name="theme-color" content="#ffffff">
 </head>
 <body>
     <div class="capture-container">

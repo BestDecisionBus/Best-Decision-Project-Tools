@@ -399,11 +399,19 @@ def api_employee_item_create(estimate_id):
         unit_price = max(0.0, float(data.get("unit_price", 0) or 0))
     except (ValueError, TypeError):
         quantity, unit_price = 1.0, 0.0
+    try:
+        unit_cost = max(0.0, float(data.get("unit_cost", 0) or 0))
+    except (ValueError, TypeError):
+        unit_cost = 0.0
     total = round(quantity * unit_price, 2)
     taxable = 1 if data.get("taxable") else 0
+    item_type = data.get("item_type", "product")
+    if item_type not in ("product", "service"):
+        item_type = "product"
 
     item = database.create_estimate_item(
-        estimate_id, est["token"], description, quantity, unit_price, total, taxable, 0
+        estimate_id, est["token"], description, quantity, unit_price, total, taxable, 0, item_type,
+        unit_cost=unit_cost
     )
     return jsonify({"ok": True, "item": item})
 
@@ -424,7 +432,7 @@ def api_employee_item_update(item_id):
     updates = {}
     if "description" in data:
         updates["description"] = (data["description"] or "").strip()
-    for f in ("quantity", "unit_price", "total"):
+    for f in ("quantity", "unit_price", "unit_cost"):
         if f in data:
             try:
                 updates[f] = max(0.0, float(data[f]))
@@ -432,6 +440,15 @@ def api_employee_item_update(item_id):
                 pass
     if "taxable" in data:
         updates["taxable"] = 1 if data["taxable"] else 0
+    if "item_type" in data:
+        val = data["item_type"]
+        if val in ("product", "service"):
+            updates["item_type"] = val
+
+    # Always recompute total from qty × unit_price server-side
+    qty = updates.get("quantity", item["quantity"] or 0)
+    price = updates.get("unit_price", item["unit_price"] or 0)
+    updates["total"] = round(float(qty) * float(price), 2)
 
     if updates:
         database.update_estimate_item(item_id, **updates)
@@ -1059,11 +1076,19 @@ def admin_estimate_item_create(estimate_id):
         sort_order = int(data.get("sort_order", 0))
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid numeric value"}), 400
+    try:
+        unit_cost = max(0.0, float(data.get("unit_cost", 0) or 0))
+    except (ValueError, TypeError):
+        unit_cost = 0.0
 
     taxable = 1 if data.get("taxable") in (True, 1, "1", "true", "on") else 0
+    item_type = data.get("item_type", "product")
+    if item_type not in ("product", "service"):
+        item_type = "product"
 
     item = database.create_estimate_item(
-        estimate_id, est["token"], description, quantity, unit_price, total, taxable, sort_order
+        estimate_id, est["token"], description, quantity, unit_price, total, taxable, sort_order, item_type,
+        unit_cost=unit_cost
     )
     return jsonify({"ok": True, "item": item})
 
@@ -1086,7 +1111,7 @@ def admin_estimate_item_update(item_id):
 
     if "description" in data:
         updates["description"] = (data["description"] or "").strip()
-    for num_field in ("quantity", "unit_price", "total"):
+    for num_field in ("quantity", "unit_price", "unit_cost", "total"):
         if num_field in data:
             try:
                 updates[num_field] = float(data[num_field])
@@ -1099,6 +1124,10 @@ def admin_estimate_item_update(item_id):
             updates["sort_order"] = int(data["sort_order"])
         except (ValueError, TypeError):
             pass
+    if "item_type" in data:
+        val = data.get("item_type")
+        if val in ("product", "service"):
+            updates["item_type"] = val
 
     if updates:
         database.update_estimate_item(item_id, **updates)
@@ -1141,8 +1170,15 @@ def admin_estimate_item_save_product(estimate_id):
         unit_price = float(data.get("unit_price", 0))
     except (ValueError, TypeError):
         unit_price = 0
+    try:
+        unit_cost = float(data.get("unit_cost", 0))
+    except (ValueError, TypeError):
+        unit_cost = 0
+    item_type = data.get("item_type", "product")
+    if item_type not in ("product", "service"):
+        item_type = "product"
 
-    ps = database.create_product_service(name, unit_price, est["token"])
+    ps = database.create_product_service(name, unit_price, est["token"], unit_cost=unit_cost, item_type=item_type)
     return jsonify({"ok": True, "product": ps})
 
 

@@ -15,7 +15,13 @@
     .day-check:has(input:checked) { background: var(--blue); color: #fff; border-color: var(--blue); }
     .day-check input { display: none; }
     .sched-emp-row td { border-bottom: 2px solid var(--gray-400); padding-top: 6px; padding-bottom: 6px; }
+    .emp-cb-label { display: flex; align-items: center; gap: 8px; padding: 5px 8px; cursor: pointer; border-radius: 4px; font-size: 14px; }
+    .emp-cb-label:hover { background: var(--gray-100); }
+    .emp-cb-label input { width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; }
     </style>
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
 </head>
 <body>
     <div class="admin-layout">
@@ -77,7 +83,22 @@
         <div id="schedule-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; overflow-y: auto;">
             <div style="background: white; max-width: 600px; width: 90%; margin: 40px auto; padding: 28px; border-radius: 12px;">
                 <h3 id="modal-title" style="margin-top: 0;">Add Schedule</h3>
-                <div class="form-group">
+                <!-- Multi-select employees (shown when adding new schedules) -->
+                <div class="form-group" id="emp-multi-group">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                        <label style="margin: 0;">Employees <span style="font-size: 12px; font-weight: 400; color: var(--gray-500);">(select one or more)</span></label>
+                        <span style="font-size: 12px; color: var(--blue); cursor: pointer;" onclick="toggleAllEmployees()">Select All / None</span>
+                    </div>
+                    <div id="emp-checkbox-list" style="max-height: 160px; overflow-y: auto; border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px; background: #fff;">
+                        {% for emp in employees %}
+                        <label class="emp-cb-label">
+                            <input type="checkbox" class="emp-cb" value="{{ emp.id }}"> {{ emp.name }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                <!-- Single employee select (shown when editing an existing schedule) -->
+                <div class="form-group" id="emp-single-group" style="display: none;">
                     <label for="sched-employee">Employee</label>
                     <select id="sched-employee">
                         <option value="">Select Employee</option>
@@ -115,7 +136,7 @@
                     <label for="sched-shift">Shift</label>
                     <select id="sched-shift" onchange="onShiftChange()">
                         {% for st in shift_types %}
-                        <option value="{{ st.id }}" data-start="{{ st.start_time }}" data-end="{{ st.end_time }}">{{ st.name }} ({{ st.start_time[:5] }} - {{ st.end_time[:5] }})</option>
+                        <option value="{{ st.id }}" data-start="{{ st.start_time }}" data-end="{{ st.end_time }}">{{ st.name }} ({{ st.start_time|time12 }} - {{ st.end_time|time12 }})</option>
                         {% endfor %}
                         <option value="custom">Custom</option>
                     </select>
@@ -341,9 +362,19 @@
             onShiftChange();
         }
 
+        function toggleAllEmployees() {
+            var cbs = document.querySelectorAll('.emp-cb');
+            var anyUnchecked = Array.from(cbs).some(function(cb) { return !cb.checked; });
+            cbs.forEach(function(cb) { cb.checked = anyUnchecked; });
+        }
+
         function closeModal() {
             document.getElementById('schedule-modal').style.display = 'none';
             editingId = null;
+            // Reset multi-select mode
+            document.querySelectorAll('.emp-cb').forEach(function(cb) { cb.checked = false; });
+            document.getElementById('emp-multi-group').style.display = '';
+            document.getElementById('emp-single-group').style.display = 'none';
             document.getElementById('sched-employee').value = '';
             document.getElementById('sched-job').value = '';
             document.getElementById('sched-date').value = '';
@@ -372,6 +403,9 @@
 
         function editScheduleEntry(s) {
             editingId = s.id;
+            // Switch to single-employee mode for editing
+            document.getElementById('emp-multi-group').style.display = 'none';
+            document.getElementById('emp-single-group').style.display = '';
             document.getElementById('sched-employee').value = s.employee_id;
             document.getElementById('sched-job').value = s.job_id;
             document.getElementById('sched-date').value = s.date;
@@ -438,16 +472,13 @@
         }
 
         function saveSchedule() {
-            var empVal = document.getElementById('sched-employee').value;
             var jobVal = document.getElementById('sched-job').value;
             var dateVal = document.getElementById('sched-date').value;
 
-            if (!empVal) { alert('Please select an employee.'); return; }
             if (!jobVal) { alert('Please select a job.'); return; }
             if (!dateVal) { alert('Please select a date.'); return; }
 
-            var data = {
-                employee_id: parseInt(empVal),
+            var baseData = {
                 job_id: parseInt(jobVal),
                 token: TOKEN,
                 date: dateVal,
@@ -459,8 +490,11 @@
                 custom_note: document.getElementById('sched-custom-note').value
             };
 
-            // If editing, just update the single entry
+            // If editing, use the single employee select
             if (editingId) {
+                var empVal = document.getElementById('sched-employee').value;
+                if (!empVal) { alert('Please select an employee.'); return; }
+                var data = Object.assign({}, baseData, {employee_id: parseInt(empVal)});
                 fetch('/scheduler/api/schedules/' + editingId, {
                     method: 'PUT',
                     headers: {'Content-Type': 'application/json'},
@@ -474,20 +508,28 @@
                 return;
             }
 
-            // New schedule — get dates from checked day boxes
-            var dates = getSelectedDayDates(data.date);
+            // New schedule — collect selected employees
+            var empIds = Array.from(document.querySelectorAll('.emp-cb:checked')).map(function(cb) { return parseInt(cb.value); });
+            if (empIds.length === 0) { alert('Please select at least one employee.'); return; }
+
+            // Get dates from checked day boxes
+            var dates = getSelectedDayDates(baseData.date);
             if (dates.length === 0) {
                 alert('Please select at least one day.');
                 return;
             }
 
-            var promises = dates.map(function(dt) {
-                var entry = Object.assign({}, data, {date: dt});
-                return fetch('/scheduler/api/schedules', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    credentials: 'same-origin',
-                    body: JSON.stringify(entry)
+            // Create a schedule for every employee × every date
+            var promises = [];
+            empIds.forEach(function(empId) {
+                dates.forEach(function(dt) {
+                    var entry = Object.assign({}, baseData, {employee_id: empId, date: dt});
+                    promises.push(fetch('/scheduler/api/schedules', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        credentials: 'same-origin',
+                        body: JSON.stringify(entry)
+                    }));
                 });
             });
 
@@ -497,13 +539,12 @@
                     closeModal();
                     loadWeek();
                 } else {
-                    // Show actual error from first failed response
                     failed[0].text().then(function(t) {
                         var msg = 'Status ' + failed[0].status;
                         try { var d = JSON.parse(t); if (d.error) msg = d.error; } catch(e) {}
-                        alert(failed.length + ' of ' + dates.length + ' schedules failed: ' + msg);
+                        alert(failed.length + ' of ' + promises.length + ' schedules failed: ' + msg);
                     }).catch(function() {
-                        alert(failed.length + ' of ' + dates.length + ' schedules failed to save.');
+                        alert(failed.length + ' of ' + promises.length + ' schedules failed to save.');
                     });
                     loadWeek();
                 }

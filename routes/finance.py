@@ -40,10 +40,36 @@ def finance_dashboard():
     overhead_pct = 0
     monthly_overhead = 0
     cash_on_hand = 0
+    combined_job_costs = None
 
     if token_str:
         payroll = database.get_weekly_payroll_estimate(token_str)
         labor_stats = database.get_overall_labor_stats(token_str)
+
+        weekly_job_costs = database.get_weekly_job_costs(token_str)
+        alltime_job_costs = database.get_alltime_job_costs(token_str)
+        weekly_by_name = {j["job_name"]: j for j in (weekly_job_costs.get("jobs") or [])}
+        alltime_by_name = {j["job_name"]: j for j in (alltime_job_costs.get("jobs") or [])}
+        all_job_names = set(weekly_by_name.keys()) | set(alltime_by_name.keys())
+        merged_jobs = []
+        for name in all_job_names:
+            w = weekly_by_name.get(name, {"hours": 0, "total_cost": 0})
+            a = alltime_by_name.get(name, {"hours": 0, "total_cost": 0})
+            merged_jobs.append({
+                "job_name": name,
+                "week_hours": w["hours"],
+                "week_cost": w["total_cost"],
+                "alltime_hours": a["hours"],
+                "alltime_cost": a["total_cost"],
+            })
+        merged_jobs.sort(key=lambda x: x["alltime_hours"], reverse=True)
+        combined_job_costs = {
+            "jobs": merged_jobs,
+            "total_week_hours": weekly_job_costs.get("total_hours", 0),
+            "total_week_cost": weekly_job_costs.get("total_cost", 0),
+            "total_alltime_hours": alltime_job_costs.get("total_hours", 0),
+            "total_alltime_cost": alltime_job_costs.get("total_cost", 0),
+        } if merged_jobs else None
         job_financials = database.get_job_financials(token_str)
         estimate_stats = database.get_estimate_stats(token_str)
         expense_totals = database.get_expense_totals(token_str)
@@ -57,9 +83,12 @@ def finance_dashboard():
             earned = jf["budget"] * jf["completion_pct"] / 100
             jf["earned_revenue"] = round(earned, 2)
             jf["unearned_liability"] = round(jf["actual_collected"] - earned, 2)
-            if jf["is_active"]:
+            # Classify by estimate status, not by job's is_active flag:
+            # — completed: has completed estimate(s) and no active/in-progress ones
+            # — active: has accepted or in-progress estimate(s) and is not archived
+            if jf.get("active_estimate_count", 0) > 0 and not jf.get("is_archived"):
                 active_jobs.append(jf)
-            else:
+            elif jf.get("completed_estimate_count", 0) > 0:
                 completed_jobs.append(jf)
 
         # Company totals across all jobs
@@ -180,6 +209,7 @@ def finance_dashboard():
         selected_token=selected_token,
         payroll=payroll,
         labor_stats=labor_stats,
+        combined_job_costs=combined_job_costs,
         active_jobs=active_jobs,
         completed_jobs=completed_jobs,
         totals=totals,

@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jobs — BDB Tools</title>
     <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
 </head>
 <body>
     <div class="admin-layout">
@@ -73,7 +76,10 @@
         </div>
         {% endif %}
 
-        {% if jobs %}
+        {% set active_jobs = jobs | selectattr('is_archived', 'equalto', 0) | list %}
+        {% set archived_jobs = jobs | selectattr('is_archived', 'equalto', 1) | list %}
+
+        {% if active_jobs %}
         <div class="table-wrap">
             <table class="resizable">
                 <thead>
@@ -86,7 +92,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for job in jobs %}
+                    {% for job in active_jobs %}
                     <tr>
                         <td>
                             <span id="jobname-display-{{ job.id }}">{{ job.job_name }}</span>
@@ -137,14 +143,47 @@
                                 <button type="submit" class="btn btn-green btn-sm">Activate</button>
                                 {% endif %}
                             </form>
+                            <form method="POST" action="{{ url_for('time_admin.admin_job_archive', job_id=job.id) }}" style="display: inline;">
+                                <button type="submit" class="btn btn-sm" style="background: var(--gray-500); color: #fff;">Archive</button>
+                            </form>
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+        {% elif selected_token %}
+        <p style="color: var(--gray-500);">No jobs yet.</p>
         {% else %}
-        <p style="color: var(--gray-500);">No jobs yet.{% if not selected_token %} Select a company above to add jobs.{% endif %}</p>
+        <p style="color: var(--gray-500);">Select a company above to add jobs.</p>
+        {% endif %}
+
+        {% if archived_jobs %}
+        <h3 style="margin-top: 32px; margin-bottom: 12px; color: var(--gray-500);">Archived Jobs</h3>
+        <div class="table-wrap">
+            <table class="resizable">
+                <thead>
+                    <tr>
+                        <th>Job Name</th>
+                        <th>Address</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in archived_jobs %}
+                    <tr style="opacity: 0.7;">
+                        <td>{{ job.job_name }}</td>
+                        <td>{{ job.job_address or '' }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('time_admin.admin_job_unarchive', job_id=job.id) }}" style="display: inline;">
+                                <button type="submit" class="btn btn-blue btn-sm">Unarchive</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
         {% endif %}
     </div>
     {% include '_footer.html' %}

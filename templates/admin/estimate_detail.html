@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% if is_project %}Project{% else %}Estimate{% endif %} Detail — BDB Tools</title>
     <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
 </head>
 <body>
     <div class="admin-layout">
@@ -179,7 +182,10 @@
                     <select id="ps-select" style="padding: 4px 8px; font-size: 13px; min-width: 200px;">
                         <option value="">Add from Products &amp; Services...</option>
                         {% for ps in products_services %}
-                        <option value="{{ ps.name }}" data-price="{{ '{:.2f}'.format(ps.unit_price or 0) }}">{{ ps.name }} (${{ '{:.2f}'.format(ps.unit_price or 0) }})</option>
+                        <option value="{{ ps.name }}"
+                                data-price="{{ '{:.2f}'.format(ps.unit_price or 0) }}"
+                                data-cost="{{ '{:.2f}'.format(ps.unit_cost or 0) }}"
+                                data-item-type="{{ ps.item_type or 'product' }}">[{{ (ps.item_type or 'product')|capitalize }}] {{ ps.name }} (${{ '{:.2f}'.format(ps.unit_price or 0) }})</option>
                         {% endfor %}
                     </select>
                     <button type="button" class="btn btn-sm btn-green" onclick="addFromPS()">Add</button>
@@ -187,11 +193,12 @@
             </div>
             <table class="admin-table" id="line-items-table" style="margin-bottom: 12px; width: 100%;">
                 <colgroup>
-                    <col style="width: 55%;">
-                    <col style="width: 90px;">
-                    <col style="width: 160px;">
+                    <col style="width: 45%;">
+                    <col style="width: 80px;">
+                    <col style="width: 130px;">
+                    <col style="width: 120px;">
                     <col style="width: 40px;">
-                    <col style="width: 160px;">
+                    <col style="width: 130px;">
                     <col style="width: 80px;">
                 </colgroup>
                 <thead>
@@ -199,6 +206,7 @@
                         <th>Product / Service</th>
                         <th style="text-align: center;">Qty</th>
                         <th style="text-align: right;">Unit Price</th>
+                        <th style="text-align: right;">Cost</th>
                         <th style="text-align: center;">Tax</th>
                         <th style="text-align: right;">Total</th>
                         <th></th>
@@ -207,9 +215,18 @@
                 <tbody id="line-items-body">
                     {% for item in items %}
                     <tr data-item-id="{{ item.id }}">
-                        <td><input type="text" class="est-input li-desc" value="{{ item.description }}" style="width: 100%;" onchange="saveItem(this)"></td>
+                        <td>
+                            <input type="text" class="est-input li-desc" value="{{ item.description }}" style="width: 100%;" onchange="saveItem(this)">
+                            <div style="margin-top: 3px;">
+                                {% set itype = item.item_type or 'product' %}
+                                <button type="button" class="li-type-btn" data-type="product" onclick="setItemType(this,'product')" style="font-size:10px; padding:1px 6px; border-radius:3px; border:1px solid #2563eb; cursor:pointer; background:{{ '#2563eb' if itype == 'product' else '#e5e7eb' }}; color:{{ '#fff' if itype == 'product' else '#374151' }};">Product</button>
+                                <button type="button" class="li-type-btn" data-type="service" onclick="setItemType(this,'service')" style="font-size:10px; padding:1px 6px; border-radius:3px; border:1px solid #7c3aed; cursor:pointer; background:{{ '#7c3aed' if itype == 'service' else '#e5e7eb' }}; color:{{ '#fff' if itype == 'service' else '#374151' }};">Service</button>
+                                <input type="hidden" class="li-item-type" value="{{ itype }}">
+                            </div>
+                        </td>
                         <td><input type="text" inputmode="decimal" class="est-input li-qty" value="{{ item.quantity }}" placeholder="0.00" style="width: 100%; text-align: center;" onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)" onblur="applyCalc(this,2,function(el){calcRow(el);})" onkeydown="if(event.key==='Enter'){applyCalc(this,2,function(el){calcRow(el);});}"></td>
                         <td><input type="text" inputmode="decimal" class="est-input li-price" value="{{ '{:.2f}'.format(item.unit_price) }}" placeholder="0.00" style="width: 100%; text-align: right;" onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)" onblur="applyCalc(this,2,function(el){calcRow(el);})" onkeydown="if(event.key==='Enter'){applyCalc(this,2,function(el){calcRow(el);});}"></td>
+                        <td><input type="text" inputmode="decimal" class="est-input li-cost" value="{{ '{:.2f}'.format(item.unit_cost or 0) }}" placeholder="0.00" style="width: 100%; text-align: right; background: #fff7ed;" onfocus="this.select()" oninput="calcCostTotals()" onchange="saveItem(this)" onblur="applyCalc(this,2,null)"></td>
                         <td style="text-align: center; padding: 0 4px;"><input type="checkbox" class="li-taxable" {% if item.taxable %}checked{% endif %} onchange="saveItem(this); calcTotals();"></td>
                         <td><input type="text" class="est-input li-total" value="{{ '{:.2f}'.format(item.total) }}" readonly style="width: 100%; text-align: right; background: var(--gray-50); color: var(--gray-600); cursor: default;"></td>
                         <td style="white-space: nowrap;">
@@ -220,9 +237,17 @@
                     {% endfor %}
                     {% if not items %}
                     <tr data-item-id="">
-                        <td><input type="text" class="est-input li-desc" value="" style="width: 100%;" placeholder="Description"></td>
+                        <td>
+                            <input type="text" class="est-input li-desc" value="" style="width: 100%;" placeholder="Description">
+                            <div style="margin-top: 3px;">
+                                <button type="button" class="li-type-btn" data-type="product" onclick="setItemType(this,'product')" style="font-size:10px; padding:1px 6px; border-radius:3px; border:1px solid #2563eb; cursor:pointer; background:#2563eb; color:#fff;">Product</button>
+                                <button type="button" class="li-type-btn" data-type="service" onclick="setItemType(this,'service')" style="font-size:10px; padding:1px 6px; border-radius:3px; border:1px solid #7c3aed; cursor:pointer; background:#e5e7eb; color:#374151;">Service</button>
+                                <input type="hidden" class="li-item-type" value="product">
+                            </div>
+                        </td>
                         <td><input type="text" inputmode="decimal" class="est-input li-qty" value="" placeholder="0.00" style="width: 100%; text-align: center;" onfocus="this.select()" oninput="calcRow(this)" onblur="applyCalc(this,2,function(el){calcRow(el);})" onkeydown="if(event.key==='Enter'){applyCalc(this,2,function(el){calcRow(el);});}"></td>
                         <td><input type="text" inputmode="decimal" class="est-input li-price" value="" placeholder="0.00" style="width: 100%; text-align: right;" onfocus="this.select()" oninput="calcRow(this)" onblur="applyCalc(this,2,function(el){calcRow(el);})" onkeydown="if(event.key==='Enter'){applyCalc(this,2,function(el){calcRow(el);});}"></td>
+                        <td><input type="text" inputmode="decimal" class="est-input li-cost" value="" placeholder="0.00" style="width: 100%; text-align: right; background: #fff7ed;" onfocus="this.select()" oninput="calcCostTotals()" onblur="applyCalc(this,2,null)"></td>
                         <td style="text-align: center; padding: 0 4px;"><input type="checkbox" class="li-taxable" onchange="calcTotals()"></td>
                         <td><input type="text" class="est-input li-total" value="" placeholder="0.00" readonly style="width: 100%; text-align: right; background: var(--gray-50); color: var(--gray-600); cursor: default;"></td>
                         <td style="white-space: nowrap;">
@@ -727,16 +752,65 @@
             estValueEl.style.color = '';
             estValueEl.title = '';
         }
+        calcCostTotals();
+    }
+
+    function calcCostTotals() {
+        var rows = document.querySelectorAll('#line-items-body tr');
+        var matCost = 0, labCost = 0;
+        var hasItems = false;
+        rows.forEach(function(row) {
+            var costEl = row.querySelector('.li-cost');
+            var typeEl = row.querySelector('.li-item-type');
+            var descEl = row.querySelector('.li-desc');
+            if (!costEl || !typeEl) return;
+            if (descEl && descEl.value.trim()) hasItems = true;
+            var qty = parseFloat(row.querySelector('.li-qty').value) || 0;
+            var cost = parseFloat(costEl.value) || 0;
+            if (typeEl.value === 'service') labCost += qty * cost;
+            else matCost += qty * cost;
+        });
+        var matEl = document.getElementById('edit-est-materials');
+        var labEl = document.getElementById('edit-est-labor');
+        matEl.value = matCost.toFixed(2);
+        labEl.value = labCost.toFixed(2);
+        if (hasItems) {
+            matEl.readOnly = true;
+            matEl.style.background = 'var(--gray-50)';
+            matEl.style.color = 'var(--gray-500)';
+            matEl.title = 'Auto-calculated from Products line items';
+            labEl.readOnly = true;
+            labEl.style.background = 'var(--gray-50)';
+            labEl.style.color = 'var(--gray-500)';
+            labEl.title = 'Auto-calculated from Services line items';
+        } else {
+            matEl.readOnly = false;
+            matEl.style.background = '';
+            matEl.style.color = '';
+            matEl.title = '';
+            labEl.readOnly = false;
+            labEl.style.background = '';
+            labEl.style.color = '';
+            labEl.title = '';
+        }
         computeMargins();
     }
 
-    function addLineItem(desc, price) {
+    function addLineItem(desc, price, item_type, cost) {
+        var itype = (item_type === 'service') ? 'service' : 'product';
         var tbody = document.getElementById('line-items-body');
         var tr = document.createElement('tr');
         tr.setAttribute('data-item-id', '');
-        tr.innerHTML = '<td><input type="text" class="est-input li-desc" value="' + (desc || '') + '" style="width: 100%;" placeholder="Description" onchange="saveItem(this)"></td>' +
+        tr.innerHTML = '<td>' +
+            '<input type="text" class="est-input li-desc" value="' + (desc || '') + '" style="width: 100%;" placeholder="Description" onchange="saveItem(this)">' +
+            '<div style="margin-top:3px;">' +
+            '<button type="button" class="li-type-btn" data-type="product" onclick="setItemType(this,\'product\')" style="font-size:10px;padding:1px 6px;border-radius:3px;border:1px solid #2563eb;cursor:pointer;background:' + (itype==='product'?'#2563eb':'#e5e7eb') + ';color:' + (itype==='product'?'#fff':'#374151') + ';">Product</button>' +
+            '<button type="button" class="li-type-btn" data-type="service" onclick="setItemType(this,\'service\')" style="font-size:10px;padding:1px 6px;border-radius:3px;border:1px solid #7c3aed;cursor:pointer;background:' + (itype==='service'?'#7c3aed':'#e5e7eb') + ';color:' + (itype==='service'?'#fff':'#374151') + ';">Service</button>' +
+            '<input type="hidden" class="li-item-type" value="' + itype + '">' +
+            '</div></td>' +
             '<td><input type="text" inputmode="decimal" class="est-input li-qty" value="" placeholder="0.00" style="width: 100%; text-align: center;" onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)" onblur="applyCalc(this,2,function(el){calcRow(el);})" onkeydown="if(event.key===\'Enter\'){applyCalc(this,2,function(el){calcRow(el);});}"></td>' +
             '<td><input type="text" inputmode="decimal" class="est-input li-price" value="' + (price || '') + '" placeholder="0.00" style="width: 100%; text-align: right;" onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)" onblur="applyCalc(this,2,function(el){calcRow(el);})" onkeydown="if(event.key===\'Enter\'){applyCalc(this,2,function(el){calcRow(el);});}"></td>' +
+            '<td><input type="text" inputmode="decimal" class="est-input li-cost" value="' + (cost ? parseFloat(cost).toFixed(2) : '') + '" placeholder="0.00" style="width: 100%; text-align: right; background:#fff7ed;" onfocus="this.select()" oninput="calcCostTotals()" onchange="saveItem(this)" onblur="applyCalc(this,2,null);"></td>' +
             '<td style="text-align: center; padding: 0 4px;"><input type="checkbox" class="li-taxable" onchange="saveItem(this); calcTotals();"></td>' +
             '<td><input type="text" class="est-input li-total" value="' + (price || '') + '" placeholder="0.00" readonly style="width: 100%; text-align: right; background: var(--gray-50); color: var(--gray-600); cursor: default;"></td>' +
             '<td style="white-space: nowrap;">' +
@@ -746,27 +820,44 @@
         calcTotals();
     }
 
+    function setItemType(btn, type) {
+        var row = btn.closest('tr');
+        row.querySelector('.li-item-type').value = type;
+        row.querySelectorAll('.li-type-btn').forEach(function(b) {
+            var isActive = b.dataset.type === type;
+            var color = b.dataset.type === 'product' ? '#2563eb' : '#7c3aed';
+            b.style.background = isActive ? color : '#e5e7eb';
+            b.style.color = isActive ? '#fff' : '#374151';
+        });
+        saveItem(btn);
+        calcCostTotals();
+    }
+
     function saveItem(el) {
         var row = el.closest('tr');
         var itemId = row.getAttribute('data-item-id');
         var desc = row.querySelector('.li-desc').value.trim();
         var qty = parseFloat(row.querySelector('.li-qty').value) || 0;
         var price = parseFloat(row.querySelector('.li-price').value) || 0;
+        var costEl = row.querySelector('.li-cost');
+        var unit_cost = costEl ? (parseFloat(costEl.value) || 0) : 0;
         var total = parseFloat(row.querySelector('.li-total').value) || 0;
         var taxable = row.querySelector('.li-taxable').checked;
+        var itemTypeEl = row.querySelector('.li-item-type');
+        var item_type = itemTypeEl ? itemTypeEl.value : 'product';
         if (!desc) return;
 
         if (itemId) {
             fetch('/admin/estimates/items/' + itemId + '/update', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, total: total, taxable: taxable})
+                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, unit_cost: unit_cost, total: total, taxable: taxable, item_type: item_type})
             });
         } else {
             fetch('/admin/estimates/' + ESTIMATE_ID + '/items/create', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, total: total, taxable: taxable, sort_order: 0})
+                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, unit_cost: unit_cost, total: total, taxable: taxable, sort_order: 0, item_type: item_type})
             }).then(function(r) { return r.json(); })
             .then(function(data) {
                 if (data.ok && data.item) {
@@ -811,11 +902,15 @@
         var row = btn.closest('tr');
         var name = row.querySelector('.li-desc').value.trim();
         var price = parseFloat(row.querySelector('.li-price').value) || 0;
+        var costEl = row.querySelector('.li-cost');
+        var unit_cost = costEl ? (parseFloat(costEl.value) || 0) : 0;
+        var itemTypeEl = row.querySelector('.li-item-type');
+        var item_type = itemTypeEl ? itemTypeEl.value : 'product';
         if (!name) { alert('Enter a description first.'); return; }
         fetch('/admin/estimates/' + ESTIMATE_ID + '/items/save-product', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({name: name, unit_price: price})
+            body: JSON.stringify({name: name, unit_price: price, unit_cost: unit_cost, item_type: item_type})
         }).then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.ok) {
@@ -824,7 +919,9 @@
                 var opt = document.createElement('option');
                 opt.value = name;
                 opt.setAttribute('data-price', price.toFixed(2));
-                opt.textContent = name + ' ($' + price.toFixed(2) + ')';
+                opt.setAttribute('data-item-type', item_type);
+                opt.setAttribute('data-cost', unit_cost.toFixed(2));
+                opt.textContent = '[' + (item_type === 'service' ? 'Service' : 'Product') + '] ' + name + ' ($' + price.toFixed(2) + ')';
                 sel.appendChild(opt);
                 btn.textContent = 'Saved!';
                 btn.style.background = '#15803d';
@@ -841,7 +938,9 @@
         var opt = sel.options[sel.selectedIndex];
         var name = sel.value;
         var price = opt.getAttribute('data-price') || '0.00';
-        addLineItem(name, price);
+        var item_type = opt.getAttribute('data-item-type') || 'product';
+        var cost = opt.getAttribute('data-cost') || '0.00';
+        addLineItem(name, price, item_type, cost);
         // Auto-save the new row
         var tbody = document.getElementById('line-items-body');
         var lastRow = tbody.lastElementChild;
@@ -857,20 +956,24 @@
             if (!desc) return;
             var qty = parseFloat(row.querySelector('.li-qty').value) || 0;
             var price = parseFloat(row.querySelector('.li-price').value) || 0;
+            var costEl = row.querySelector('.li-cost');
+            var unit_cost = costEl ? (parseFloat(costEl.value) || 0) : 0;
             var total = parseFloat(row.querySelector('.li-total').value) || 0;
             var taxable = row.querySelector('.li-taxable').checked;
+            var itemTypeEl = row.querySelector('.li-item-type');
+            var item_type = itemTypeEl ? itemTypeEl.value : 'product';
             var itemId = row.getAttribute('data-item-id');
             if (itemId) {
                 promises.push(fetch('/admin/estimates/items/' + itemId + '/update', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({description: desc, quantity: qty, unit_price: price, total: total, taxable: taxable})
+                    body: JSON.stringify({description: desc, quantity: qty, unit_price: price, unit_cost: unit_cost, total: total, taxable: taxable, item_type: item_type})
                 }));
             } else {
                 promises.push(fetch('/admin/estimates/' + ESTIMATE_ID + '/items/create', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({description: desc, quantity: qty, unit_price: price, total: total, taxable: taxable, sort_order: 0})
+                    body: JSON.stringify({description: desc, quantity: qty, unit_price: price, unit_cost: unit_cost, total: total, taxable: taxable, sort_order: 0, item_type: item_type})
                 }).then(function(r) { return r.json(); }).then(function(data) {
                     if (data.ok && data.item) {
                         row.setAttribute('data-item-id', data.item.id);

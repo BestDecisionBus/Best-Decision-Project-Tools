@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Estimate Detail — {{ token.company_name }}</title>
     <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/c/{{ token.token }}/manifest.json">
+    <meta name="theme-color" content="#ffffff">
 </head>
 <body>
     <div class="capture-container">
@@ -51,13 +54,14 @@
         <div class="form-group">
             <label style="font-weight: 600; font-size: 15px;">Customer Info</label>
             <input type="text" id="cust-name" value="{{ estimate.customer_name or '' }}"
-                   placeholder="Customer name" style="margin-bottom: 8px;">
+                   placeholder="Customer name" style="margin-bottom: 8px;"
+                   onblur="saveCustomerInfo()">
             <input type="tel" inputmode="tel" id="cust-phone" value="{{ estimate.customer_phone or '' }}"
                    placeholder="(555) 555-5555" style="margin-bottom: 8px;"
-                   oninput="formatPhone(this)">
+                   oninput="formatPhone(this)" onblur="saveCustomerInfo()">
             <input type="email" inputmode="email" id="cust-email" value="{{ estimate.customer_email or '' }}"
                    placeholder="email@example.com" style="margin-bottom: 8px;"
-                   oninput="validateEmail(this)" onblur="validateEmail(this)">
+                   oninput="validateEmail(this)" onblur="validateEmail(this); saveCustomerInfo()">
             <button type="button" class="btn btn-blue btn-sm" onclick="saveCustomerInfo()">Save Customer Info</button>
             <div id="cust-save-status" style="display:none; font-size: 13px; margin-top: 6px;"></div>
         </div>
@@ -120,9 +124,10 @@
                 <select id="ps-select" style="flex:1; min-width:0; padding:8px; font-size:14px; border:1px solid var(--gray-300); border-radius:6px;">
                     <option value="">Add from catalog...</option>
                     {% for ps in products_services %}
-                    <option value="{{ ps.name }}" data-price="{{ '{:.2f}'.format(ps.unit_price or 0) }}">
-                        {{ ps.name }} (${{ '{:.2f}'.format(ps.unit_price or 0) }})
-                    </option>
+                    <option value="{{ ps.name }}"
+                            data-price="{{ '{:.2f}'.format(ps.unit_price or 0) }}"
+                            data-cost="{{ '{:.2f}'.format(ps.unit_cost or 0) }}"
+                            data-item-type="{{ ps.item_type or 'product' }}">[{{ (ps.item_type or 'product')|capitalize }}] {{ ps.name }} (${{ '{:.2f}'.format(ps.unit_price or 0) }})</option>
                     {% endfor %}
                 </select>
                 <button type="button" class="btn btn-green btn-sm" onclick="addFromPS()">Add</button>
@@ -135,23 +140,40 @@
                     <input type="text" class="li-desc" value="{{ item.description }}" placeholder="Description"
                            style="width:100%; padding:8px; font-size:14px; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"
                            onchange="saveItem(this)">
-                    <div style="display:flex; gap:8px; margin-top:6px; align-items:center; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:4px; margin-bottom:2px;">
+                        {% set itype = item.item_type or 'product' %}
+                        <button type="button" class="li-type-btn" data-type="product" onclick="setItemType(this,'product')" style="font-size:11px; padding:2px 8px; border-radius:4px; border:1px solid #2563eb; cursor:pointer; background:{{ '#2563eb' if itype == 'product' else '#e5e7eb' }}; color:{{ '#fff' if itype == 'product' else '#374151' }};">Product</button>
+                        <button type="button" class="li-type-btn" data-type="service" onclick="setItemType(this,'service')" style="font-size:11px; padding:2px 8px; border-radius:4px; border:1px solid #7c3aed; cursor:pointer; background:{{ '#7c3aed' if itype == 'service' else '#e5e7eb' }}; color:{{ '#fff' if itype == 'service' else '#374151' }};">Service</button>
+                        <input type="hidden" class="li-item-type" value="{{ itype }}">
+                        <label style="white-space:nowrap; font-size:13px; color:var(--gray-600); margin-left:8px;">
+                            Tax <input type="checkbox" class="li-taxable" {% if item.taxable %}checked{% endif %}
+                                   onchange="saveItem(this); calcTotals();">
+                        </label>
+                    </div>
+                    <div style="display:flex; gap:8px; margin-top:6px; align-items:center;">
                         <input type="text" inputmode="decimal" class="li-qty" value="{{ item.quantity }}" placeholder="Qty"
                                style="width:65px; padding:6px; text-align:center; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"
                                onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)"
                                onblur="applyCalc(this,2,function(el){calcRow(el);})"
                                onkeydown="if(event.key==='Enter'){applyCalc(this,2,function(el){calcRow(el);});}">
                         <span style="color:var(--gray-500);">×</span>
-                        <label style="white-space:nowrap; font-size:13px; color:var(--gray-600);">
-                            <input type="checkbox" class="li-taxable" {% if item.taxable %}checked{% endif %}
-                                   onchange="saveItem(this); calcTotals();"> Tax
-                        </label>
                         <input type="text" inputmode="decimal" class="li-price" value="{{ '{:.2f}'.format(item.unit_price) }}" placeholder="Unit Price"
                                style="flex:1; min-width:80px; padding:6px; text-align:right; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"
                                onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)"
                                onblur="applyCalc(this,2,function(el){calcRow(el);})"
                                onkeydown="if(event.key==='Enter'){applyCalc(this,2,function(el){calcRow(el);});}">
                         <button type="button" class="btn btn-red btn-sm" onclick="deleteItem(this)" style="padding:4px 8px;">✕</button>
+                    </div>
+                    <div style="display:flex; gap:6px; margin-top:4px; align-items:center;">
+                        <label style="font-size:12px; color:var(--gray-500); white-space:nowrap;">Cost/unit:</label>
+                        <input type="text" inputmode="decimal" class="li-cost"
+                               value="{{ '{:.2f}'.format(item.unit_cost or 0) }}"
+                               placeholder="0.00"
+                               style="flex:1; padding:5px; text-align:right; border:1px solid var(--gray-300); border-radius:6px; background:#fff7ed;"
+                               onfocus="this.select()"
+                               oninput="calcCostTotals()"
+                               onchange="saveItem(this)"
+                               onblur="applyCalc(this,2,null);">
                     </div>
                     <div style="text-align:right; font-weight:600; font-size:15px; margin-top:6px; color:var(--gray-700);">
                         = <span class="li-total-display">{{ '${:,.2f}'.format(item.total) }}</span>
@@ -394,7 +416,24 @@
         calcTotals();
     }
 
+    function calcCostTotals() {
+        var cards = document.querySelectorAll('#li-cards .li-card');
+        var matCost = 0, labCost = 0;
+        cards.forEach(function(card) {
+            var costEl = card.querySelector('.li-cost');
+            var typeEl = card.querySelector('.li-item-type');
+            if (!costEl || !typeEl) return;
+            var qty = parseFloat(card.querySelector('.li-qty').value) || 0;
+            var cost = parseFloat(costEl.value) || 0;
+            if (typeEl.value === 'service') labCost += qty * cost;
+            else matCost += qty * cost;
+        });
+        document.getElementById('li-mat-cost').value = matCost.toFixed(2);
+        document.getElementById('li-lab-cost').value = labCost.toFixed(2);
+    }
+
     function calcTotals() {
+        calcCostTotals();
         var cards = document.querySelectorAll('#li-cards .li-card');
         var subtotal = 0, taxable = 0;
         cards.forEach(function(card) {
@@ -436,21 +475,25 @@
         var desc = card.querySelector('.li-desc').value.trim();
         var qty = parseFloat(card.querySelector('.li-qty').value) || 0;
         var price = parseFloat(card.querySelector('.li-price').value) || 0;
+        var costEl = card.querySelector('.li-cost');
+        var unit_cost = costEl ? (parseFloat(costEl.value) || 0) : 0;
         var total = parseFloat(card.querySelector('.li-total').value) || 0;
         var taxable = card.querySelector('.li-taxable').checked;
+        var itemTypeEl = card.querySelector('.li-item-type');
+        var item_type = itemTypeEl ? itemTypeEl.value : 'product';
         if (!desc) return;
 
         if (itemId) {
             fetch('/api/estimate/items/' + itemId + '/update', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, total: total, taxable: taxable})
+                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, unit_cost: unit_cost, total: total, taxable: taxable, item_type: item_type})
             });
         } else {
             fetch('/api/estimate/' + ESTIMATE_ID + '/items/create', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, total: total, taxable: taxable})
+                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, unit_cost: unit_cost, total: total, taxable: taxable, item_type: item_type})
             }).then(function(r) { return r.json(); }).then(function(data) {
                 if (data.ok && data.item) card.setAttribute('data-item-id', String(data.item.id));
             });
@@ -469,7 +512,8 @@
     }
 
     // ---- Add blank line item ----
-    function addLineItem(desc, price) {
+    function addLineItem(desc, price, item_type, cost) {
+        var itype = (item_type === 'service') ? 'service' : 'product';
         var container = document.getElementById('li-cards');
         var card = document.createElement('div');
         card.className = 'li-card';
@@ -479,15 +523,20 @@
             '<input type="text" class="li-desc" value="' + (desc || '').replace(/"/g, '&quot;') + '" placeholder="Description"' +
             ' style="width:100%; padding:8px; font-size:14px; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"' +
             ' onchange="saveItem(this)">' +
-            '<div style="display:flex; gap:8px; margin-top:6px; align-items:center; flex-wrap:wrap;">' +
+            '<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:4px; margin-bottom:2px;">' +
+            '<button type="button" class="li-type-btn" data-type="product" onclick="setItemType(this,\'product\')" style="font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid #2563eb;cursor:pointer;background:' + (itype==='product'?'#2563eb':'#e5e7eb') + ';color:' + (itype==='product'?'#fff':'#374151') + ';">Product</button>' +
+            '<button type="button" class="li-type-btn" data-type="service" onclick="setItemType(this,\'service\')" style="font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid #7c3aed;cursor:pointer;background:' + (itype==='service'?'#7c3aed':'#e5e7eb') + ';color:' + (itype==='service'?'#fff':'#374151') + ';">Service</button>' +
+            '<input type="hidden" class="li-item-type" value="' + itype + '">' +
+            '<label style="white-space:nowrap; font-size:13px; color:var(--gray-600); margin-left:8px;">' +
+            'Tax <input type="checkbox" class="li-taxable" onchange="saveItem(this); calcTotals();"></label>' +
+            '</div>' +
+            '<div style="display:flex; gap:8px; margin-top:6px; align-items:center;">' +
             '<input type="text" inputmode="decimal" class="li-qty" value="1" placeholder="Qty"' +
             ' style="width:65px; padding:6px; text-align:center; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"' +
             ' onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)"' +
             ' onblur="applyCalc(this,2,function(el){calcRow(el);})"' +
             ' onkeydown="if(event.key===\'Enter\'){applyCalc(this,2,function(el){calcRow(el);});}">' +
             '<span style="color:var(--gray-500);">×</span>' +
-            '<label style="white-space:nowrap; font-size:13px; color:var(--gray-600);">' +
-            '<input type="checkbox" class="li-taxable" onchange="saveItem(this); calcTotals();"> Tax</label>' +
             '<input type="text" inputmode="decimal" class="li-price" value="' + (price || '') + '" placeholder="Unit Price"' +
             ' style="flex:1; min-width:80px; padding:6px; text-align:right; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"' +
             ' onfocus="this.select()" oninput="calcRow(this)" onchange="saveItem(this)"' +
@@ -495,12 +544,31 @@
             ' onkeydown="if(event.key===\'Enter\'){applyCalc(this,2,function(el){calcRow(el);});}">' +
             '<button type="button" class="btn btn-red btn-sm" onclick="deleteItem(this)" style="padding:4px 8px;">✕</button>' +
             '</div>' +
+            '<div style="display:flex; gap:6px; margin-top:4px; align-items:center;">' +
+            '<label style="font-size:12px; color:var(--gray-500); white-space:nowrap;">Cost/unit:</label>' +
+            '<input type="text" inputmode="decimal" class="li-cost" value="' + (cost ? parseFloat(cost).toFixed(2) : '') + '" placeholder="0.00"' +
+            ' style="flex:1; padding:5px; text-align:right; border:1px solid var(--gray-300); border-radius:6px; background:#fff7ed;"' +
+            ' onfocus="this.select()" oninput="calcCostTotals()" onchange="saveItem(this)" onblur="applyCalc(this,2,null);">' +
+            '</div>' +
             '<div style="text-align:right; font-weight:600; font-size:15px; margin-top:6px; color:var(--gray-700);">' +
             '= <span class="li-total-display">$0.00</span>' +
             '<input type="hidden" class="li-total" value="0"></div>';
         container.appendChild(card);
         card.querySelector('.li-desc').focus();
-        calcTotals();
+        calcRow(card.querySelector('.li-qty'));
+    }
+
+    function setItemType(btn, type) {
+        var card = btn.closest('.li-card');
+        card.querySelector('.li-item-type').value = type;
+        card.querySelectorAll('.li-type-btn').forEach(function(b) {
+            var isActive = b.dataset.type === type;
+            var color = b.dataset.type === 'product' ? '#2563eb' : '#7c3aed';
+            b.style.background = isActive ? color : '#e5e7eb';
+            b.style.color = isActive ? '#fff' : '#374151';
+        });
+        saveItem(btn);
+        calcCostTotals();
     }
 
     // ---- Add from P&S catalog ----
@@ -510,7 +578,9 @@
         var opt = sel.options[sel.selectedIndex];
         var name = sel.value;
         var price = opt.getAttribute('data-price') || '';
-        addLineItem(name, price);
+        var item_type = opt.getAttribute('data-item-type') || 'product';
+        var cost = opt.getAttribute('data-cost') || '0';
+        addLineItem(name, price, item_type, cost);
         // Auto-save the new card
         var cards = document.querySelectorAll('#li-cards .li-card');
         var lastCard = cards[cards.length - 1];
@@ -535,6 +605,72 @@
 
     // ---- Save transcription/notes ----
     function saveEstimate() {
+        var btn = document.getElementById('btn-save');
+
+        // If recording is actively in progress, stop it first,
+        // then auto-submit the recording, then save the estimate.
+        if (memoMediaRecorder && memoMediaRecorder.state === 'recording') {
+            btn.disabled = true;
+            btn.textContent = 'Stopping recording…';
+            _afterMemoStopCallback = function() { _autoSubmitMemoThenSave(); };
+            stopMemoRecording();
+            return;
+        }
+
+        // If recording has stopped but the blob hasn't been submitted yet,
+        // auto-submit it before saving so it isn't lost.
+        if (memoAudioBlob) {
+            _autoSubmitMemoThenSave();
+            return;
+        }
+
+        _doSaveEstimate();
+    }
+
+    function _autoSubmitMemoThenSave() {
+        var btn = document.getElementById('btn-save');
+        btn.disabled = true;
+        btn.textContent = 'Saving recording…';
+
+        if (!memoAudioBlob) { _doSaveEstimate(); return; }
+
+        var ext = 'webm';
+        if (memoAudioBlob.type.indexOf('ogg') !== -1) ext = 'ogg';
+        else if (memoAudioBlob.type.indexOf('mp4') !== -1) ext = 'mp4';
+
+        var fd = new FormData();
+        fd.append('token', TOKEN);
+        fd.append('audio', memoAudioBlob, 'memo.' + ext);
+
+        fetch('/api/estimate/' + ESTIMATE_ID + '/add-audio', {method: 'POST', body: fd})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                memoAudioBlob = null;
+                var statusEl = document.getElementById('memo-submit-status');
+                statusEl.style.display = '';
+                statusEl.style.color = data.ok ? 'var(--green)' : 'var(--red)';
+                statusEl.textContent = data.ok
+                    ? 'Recording saved — transcription will appear shortly.'
+                    : (data.error || 'Recording upload failed.');
+                var submitBtn = document.getElementById('memo-submit-btn');
+                if (submitBtn && data.ok) submitBtn.style.display = 'none';
+                _doSaveEstimate();
+            })
+            .catch(function(err) {
+                btn.disabled = false;
+                btn.textContent = 'Save Changes';
+                alert('Failed to save recording before submitting: ' + err.message + '\nPlease try again.');
+            });
+    }
+
+    function _doSaveEstimate() {
+        // Flush any field that currently has focus — fires onchange/onblur
+        // handlers so in-progress line item edits and customer fields are saved
+        // before the estimate notes fetch goes out.
+        if (document.activeElement && document.activeElement !== document.body) {
+            document.activeElement.blur();
+        }
+
         var fd = new FormData();
         fd.append('token', TOKEN);
         var transcEl = document.getElementById('transcription-edit');
@@ -542,8 +678,9 @@
         var notesEl = document.getElementById('notes-edit');
         if (notesEl) fd.append('notes', notesEl.value);
 
-        document.getElementById('btn-save').disabled = true;
-        document.getElementById('btn-save').textContent = 'Saving...';
+        var btn = document.getElementById('btn-save');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
 
         fetch('/api/estimate/' + ESTIMATE_ID + '/update', {method: 'POST', body: fd})
             .then(function(r) { return r.json(); })
@@ -560,13 +697,13 @@
                     status.style.color = 'var(--red)';
                     status.textContent = data.error || 'Save failed';
                 }
-                document.getElementById('btn-save').disabled = false;
-                document.getElementById('btn-save').textContent = 'Save Changes';
+                btn.disabled = false;
+                btn.textContent = 'Save Changes';
             })
             .catch(function(err) {
                 alert('Error: ' + err.message);
-                document.getElementById('btn-save').disabled = false;
-                document.getElementById('btn-save').textContent = 'Save Changes';
+                btn.disabled = false;
+                btn.textContent = 'Save Changes';
             });
     }
 
@@ -711,6 +848,7 @@
     var memoRecordingInterval = null;
     var memoRecordingSeconds = 0;
     var hasMicSupport = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    var _afterMemoStopCallback = null;
 
     if (!hasMicSupport) {
         var unsupEl = document.getElementById('memo-mic-unsupported');
@@ -756,6 +894,11 @@
                 document.getElementById('memo-playback').src = URL.createObjectURL(memoAudioBlob);
                 document.getElementById('memo-audio-preview').style.display = '';
                 document.getElementById('memo-record-section').style.display = 'none';
+                if (typeof _afterMemoStopCallback === 'function') {
+                    var cb = _afterMemoStopCallback;
+                    _afterMemoStopCallback = null;
+                    cb();
+                }
             };
             memoMediaRecorder.start(1000);
 
@@ -810,26 +953,22 @@
     }
 
     function sendClientPDFByEmail() {
-        var email = document.getElementById('cust-email').value.trim();
-        if (!email) {
-            alert('No customer email saved. Add a customer email address first.');
+        if (!navigator.share) {
+            alert('Sharing is not supported on this device or browser.');
             return;
         }
+
+        var btn = document.querySelector('[onclick="sendClientPDFByEmail()"]');
+        var origText = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = 'Preparing PDF…'; }
+
         var sel = _selectedPhotoIds();
-        var pdfUrl = '/my-estimates/' + ESTIMATE_ID + '/client-pdf?token=' + TOKEN;
+        var pdfUrl = '/my-estimates/' + ESTIMATE_ID + '/client-pdf?token=' + TOKEN + '&share=1';
         if (sel.ids.length < sel.total) {
             pdfUrl += '&photos=' + sel.ids.join(',');
         }
 
-        if (!navigator.share) {
-            // Desktop fallback — no file attachment possible via mailto
-            var subject = encodeURIComponent('Your Estimate');
-            var body = encodeURIComponent('Please find your estimate attached.');
-            window.location.href = 'mailto:' + email + '?subject=' + subject + '&body=' + body;
-            return;
-        }
-
-        fetch(pdfUrl + '&share=1')
+        fetch(pdfUrl)
             .then(function(r) { return r.blob(); })
             .then(function(blob) {
                 var file = new File([blob], _buildPdfName(), {type: 'application/pdf'});
@@ -840,12 +979,11 @@
                 });
             })
             .catch(function(err) {
-                // Only fall back if it wasn't a user cancel
-                if (!err || err.name !== 'AbortError') {
-                    var subject = encodeURIComponent('Your Estimate');
-                    var body = encodeURIComponent('Please find your estimate attached.');
-                    window.location.href = 'mailto:' + email + '?subject=' + subject + '&body=' + body;
-                }
+                if (err && err.name === 'AbortError') return; // user cancelled — do nothing
+                alert('Could not prepare the PDF. Please try again.');
+            })
+            .finally(function() {
+                if (btn) { btn.disabled = false; btn.textContent = origText; }
             });
     }
 
