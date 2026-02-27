@@ -157,10 +157,12 @@
             {% if photos %}
             <div class="photo-gallery">
                 {% for p in photos %}
-                <div style="position: relative;">
+                <div id="photo-tile-{{ p.id }}" style="position: relative;">
                     <label style="position: absolute; top: 4px; left: 4px; z-index: 1; background: rgba(255,255,255,0.85); border-radius: 4px; padding: 2px 4px; cursor: pointer;">
                         <input type="checkbox" class="photo-select" value="{{ p.id }}" checked>
                     </label>
+                    <button type="button" onclick="deletePhoto({{ p.id }})"
+                            style="position:absolute; top:4px; right:4px; z-index:1; background:rgba(220,38,38,0.85); border:none; border-radius:4px; color:#fff; font-size:13px; line-height:1; padding:3px 6px; cursor:pointer;">✕</button>
                     <img src="/api/job-photos/{{ p.id }}?thumb=1" alt="Photo" style="width: 100%; border-radius: 6px; cursor: pointer;"
                          onclick="window.open('/api/job-photos/{{ p.id }}', '_blank')">
                     {% if p.caption %}
@@ -342,7 +344,21 @@
 
         {# --- Job Financials --- #}
         <div style="border: 1px solid var(--blue); border-top: 2px solid var(--blue); background: #f0f5ff; border-radius: 8px; padding: 20px;">
-            <label style="color: var(--blue-dark); font-size: 15px; text-transform: uppercase; font-weight: 700; margin-bottom: 16px; display: block; letter-spacing: 0.5px;">Job Financials</label>
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+                <label style="color: var(--blue-dark); font-size: 15px; text-transform: uppercase; font-weight: 700; margin: 0; letter-spacing: 0.5px;">Job Financials</label>
+                {% if margin_target or markup_required %}
+                <div style="display: flex; gap: 20px; align-items: center;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 11px; font-weight: 600; color: var(--blue-dark); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px;">Margin Target</div>
+                        <div style="font-size: 16px; font-weight: 700; color: var(--blue-dark);">{{ margin_target }}%</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 11px; font-weight: 600; color: var(--blue-dark); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px;">Markup Target</div>
+                        <div style="font-size: 16px; font-weight: 700; color: var(--blue-dark);">{{ markup_required }}%</div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
 
             <label style="color: var(--blue-dark); font-size: 13px; text-transform: uppercase; font-weight: 700; margin-bottom: 10px; display: block;">Estimated Costs</label>
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 18px;">
@@ -1074,6 +1090,21 @@
             url += '?photos=' + sel.ids.join(',');
         }
         window.location.href = url;
+    }
+
+    function deletePhoto(photoId) {
+        if (!confirm('Delete this photo? This cannot be undone.')) return;
+        fetch('/api/job-photos/' + photoId + '/delete', {method: 'POST'})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    var tile = document.getElementById('photo-tile-' + photoId);
+                    if (tile) tile.remove();
+                } else {
+                    alert(data.error || 'Failed to delete photo.');
+                }
+            })
+            .catch(function() { alert('Network error. Please try again.'); });
     }
 
     function toggleAllPhotos(checked) {

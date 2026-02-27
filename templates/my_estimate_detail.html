@@ -78,11 +78,13 @@
             </div>
             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
                 {% for p in photos %}
-                <div style="display: flex; flex-direction: column; gap: 4px;">
+                <div id="photo-tile-{{ p.id }}" style="display: flex; flex-direction: column; gap: 4px;">
                     <div style="position: relative; height: 90px;">
                         <label style="position: absolute; top: 4px; left: 4px; z-index: 1; background: rgba(255,255,255,0.9); border-radius: 4px; padding: 2px 4px; cursor: pointer;">
                             <input type="checkbox" class="photo-select" value="{{ p.id }}" checked>
                         </label>
+                        <button type="button" onclick="deletePhoto({{ p.id }})"
+                                style="position:absolute; top:4px; right:4px; z-index:1; background:rgba(220,38,38,0.85); border:none; border-radius:4px; color:#fff; font-size:13px; line-height:1; padding:3px 6px; cursor:pointer;">✕</button>
                         <img src="/api/job-photos/{{ p.id }}?thumb=1" alt="Photo"
                              style="width: 100%; height: 100%; object-fit: cover; border-radius: 6px; border: 1px solid var(--gray-200); cursor: pointer;"
                              onclick="window.open('/api/job-photos/{{ p.id }}', '_blank')">
@@ -171,7 +173,7 @@
                                placeholder="0.00"
                                style="flex:1; padding:5px; text-align:right; border:1px solid var(--gray-300); border-radius:6px; background:#fff7ed;"
                                onfocus="this.select()"
-                               oninput="calcCostTotals()"
+                               oninput="calcTotals()"
                                onchange="saveItem(this)"
                                onblur="applyCalc(this,2,null);">
                     </div>
@@ -226,13 +228,15 @@
             </div>
 
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-                <div style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:8px; padding:10px; text-align:center;">
+                <div id="li-margin-box" style="background:var(--gray-50); border:2px solid var(--gray-200); border-radius:8px; padding:10px; text-align:center;">
                     <div style="font-size:12px; color:var(--gray-500); margin-bottom:2px;">Margin</div>
                     <div id="li-margin" style="font-size:20px; font-weight:700; color:var(--gray-700);">—</div>
+                    {% if margin_target %}<div style="font-size:11px; color:var(--gray-400); margin-top:4px;">Target: {{ margin_target }}%</div>{% endif %}
                 </div>
-                <div style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:8px; padding:10px; text-align:center;">
+                <div id="li-markup-box" style="background:var(--gray-50); border:2px solid var(--gray-200); border-radius:8px; padding:10px; text-align:center;">
                     <div style="font-size:12px; color:var(--gray-500); margin-bottom:2px;">Markup</div>
                     <div id="li-markup" style="font-size:20px; font-weight:700; color:var(--gray-700);">—</div>
+                    {% if markup_required %}<div style="font-size:11px; color:var(--gray-400); margin-top:4px;">Target: {{ markup_required }}%</div>{% endif %}
                 </div>
             </div>
         </div>
@@ -343,6 +347,8 @@
     var JOB_ID = {{ estimate.job_id or 'null' }};
     var JOB_NAME = "{{ (job.job_name if job else '') | replace('"', '') }}";
     var EST_DATE = "{{ (estimate.created_at or '')[:10] }}";
+    var MARGIN_TARGET = {{ margin_target or 0 }};
+    var MARKUP_TARGET = {{ markup_required or 0 }};
     function getEstCost() {
         var mat = parseFloat(document.getElementById('li-mat-cost').value) || 0;
         var lab = parseFloat(document.getElementById('li-lab-cost').value) || 0;
@@ -450,6 +456,8 @@
 
         var marginEl = document.getElementById('li-margin');
         var markupEl = document.getElementById('li-markup');
+        var marginBox = document.getElementById('li-margin-box');
+        var markupBox = document.getElementById('li-markup-box');
         var estCost = getEstCost();
         if (estCost > 0 && grandTotal > 0) {
             var grossProfit = grandTotal - estCost;
@@ -460,11 +468,21 @@
             markupEl.textContent = markup.toFixed(1) + '%';
             marginEl.style.color = positive ? 'var(--green)' : 'var(--red)';
             markupEl.style.color = positive ? 'var(--green)' : 'var(--red)';
+            function targetBorder(val, target) {
+                if (!target) return 'var(--gray-200)';
+                if (val >= target) return 'var(--green)';
+                if (val >= target - 5) return '#f59e0b';
+                return 'var(--red)';
+            }
+            marginBox.style.borderColor = targetBorder(margin, MARGIN_TARGET);
+            markupBox.style.borderColor = targetBorder(markup, MARKUP_TARGET);
         } else {
             marginEl.textContent = '—';
             markupEl.textContent = '—';
             marginEl.style.color = 'var(--gray-700)';
             markupEl.style.color = 'var(--gray-700)';
+            marginBox.style.borderColor = 'var(--gray-200)';
+            markupBox.style.borderColor = 'var(--gray-200)';
         }
     }
 
@@ -548,7 +566,7 @@
             '<label style="font-size:12px; color:var(--gray-500); white-space:nowrap;">Cost/unit:</label>' +
             '<input type="text" inputmode="decimal" class="li-cost" value="' + (cost ? parseFloat(cost).toFixed(2) : '') + '" placeholder="0.00"' +
             ' style="flex:1; padding:5px; text-align:right; border:1px solid var(--gray-300); border-radius:6px; background:#fff7ed;"' +
-            ' onfocus="this.select()" oninput="calcCostTotals()" onchange="saveItem(this)" onblur="applyCalc(this,2,null);">' +
+            ' onfocus="this.select()" oninput="calcTotals()" onchange="saveItem(this)" onblur="applyCalc(this,2,null);">' +
             '</div>' +
             '<div style="text-align:right; font-weight:600; font-size:15px; margin-top:6px; color:var(--gray-700);">' +
             '= <span class="li-total-display">$0.00</span>' +
@@ -568,7 +586,7 @@
             b.style.color = isActive ? '#fff' : '#374151';
         });
         saveItem(btn);
-        calcCostTotals();
+        calcTotals();
     }
 
     // ---- Add from P&S catalog ----
@@ -750,6 +768,22 @@
         document.querySelectorAll('.photo-select').forEach(function(cb) { cb.checked = checked; });
     }
 
+    // ---- Delete photo ----
+    function deletePhoto(photoId, tileEl) {
+        if (!confirm('Delete this photo? This cannot be undone.')) return;
+        fetch('/api/job-photos/' + photoId + '/delete', {method: 'POST'})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    var tile = tileEl || document.getElementById('photo-tile-' + photoId);
+                    if (tile) tile.remove();
+                } else {
+                    alert(data.error || 'Failed to delete photo.');
+                }
+            })
+            .catch(function() { alert('Network error. Please try again.'); });
+    }
+
     // ---- Save photo caption (debounced) ----
     var _captionTimers = {};
     function scheduleCaption(photoId, val) {
@@ -812,6 +846,15 @@
                     cb.checked = true;
                     lbl.appendChild(cb);
                     wrap.appendChild(lbl);
+
+                    var delBtn = document.createElement('button');
+                    delBtn.type = 'button';
+                    delBtn.style.cssText = 'position:absolute; top:4px; right:4px; z-index:1; background:rgba(220,38,38,0.85); border:none; border-radius:4px; color:#fff; font-size:13px; line-height:1; padding:3px 6px; cursor:pointer;';
+                    delBtn.textContent = '✕';
+                    (function(pid, outerEl) {
+                        delBtn.onclick = function() { deletePhoto(pid, outerEl); };
+                    })(data.photo_id, outer);
+                    wrap.appendChild(delBtn);
 
                     var img = document.createElement('img');
                     img.src = '/api/job-photos/' + data.photo_id + '?thumb=1';

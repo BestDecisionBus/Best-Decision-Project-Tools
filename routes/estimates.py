@@ -14,6 +14,24 @@ import database
 estimates_bp = Blueprint('estimates', __name__)
 
 
+def _compute_finance_targets(token_str, token_data):
+    """Return (margin_target, markup_required) matching the finance dashboard logic."""
+    income_target_pct = (token_data or {}).get("income_target_pct", 0) or 0
+    monthly_overhead = (token_data or {}).get("monthly_overhead", 0) or 0
+    try:
+        job_financials = database.get_job_financials(token_str)
+        t_earned = sum(
+            jf["budget"] * jf["completion_pct"] / 100
+            for jf in job_financials
+        )
+        overhead_pct = round((monthly_overhead * 12) / t_earned * 100, 1) if (monthly_overhead > 0 and t_earned > 0) else 0
+    except Exception:
+        overhead_pct = 0
+    margin_target = round(overhead_pct + income_target_pct, 1)
+    markup_required = round(margin_target / (100 - margin_target) * 100, 1) if margin_target < 100 else 0
+    return margin_target, markup_required
+
+
 # ---------------------------------------------------------------------------
 # Lazy import of app-level helpers to avoid circular imports
 # ---------------------------------------------------------------------------
@@ -288,6 +306,8 @@ def my_estimate_detail(estimate_id):
     items = database.get_estimate_items(estimate_id)
     products_services = database.get_products_services_by_token(token_str, active_only=True)
 
+    _margin_target, _markup_required = _compute_finance_targets(token_str, token_data)
+
     return render_template(
         "my_estimate_detail.html",
         token=token_data,
@@ -297,6 +317,8 @@ def my_estimate_detail(estimate_id):
         photos=photos,
         items=items,
         products_services=products_services,
+        margin_target=_margin_target,
+        markup_required=_markup_required,
     )
 
 
@@ -562,6 +584,8 @@ def admin_estimate_detail(estimate_id):
     is_project = est.get("approval_status", "pending") not in ("pending", "declined")
     all_jobs = database.get_jobs_by_token(est["token"])
 
+    _margin_target, _markup_required = _compute_finance_targets(est["token"], token_data)
+
     return render_template(
         "admin/estimate_detail.html",
         estimate=est,
@@ -575,6 +599,8 @@ def admin_estimate_detail(estimate_id):
         job_labor=job_labor,
         is_project=is_project,
         all_jobs=all_jobs,
+        margin_target=_margin_target,
+        markup_required=_markup_required,
     )
 
 
@@ -1491,6 +1517,8 @@ def admin_job_tasks(job_id):
     tasks = database.get_job_tasks(job_id)
     token_data = database.get_token(job["token"])
 
+    _margin_target, _markup_required = _compute_finance_targets(job["token"], token_data)
+
     return render_template(
         "admin/estimate_detail.html",
         job=job,
@@ -1498,6 +1526,8 @@ def admin_job_tasks(job_id):
         selected_token=token_data,
         estimate=None,
         photos=[],
+        margin_target=_margin_target,
+        markup_required=_markup_required,
     )
 
 

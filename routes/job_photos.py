@@ -411,6 +411,33 @@ def api_update_photo_caption(photo_id):
 
 
 # ---------------------------------------------------------------------------
+# 3c. Delete photo API  -- POST /api/job-photos/<id>/delete
+# ---------------------------------------------------------------------------
+
+@job_photos_bp.route("/api/job-photos/<int:photo_id>/delete", methods=["POST"])
+def api_delete_photo(photo_id):
+    photo = database.get_job_photo(photo_id)
+    if not photo:
+        return jsonify({"error": "Not found"}), 404
+
+    if not current_user.is_authenticated:
+        h = _helpers()
+        employee = h._require_employee_session(photo["token"])
+        if not employee:
+            return jsonify({"error": "Not authenticated"}), 401
+
+    image_path = config.JOB_PHOTOS_DIR / photo["image_file"]
+    thumb_path = config.JOB_PHOTOS_DIR / photo["thumb_file"] if photo.get("thumb_file") else None
+    if image_path.exists():
+        image_path.unlink()
+    if thumb_path and thumb_path.exists():
+        thumb_path.unlink()
+
+    database.delete_job_photo(photo_id)
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
 # 4. Admin browse  -- GET /admin/job-photos
 #    Level 1: jobs with photos (no params)
 #    Level 2: week folders for a job (?job_id=X)
