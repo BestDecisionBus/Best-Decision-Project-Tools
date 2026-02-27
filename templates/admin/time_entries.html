@@ -19,7 +19,13 @@
         {% endfor %}
         {% endwith %}
 
-        <h2>Time Entries</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h2 style="margin: 0;">Time Entries</h2>
+            {% if current_user.is_admin or current_user.is_bdb %}
+            <a href="{{ url_for('time_admin.admin_manual_entry') }}{% if selected_token %}?token={{ selected_token.token }}{% endif %}"
+               class="btn btn-green">+ Add Entry</a>
+            {% endif %}
+        </div>
 
         {% if current_user.is_bdb %}
             {% if tokens|length > 1 %}

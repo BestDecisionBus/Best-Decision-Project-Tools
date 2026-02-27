@@ -1188,22 +1188,28 @@ def create_manual_entry(employee_id, job_id, token_str, manual_time_in, manual_t
                         admin_notes, changed_by, reason=""):
     conn = get_db()
     now = datetime.now().isoformat()
+    has_out = bool(manual_time_out and manual_time_out.strip())
     total_hours = None
-    try:
-        t_in = datetime.fromisoformat(manual_time_in)
-        t_out = datetime.fromisoformat(manual_time_out)
-        total_hours = round((t_out - t_in).total_seconds() / 3600, 2)
-    except (ValueError, TypeError):
-        pass
+    if has_out:
+        try:
+            t_in = datetime.fromisoformat(manual_time_in)
+            t_out = datetime.fromisoformat(manual_time_out)
+            total_hours = round((t_out - t_in).total_seconds() / 3600, 2)
+        except (ValueError, TypeError):
+            pass
+    status = "completed" if has_out else "active"
+    clock_out = manual_time_out if has_out else None
     cur = conn.execute(
         """INSERT INTO time_entries
            (employee_id, job_id, token, clock_in_time, clock_in_method,
             clock_out_time, clock_out_method,
             manual_time_in, manual_time_out,
             admin_notes, total_hours, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 'manual', ?, 'manual', ?, ?, ?, ?, 'completed', ?, ?)""",
-        (employee_id, job_id, token_str, manual_time_in, manual_time_out,
-         manual_time_in, manual_time_out, admin_notes, total_hours, now, now),
+           VALUES (?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (employee_id, job_id, token_str, manual_time_in,
+         clock_out, 'manual' if has_out else None,
+         manual_time_in, clock_out,
+         admin_notes, total_hours, status, now, now),
     )
     entry_id = cur.lastrowid
     conn.execute(

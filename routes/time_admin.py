@@ -670,14 +670,29 @@ def admin_manual_entry():
         manual_out = request.form.get("manual_time_out", "").strip()
         notes = request.form.get("admin_notes", "").strip()
 
-        if not all([employee_id, job_id, manual_in, manual_out, token_str, notes]):
-            flash("All fields including notes are required for manual entries.", "error")
+        errors = []
+        if not token_str:
+            errors.append("Company token missing — navigate back and reload the page.")
+        if not employee_id:
+            errors.append("Employee is required.")
+        if not job_id:
+            errors.append("Job is required.")
+        if not manual_in:
+            errors.append("Clock-in time is required.")
+        if not notes:
+            errors.append("Admin notes are required.")
+        if errors:
+            for e in errors:
+                flash(e, "error")
         else:
             entry_id = database.create_manual_entry(
-                employee_id, job_id, token_str, manual_in, manual_out,
+                employee_id, job_id, token_str, manual_in, manual_out or None,
                 notes, current_user.username, reason=notes,
             )
-            flash("Manual entry created.", "success")
+            if manual_out:
+                flash("Manual entry created (clocked in and out).", "success")
+            else:
+                flash("Clock-in entry created. Employee is now shown as active.", "success")
             return redirect(url_for("time_admin.admin_time_entries", token=token_str))
 
     return render_template(

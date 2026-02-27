@@ -19,8 +19,8 @@
         {% endfor %}
         {% endwith %}
 
-        <a href="{{ url_for('admin.admin_dashboard') }}{% if selected_token %}?token={{ selected_token.token }}{% endif %}"
-           style="color: var(--blue); text-decoration: none; font-size: 14px;">&larr; Back to Dashboard</a>
+        <a href="{{ url_for('time_admin.admin_time_entries') }}{% if selected_token %}?token={{ selected_token.token }}{% endif %}"
+           style="color: var(--blue); text-decoration: none; font-size: 14px;">&larr; Back to Time Entries</a>
 
         <h2 style="margin-top: 12px;">Create Manual Entry</h2>
 
@@ -70,14 +70,20 @@
 
                 <div class="form-row">
                     <div class="form-group" style="flex: 1;">
-                        <label for="manual_time_in">Time In</label>
+                        <label for="manual_time_in">Clock In <span style="color: var(--red);">*</span></label>
                         <input type="datetime-local" id="manual_time_in" name="manual_time_in" required>
                     </div>
                     <div class="form-group" style="flex: 1;">
-                        <label for="manual_time_out">Time Out</label>
-                        <input type="datetime-local" id="manual_time_out" name="manual_time_out" required>
+                        <label for="manual_time_out">
+                            Clock Out
+                            <span style="font-weight: 400; color: var(--gray-400); font-size: 13px;">— leave blank to clock in only</span>
+                        </label>
+                        <input type="datetime-local" id="manual_time_out" name="manual_time_out">
                     </div>
                 </div>
+                <p id="entry-mode-hint" style="font-size: 13px; color: var(--gray-500); margin: -8px 0 16px;">
+                    Providing both times creates a completed entry. Clock In only creates an active entry the employee can clock out of normally.
+                </p>
 
                 <div class="form-group">
                     <label for="admin_notes">Admin Notes (required — explain the reason for this manual entry)</label>

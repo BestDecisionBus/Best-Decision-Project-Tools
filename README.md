@@ -1,6 +1,6 @@
 # BDB Tools
 
-A multi-tenant web application that gives field service companies four essential operational tools — time tracking, receipt capture, employee scheduling, and job site photo documentation — all accessible from a mobile browser with no app install required.
+A multi-tenant web application that gives field service companies five essential operational tools — time tracking, receipt capture, employee scheduling, job site photo documentation, and field estimating — all accessible from a mobile browser with no app install required.
 
 ---
 
@@ -22,9 +22,10 @@ A multi-tenant web application that gives field service companies four essential
 
 **Scheduling**
 - Drag-and-drop weekly schedule builder
-- Shift presets (full day, morning, afternoon, custom)
+- Customizable shift types (full day, morning, afternoon, or any custom time range)
 - Employee-facing schedule view (upcoming 14 days)
 - Dedicated scheduler role with limited access
+- Per-shift job task notes
 
 **Job Photos**
 - Single photo capture or multi-select batch upload from device library
@@ -32,6 +33,22 @@ A multi-tenant web application that gives field service companies four essential
 - Photos organized by job and week
 - Download as ZIP or PDF report with GPS coordinates
 - Thumbnail generation for fast browsing
+
+**Estimates / Projects**
+- Field estimate capture from mobile: select job, record voice memo, add photos
+- Automatic audio transcription via OpenAI Whisper
+- Line-item builder: description, quantity, unit, unit price, taxable flag
+- Reusable product/service catalog for fast line-item entry
+- Customer details: name, phone, email, client budget
+- Approval lifecycle: Pending → Accepted → In Progress → Completed → Declined
+- Dual document identity: `Est #` (pending/declined) → `Proj #` (accepted+)
+- Financial tracking: estimate value, estimated vs actual materials + labor costs, payments collected, WIP completion %
+- Sales tax rate per estimate
+- Three report outputs: internal PDF, internal XLSX, client-facing Scope PDF
+- "Send to job folder" links estimate to the job's photo/file system
+- Per-job task checklist (auto-populated from estimate or added manually)
+- Employee "My Estimates" view for field-submitted estimates
+- Admin estimate notes and customer message fields
 
 **Platform**
 - Multi-tenant architecture — each company gets a unique URL token
@@ -41,6 +58,7 @@ A multi-tenant web application that gives field service companies four essential
 - Context-aware admin guide (company admins see only their relevant sections)
 - Comprehensive employee help page
 - Security headers, rate limiting, file validation via magic bytes
+- **CFO Dashboard** — financial health KPIs, WIP gauges, and configurable business targets
 
 ---
 
@@ -187,6 +205,16 @@ All configuration is via environment variables in `.env`:
 | Download receipt PDFs | Receipts > Browse > select month > "Download ZIP" |
 | Build a schedule | Employees > Schedules > click cells to add shifts |
 | Browse job photos | Jobs > Job Photos > select job > select week |
+| Create an estimate | Estimates > "+ New Estimate" or field capture via employee URL |
+| View estimate/project detail | Estimates > click any row > View |
+| Download estimate PDF | Estimate Detail > "Download PDF" or "Scope PDF" |
+| Download estimate XLSX | Estimate Detail > "Download XLSX" |
+| Advance estimate to project | Estimate Detail > change Approval Status to "Accepted" |
+| View financial KPIs | Admin > CFO Dashboard |
+| Set margin / overhead targets | CFO Dashboard > edit Income Target % and Monthly Overhead $ |
+| Manage products/services catalog | Admin > Products & Services |
+| Manage shift types | Admin > Shift Types |
+| Manage message snippets | Admin > Message Snippets |
 | View audit trail | Admin > Audit Log |
 
 **Company admin portal:** Company-specific admins log in at `/company-admin/login`. They see only their own company's data and do not have access to Tokens or Users management.
@@ -205,6 +233,8 @@ All configuration is via environment variables in `.env`:
 | **Receipt Capture** | Take a photo or select from library > select job and categories > record a voice memo > submit. Available only if admin has granted receipt access. |
 | **Your Schedule** | View upcoming shifts for the next 14 days. |
 | **Job Photos** | Select a job > take a photo or select multiple from library > add optional captions > submit. |
+| **Estimate** | Select a job > record a voice memo describing the scope > submit for transcription. Available only if admin has granted estimate access. |
+| **My Estimates** | View all estimates you have submitted and their current status. |
 | **Help** | Detailed instructions for all tools, GPS setup, and common scenarios (forgot to clock out, etc.) |
 
 **Supported file formats:**
@@ -216,6 +246,52 @@ All configuration is via environment variables in `.env`:
 
 ---
 
+## CFO Dashboard
+
+The CFO Dashboard (`/admin/finance`) provides a real-time financial health view across all estimates and projects for a company.
+
+**Configurable targets (saved per company):**
+
+| Setting | Description |
+|---|---|
+| Income Target % | Your target net income as a percentage of earned revenue |
+| Monthly Overhead $ | Fixed monthly costs (rent, insurance, office staff, truck payments, etc.) |
+| Cash on Hand $ | Total liquid cash across all accounts |
+
+**Derived targets (calculated automatically):**
+
+| KPI | Formula |
+|---|---|
+| Overhead % | (Monthly overhead × 12) ÷ earned revenue |
+| Margin Target | Overhead % + Income Target % |
+| Markup Required | Margin target ÷ (1 − margin target) |
+
+**Executive KPI cards:**
+
+| KPI | Description |
+|---|---|
+| Pipeline Value | Total value of pending estimates |
+| Contracted Revenue | Total value of accepted + in-progress projects |
+| Cash Collected | Total payments received across all projects |
+| Earned Revenue | Revenue recognized based on % of work completed (budget × completion %) |
+| Unearned Liability | Cash collected ahead of work completed — a liability until earned |
+| Total Costs | Actual materials + labor costs incurred |
+| Net Income | Earned revenue − total costs − overhead allocation |
+| Net Income % | Net income as a percentage of earned revenue (shown red/green vs target) |
+| Days Cash on Hand | Cash on Hand ÷ daily overhead (green ≥ 60 days, red < 30 days) |
+| Billing Position | Cash collected vs earned revenue — shows overbilled or underbilled amount |
+
+**Visual health gauges:**
+
+| Gauge | What it shows |
+|---|---|
+| Overall Margin | (Earned revenue − total costs) ÷ earned revenue across all projects |
+| WIP Income vs Progress | Cash collected vs what should be collected based on % complete |
+| WIP Costs vs Progress | Actual costs vs expected costs based on % complete |
+| Budget Consumption | Actual costs as a percentage of total estimated budget |
+
+---
+
 ## Project Structure
 
 ```
@@ -223,9 +299,9 @@ Best-Decision-Business-Tools/
 │
 ├── app.py                  # Flask app, auth system, middleware, shared routes, blueprint registration
 ├── config.py               # Paths, environment variables, directory creation
-├── database.py             # SQLite schema, migrations, all CRUD functions (1750 lines)
+├── database.py             # SQLite schema, migrations, all CRUD functions (~3200 lines)
 ├── gunicorn.conf.py        # Gunicorn config: 2 workers, 300s timeout, task queue startup
-├── task_queue.py           # Background worker: DB polling, file-lock GPU exclusivity, receipt processing
+├── task_queue.py           # Background worker: DB polling, file-lock GPU exclusivity, receipt/estimate processing
 ├── transcriber.py          # Whisper model loader and transcription
 ├── pdf_generator.py        # Receipt PDF generation, EXIF orientation fix, thumbnail creation
 ├── requirements.txt        # Python dependencies
@@ -233,7 +309,10 @@ Best-Decision-Business-Tools/
 ├── .env                    # Environment variables (not committed)
 │
 ├── routes/
-│   ├── admin.py            # Dashboard, tokens, users, employees, jobs, categories, common tasks, guide
+│   ├── admin.py            # Dashboard, tokens, users, employees, jobs, categories, shift types,
+│   │                       #   message snippets, common tasks, guide, finance dashboard
+│   ├── estimates.py        # Estimates/projects CRUD, line items, reports (PDF/XLSX/scope PDF),
+│   │                       #   field capture, my-estimates, job tasks, products/services catalog
 │   ├── time_admin.py       # Time entries, manual entries, export, payroll reports, audit log
 │   ├── timekeeper.py       # Employee clock in/out API, timekeeper page, help page
 │   ├── receipts.py         # Receipt capture page, upload API with file validation
@@ -246,9 +325,15 @@ Best-Decision-Business-Tools/
 │   ├── capture.html        # Receipt capture (employee)
 │   ├── company_home.html   # Company landing page with login and tool grid
 │   ├── company_admin_login.html
-│   ├── admin/              # 20+ admin panel templates
+│   ├── admin/              # 25+ admin panel templates
 │   │   ├── _nav.html       # Two-tier navigation (main tabs + sub-nav)
 │   │   ├── dashboard.html  # Stat cards, active entries, schedule, payroll, job costs
+│   │   ├── finance_dashboard.html  # CFO Dashboard: KPI cards, health gauges, WIP tracking
+│   │   ├── estimates.html          # Estimates/projects list with status badges and cost columns
+│   │   ├── estimate_detail.html    # Full estimate editor: line items, costs, reports, approval
+│   │   ├── products_services.html  # Product/service catalog management
+│   │   ├── message_snippets.html   # Reusable message snippet management
+│   │   ├── shift_types.html        # Custom shift type management
 │   │   ├── guide.html      # Context-aware admin guide (BDB vs company)
 │   │   └── ...             # time_entries, employees, jobs, receipts, schedules, etc.
 │   ├── employee/           # Employee-facing templates
@@ -268,6 +353,7 @@ Best-Decision-Business-Tools/
 │   └── bdb_tools.db        # SQLite database (auto-created)
 │
 ├── receipts/               # Receipt files: receipts/{token}/{YYYY-MM}/*.{jpg,webm,pdf}
+├── estimates/              # Estimate audio files: estimates/{token}/*.{webm,mp4}
 ├── job_photos/             # Job photos: job_photos/{token}/{job-name}/{YYYY-Www}/*.jpg
 ├── exports/                # Temporary export files (XLSX)
 │
@@ -303,7 +389,7 @@ Gunicorn configuration (`gunicorn.conf.py`):
 | bind | `0.0.0.0:5003` | All interfaces, port 5003 |
 | workers | `2` | Pre-fork workers (each loads Whisper model) |
 | timeout | `300` | 5 minutes, accommodates large uploads and Whisper processing |
-| post_fork | starts task_queue | Background worker for receipt transcription |
+| post_fork | starts task_queue | Background worker for receipt + estimate transcription |
 
 ### systemd Service
 
@@ -347,10 +433,10 @@ sudo systemctl restart bdb-tools
 ```bash
 # Add to crontab: crontab -e
 0 3 * * * cp ~/Best-Decision-Business-Tools/instance/bdb_tools.db ~/backups/bdb_tools_$(date +\%Y\%m\%d).db
-0 4 * * 0 tar czf ~/backups/bdb_files_$(date +\%Y\%m\%d).tar.gz ~/Best-Decision-Business-Tools/receipts ~/Best-Decision-Business-Tools/job_photos ~/Best-Decision-Business-Tools/static/logos
+0 4 * * 0 tar czf ~/backups/bdb_files_$(date +\%Y\%m\%d).tar.gz ~/Best-Decision-Business-Tools/receipts ~/Best-Decision-Business-Tools/estimates ~/Best-Decision-Business-Tools/job_photos ~/Best-Decision-Business-Tools/static/logos
 ```
 
-**File permissions:** The Gunicorn process runs as the user specified in the service file. Ensure that user has read/write access to `instance/`, `receipts/`, `job_photos/`, `exports/`, and `static/logos/`.
+**File permissions:** The Gunicorn process runs as the user specified in the service file. Ensure that user has read/write access to `instance/`, `receipts/`, `estimates/`, `job_photos/`, `exports/`, and `static/logos/`.
 
 ---
 
@@ -374,6 +460,12 @@ sudo systemctl restart bdb-tools
 | POST | `/api/job-photos/upload` | Token | Upload photo (FormData: `token`, `job_id`, `image`, `caption`, GPS) |
 | GET | `/api/job-photos/<id>` | None | Serve photo (add `?thumb=1` for thumbnail) |
 | GET | `/schedule` | Session | Employee schedule view |
+| GET | `/estimate` | Session | Field estimate capture page |
+| POST | `/api/estimate/upload` | Token | Submit estimate (FormData: `token`, `job_id`, `audio`) |
+| GET | `/api/estimate/status/<id>` | None | Check estimate transcription status |
+| GET | `/my-estimates` | Session | Employee: list of submitted estimates |
+| GET | `/my-estimates/<id>` | Session | Employee: estimate detail view |
+| GET | `/my-estimates/<id>/client-pdf` | Session | Employee: download client-facing scope PDF |
 | GET | `/help` | None | Employee help page |
 
 ### Shared Data APIs
@@ -385,8 +477,9 @@ sudo systemctl restart bdb-tools
 | GET | `/api/common-tasks?token=X` | Token | List active common tasks |
 | GET | `/api/check-username?username=X` | Login | Check if username is available |
 | GET | `/api/geocode?address=X` | Login | Geocode an address via Nominatim |
+| GET | `/api/estimate/geocode` | Token | Geocode address for estimate job |
 
-### Admin Routes
+### Admin Routes — Time & Payroll
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
@@ -394,12 +487,6 @@ sudo systemctl restart bdb-tools
 | GET/POST | `/company-admin/login` | None | Company admin login |
 | GET | `/admin/logout` | Login | Admin logout |
 | GET | `/admin/` | Admin | Dashboard |
-| GET/POST | `/admin/tokens` | BDB | Token (company) management |
-| GET/POST | `/admin/users` | BDB Admin | BDB user management |
-| GET/POST | `/admin/employees` | Admin | Employee management |
-| GET/POST | `/admin/jobs` | Admin | Job management |
-| GET/POST | `/admin/categories` | Admin | Expense category management |
-| GET/POST | `/admin/common-tasks` | Admin | Common task management |
 | GET | `/admin/time-entries` | Admin | Time entries list with filters |
 | GET | `/admin/time-entries/<id>` | Admin | Time entry detail with GPS map |
 | POST | `/admin/time-entries/<id>/notes` | Admin | Update admin notes |
@@ -409,22 +496,61 @@ sudo systemctl restart bdb-tools
 | GET/POST | `/admin/manual-entry` | Admin | Create manual time entry |
 | GET | `/admin/export` | Admin | Payroll export page |
 | GET | `/admin/audit-log` | Login | View audit trail |
+
+### Admin Routes — Receipts
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
 | GET | `/admin/receipts` | Admin | Receipt dashboard |
 | GET | `/admin/receipts/browse` | Admin | Browse receipts by company/month |
 | GET | `/admin/receipts/<id>` | Admin | Receipt detail |
 | GET | `/admin/receipts/download/<id>/<type>` | Admin | Download receipt file (image/audio/pdf) |
 | GET | `/admin/receipts/download-zip/<token>/<month>` | Admin | Download monthly receipt ZIP |
+| POST | `/admin/receipts/<id>/delete` | Admin | Delete receipt |
+
+### Admin Routes — Estimates & Projects
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/admin/estimates` | Admin | Estimates/projects list with cost columns and status badges |
+| POST | `/admin/estimates/create` | Admin | Create new estimate |
+| GET | `/admin/estimates/<id>` | Admin | Estimate detail — edit all fields, manage line items |
+| POST | `/admin/estimates/<id>/update` | Admin | Save estimate field changes |
+| POST | `/admin/estimates/<id>/delete` | Admin | Delete estimate |
+| GET | `/admin/estimates/<id>/report/pdf` | Admin | Download internal PDF report |
+| GET | `/admin/estimates/<id>/report/xlsx` | Admin | Download internal XLSX report |
+| GET | `/admin/estimates/<id>/report/scope-pdf` | Admin | Download client-facing scope PDF |
+| GET | `/admin/estimates/<id>/report/client-pdf` | Admin | Download client-facing PDF (alternate format) |
+| POST | `/admin/estimates/<id>/send-to-job-folder` | Admin | Link estimate to job folder |
+| POST | `/admin/estimates/<id>/items/create` | Admin | Add line item to estimate |
+| POST | `/admin/estimates/items/<item_id>/update` | Admin | Update line item |
+| POST | `/admin/estimates/items/<item_id>/delete` | Admin | Delete line item |
+| POST | `/admin/estimates/<id>/items/save-product` | Admin | Save line item to product catalog |
+| GET | `/admin/job-tasks/<job_id>` | Admin | View job task checklist |
+| POST | `/admin/job-tasks/<job_id>/create` | Admin | Add task to job checklist |
+| POST | `/admin/job-tasks/<task_id>/toggle` | Admin | Toggle task complete/incomplete |
+
+### Admin Routes — CFO Dashboard & Finance
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/admin/finance` | Admin | CFO Dashboard — KPI cards and health gauges |
+| POST | `/admin/finance/targets` | Admin | Save income target, overhead, cash on hand |
+
+### Admin Routes — Job Photos
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
 | GET | `/admin/job-photos` | Login | Browse job photos |
 | GET | `/admin/job-photos/<id>/detail` | Login | Photo detail with GPS |
 | GET | `/admin/job-photos/download-zip/<job_id>/<week>` | Login | Download weekly photo ZIP |
 | GET | `/admin/job-photos/download-pdf/<job_id>/<week>` | Login | Download weekly photo PDF report |
-| GET | `/admin/schedules` | Login | Admin schedule view |
-| GET | `/admin/guide` | Admin | Admin guide (context-aware) |
 
-### Scheduler APIs
+### Admin Routes — Scheduling
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
+| GET | `/admin/schedules` | Login | Admin schedule view |
 | GET | `/scheduler` | Scheduler | Scheduler dashboard |
 | GET | `/scheduler/api/schedules` | Login | List schedules for date range |
 | POST | `/scheduler/api/schedules` | Scheduler | Create schedule |
@@ -433,37 +559,62 @@ sudo systemctl restart bdb-tools
 | POST | `/scheduler/api/employees` | Scheduler | Quick-add employee |
 | POST | `/scheduler/api/jobs` | Scheduler | Quick-add job |
 
+### Admin Routes — Company & User Management
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET/POST | `/admin/tokens` | BDB | Token (company) management |
+| GET/POST | `/admin/users` | BDB Admin | BDB user management |
+| GET/POST | `/admin/employees` | Admin | Employee management |
+| GET/POST | `/admin/jobs` | Admin | Job management |
+| GET/POST | `/admin/categories` | Admin | Expense category management |
+| GET/POST | `/admin/common-tasks` | Admin | Common task management (schedule note presets) |
+| GET/POST | `/admin/shift-types` | Admin | Shift type management (custom schedule presets) |
+| GET/POST | `/admin/products-services` | Admin | Products & services catalog for estimate line items |
+| GET/POST | `/admin/message-snippets` | Admin | Reusable message snippet management |
+| GET | `/admin/guide` | Admin | Admin guide (context-aware) |
+
 ---
 
 ## Database Schema
 
-11 tables with token-based multi-tenant isolation:
+18 tables with token-based multi-tenant isolation:
 
 ```
 tokens ─────┬── users
              ├── employees ──── time_entries ──── audit_log
              ├── jobs ─────────┬── time_entries
-             │                 ├── schedules
+             │                 ├── schedules ──── job_tasks
              │                 ├── job_photos
-             │                 └── submissions
-             ├── categories ──── submissions
+             │                 ├── submissions
+             │                 └── estimates ──── estimate_items
+             ├── categories ───── submissions (via submission_categories)
              ├── common_tasks
-             └── submissions
+             ├── shift_types
+             ├── products_services
+             └── message_snippets
 ```
 
 | Table | Purpose | Key Columns |
 |---|---|---|
-| `tokens` | Company tenants | token, company_name, logo_file, labor_burden_pct, is_active |
+| `tokens` | Company tenants | token, company_name, logo_file, labor_burden_pct, income_target_pct, monthly_overhead, cash_on_hand, is_active |
 | `users` | Admin panel users | username, password_hash, role, token (NULL = BDB user) |
-| `employees` | Company workers | name, employee_id, token, username, hourly_wage, receipt_access |
+| `employees` | Company workers | name, employee_id, token, username, hourly_wage, receipt_access, estimate_access |
 | `jobs` | Job sites | job_name, job_address, latitude, longitude, token |
 | `categories` | Expense categories | name, token, sort_order |
+| `common_tasks` | Schedule note presets | name, token, sort_order |
+| `shift_types` | Custom shift presets | name, start_time, end_time, token, sort_order |
 | `time_entries` | Clock records | employee_id, job_id, clock_in/out times + GPS, manual overrides, status |
 | `submissions` | Receipt uploads | token, image_file, audio_file, pdf_file, transcription, status |
-| `schedules` | Work schedules | employee_id, job_id, date, start_time, end_time, shift_type |
+| `submission_categories` | Receipt → category join | submission_id, category_id, amount |
+| `schedules` | Work schedules | employee_id, job_id, date, start_time, end_time, shift_type, job_task_id |
 | `job_photos` | Site photos | job_id, week_folder, image_file, thumb_file, caption, GPS |
-| `common_tasks` | Schedule note presets | name, token, sort_order |
-| `audit_log` | Change history | time_entry_id, action, field_changed, old_value, new_value, changed_by |
+| `estimates` | Estimate / project records | job_id, token, title, transcription, approval_status, estimate_value, est/actual materials + labor costs, collected, completion_pct, customer info, sales_tax_rate, estimate_number |
+| `estimate_items` | Estimate line items | estimate_id, description, quantity, unit, unit_price, total, taxable, item_type, unit_cost |
+| `products_services` | Catalog for estimate items | name, unit_price, unit_cost, item_type, token, sort_order |
+| `message_snippets` | Reusable text blocks | name, token, sort_order |
+| `job_tasks` | Per-job task checklists | job_id, name, source, sort_order, is_active, token |
+| `audit_log` | Change history | time_entry_id, action, field_changed, old_value, new_value, changed_by, reason |
 
 For full schema details including column types, indexes, and constraints, see [ARCHITECTURE.md](ARCHITECTURE.md#database-schema).
 
@@ -550,7 +701,7 @@ The Whisper model downloads on first transcription. If it hangs:
 python -c "import whisper; whisper.load_model('base')"
 ```
 
-### Receipt stuck in "processing" status
+### Receipt or estimate stuck in "processing" status
 
 The background task queue may have stalled:
 
@@ -562,7 +713,7 @@ ls -la instance/gpu_worker.lock
 sudo systemctl restart bdb-tools
 
 # If a specific submission is stuck, check the logs
-journalctl -u bdb-tools --since "1 hour ago" | grep "submission"
+journalctl -u bdb-tools --since "1 hour ago" | grep "submission\|estimate"
 ```
 
 ### Photos not showing thumbnails on mobile
