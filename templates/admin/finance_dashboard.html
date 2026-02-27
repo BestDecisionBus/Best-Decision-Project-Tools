@@ -406,9 +406,9 @@
             <h3 style="margin: 0;">Completed Projects</h3>
             <div style="display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap;">
                 <label style="font-size: 13px; color: var(--gray-500); margin: 0;">From</label>
-                <input type="date" id="cp-date-from" style="font-size: 13px; padding: 4px 6px;" onchange="filterCompleted()">
+                <input type="date" id="cp-date-from" data-no-guard style="font-size: 13px; padding: 4px 6px;" onchange="filterCompleted()">
                 <label style="font-size: 13px; color: var(--gray-500); margin: 0;">To</label>
-                <input type="date" id="cp-date-to" style="font-size: 13px; padding: 4px 6px;" onchange="filterCompleted()">
+                <input type="date" id="cp-date-to" data-no-guard style="font-size: 13px; padding: 4px 6px;" onchange="filterCompleted()">
                 <button type="button" class="btn btn-sm" style="font-size: 12px; background: var(--gray-200); color: var(--gray-700);" onclick="clearCompletedFilter()">Clear</button>
             </div>
         </div>

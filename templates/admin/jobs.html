@@ -88,6 +88,7 @@
                         <th>Address</th>
                         <th>Lat/Lng</th>
                         <th>Status</th>
+                        <th>Est. Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -130,6 +131,21 @@
                             <span class="badge badge-inactive">Inactive</span>
                             {% endif %}
                         </td>
+                        <td>
+                            {% if job.job_status == 'in_progress' %}
+                            <span class="badge" style="background: #dbeafe; color: #1d4ed8;">In Progress</span>
+                            {% elif job.job_status == 'accepted' %}
+                            <span class="badge" style="background: #dcfce7; color: #15803d;">Accepted</span>
+                            {% elif job.job_status == 'pending' %}
+                            <span class="badge" style="background: #fef9c3; color: #854d0e;">Pending</span>
+                            {% elif job.job_status == 'completed' %}
+                            <span class="badge" style="background: #f3f4f6; color: #374151;">Completed</span>
+                            {% elif job.job_status == 'declined' %}
+                            <span class="badge" style="background: #fee2e2; color: #b91c1c;">Declined</span>
+                            {% else %}
+                            <span style="color: var(--gray-400);">—</span>
+                            {% endif %}
+                        </td>
                         <td style="display: flex; gap: 6px; flex-wrap: wrap;">
                             <button type="button" class="btn btn-blue btn-sm" id="jobedit-btn-{{ job.id }}"
                                     onclick="toggleJobEdit({{ job.id }})">Edit</button>
@@ -159,7 +175,14 @@
         {% endif %}
 
         {% if archived_jobs %}
-        <h3 style="margin-top: 32px; margin-bottom: 12px; color: var(--gray-500);">Archived Jobs</h3>
+        <h3 style="margin-top: 32px; margin-bottom: 12px;">
+            <button type="button" onclick="toggleArchive()" id="archive-toggle"
+                    style="background: none; border: none; cursor: pointer; font-size: inherit; font-weight: inherit; color: var(--gray-500); display: flex; align-items: center; gap: 8px; padding: 0;">
+                <span id="archive-arrow" style="font-size: 12px;">&#9654;</span>
+                Archived Jobs <span style="font-size: 13px; font-weight: 400;">({{ archived_jobs|length }})</span>
+            </button>
+        </h3>
+        <div id="archive-section" style="display: none;">
         <div class="table-wrap">
             <table class="resizable">
                 <thead>
@@ -184,10 +207,28 @@
                 </tbody>
             </table>
         </div>
+        </div>
         {% endif %}
     </div>
     {% include '_footer.html' %}
     <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script>
+    function toggleArchive() {
+        var section = document.getElementById('archive-section');
+        var arrow = document.getElementById('archive-arrow');
+        var open = section.style.display !== 'none';
+        section.style.display = open ? 'none' : '';
+        arrow.innerHTML = open ? '&#9654;' : '&#9660;';
+        localStorage.setItem('archiveOpen', open ? '0' : '1');
+    }
+    (function() {
+        if (localStorage.getItem('archiveOpen') === '1') {
+            var section = document.getElementById('archive-section');
+            var arrow = document.getElementById('archive-arrow');
+            if (section) { section.style.display = ''; arrow.innerHTML = '&#9660;'; }
+        }
+    })();
+    </script>
     <script>
     function geocodeAddress() {
         var address = document.getElementById('job_address').value;

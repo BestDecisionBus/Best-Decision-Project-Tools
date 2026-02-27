@@ -841,16 +841,26 @@ def check_employee_username_available(username, token_str, exclude_emp_id=None):
 
 def get_jobs_by_token(token_str, active_only=False):
     conn = get_db()
+    base = """
+        SELECT j.*,
+            (SELECT e.approval_status FROM estimates e
+             WHERE e.job_id = j.id
+             ORDER BY CASE e.approval_status
+                 WHEN 'in_progress' THEN 1
+                 WHEN 'accepted'    THEN 2
+                 WHEN 'pending'     THEN 3
+                 WHEN 'completed'   THEN 4
+                 WHEN 'declined'    THEN 5
+                 ELSE 6
+             END ASC
+             LIMIT 1) AS job_status
+        FROM jobs j
+        WHERE j.token = ?
+    """
     if active_only:
-        rows = conn.execute(
-            "SELECT * FROM jobs WHERE token = ? AND is_active = 1 ORDER BY job_name ASC",
-            (token_str,),
-        ).fetchall()
+        rows = conn.execute(base + " AND j.is_active = 1 ORDER BY j.job_name ASC", (token_str,)).fetchall()
     else:
-        rows = conn.execute(
-            "SELECT * FROM jobs WHERE token = ? ORDER BY job_name ASC",
-            (token_str,),
-        ).fetchall()
+        rows = conn.execute(base + " ORDER BY j.job_name ASC", (token_str,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
