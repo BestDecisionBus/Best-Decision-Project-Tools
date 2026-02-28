@@ -98,11 +98,15 @@ BDB Tools is a fully deployed, production-grade multi-tenant field service opera
 - [x] Company admin / viewer user management
 - [x] Employee management with per-employee access control (receipt, estimate)
 - [x] Job management with geocoding
-- [x] Expense categories
+- [x] Expense categories (with optional GL/account code field)
 - [x] Common tasks (schedule note presets)
 - [x] Shift types (custom schedule time presets)
-- [x] Products & services catalog
+- [x] Products & services catalog (with taxable flag)
 - [x] Message snippets
+- [x] Bulk CSV import for all 5 admin lists (append or deactivate-and-replace mode)
+- [x] Inline sort order editing on all 5 list tables (auto-saves on change, no page reload)
+- [x] Column resize handles on all admin list tables
+- [x] Click-to-sort column headers on all admin list tables
 
 ---
 
@@ -186,8 +190,8 @@ Approximate sizes as of February 2026:
 |---|---|---|
 | `database.py` | ~3200 | All CRUD functions + schema |
 | `routes/estimates.py` | ~1600 | Largest blueprint — full estimate lifecycle + reports |
-| `static/css/style.css` | ~1700 | Single unified design system |
-| `routes/admin.py` | ~600 | Tokens, users, employees, jobs, config pages |
+| `static/css/style.css` | ~1780 | Single unified design system |
+| `routes/admin.py` | ~1050 | Tokens, users, employees, jobs, config pages, CSV import/export, inline sort endpoints |
 | `routes/time_admin.py` | ~700 | Time entries, manual entry, export, audit |
 | `app.py` | ~620 | Flask core, auth, middleware |
 | `pdf_generator.py` | ~400 | Receipt PDF + image processing |

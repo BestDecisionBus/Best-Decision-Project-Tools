@@ -68,11 +68,43 @@
                 </div>
             </form>
         </div>
+
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Import from CSV</h3>
+            <p style="font-size: 13px; color: var(--gray-500); margin-bottom: 12px;">
+                <a href="{{ url_for('admin.admin_shift_type_csv_sample') }}">Download sample CSV</a>
+                then upload your completed file below.
+            </p>
+            <form method="POST" action="{{ url_for('admin.admin_shift_type_csv_import') }}"
+                  enctype="multipart/form-data">
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <div>
+                        <p style="font-size: 12px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; margin: 0 0 8px;">Import Mode</p>
+                        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                            <label style="font-weight: normal; display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--gray-800);">
+                                <input type="radio" name="import_mode" value="append" checked> Append to current list
+                            </label>
+                            <label style="font-weight: normal; display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--gray-800);">
+                                <input type="radio" name="import_mode" value="replace"> Deactivate existing &amp; replace
+                            </label>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="st-csv-file">CSV File</label>
+                            <input type="file" id="st-csv-file" name="csv_file" accept=".csv" required>
+                        </div>
+                        <div><button type="submit" class="btn btn-blue">Import</button></div>
+                    </div>
+                </div>
+            </form>
+        </div>
         {% endif %}
 
         {% if shift_types %}
         <div class="table-wrap">
-            <table class="resizable">
+            <table class="resizable sortable">
                 <thead>
                     <tr>
                         <th>Name</th>
@@ -80,7 +112,7 @@
                         <th>End Time</th>
                         <th>Sort Order</th>
                         <th>Status</th>
-                        <th>Actions</th>
+                        <th data-no-sort>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -102,9 +134,9 @@
                                    style="display: none; width: 100%;">
                         </td>
                         <td>
-                            <span id="stsort-display-{{ s.id }}">{{ s.sort_order }}</span>
                             <input type="number" id="stsort-input-{{ s.id }}" value="{{ s.sort_order }}"
-                                   style="display: none; width: 80px;">
+                                   class="sort-input" onchange="saveSortOrder(this)"
+                                   data-endpoint="/admin/shift-types/{{ s.id }}/sort">
                         </td>
                         <td>
                             {% if s.is_active %}
@@ -146,8 +178,6 @@
         var startInput = document.getElementById('ststart-input-' + id);
         var endDisplay = document.getElementById('stend-display-' + id);
         var endInput = document.getElementById('stend-input-' + id);
-        var sortDisplay = document.getElementById('stsort-display-' + id);
-        var sortInput = document.getElementById('stsort-input-' + id);
         var editBtn = document.getElementById('stedit-btn-' + id);
         var saveBtn = document.getElementById('stsave-btn-' + id);
         var editing = nameInput.style.display === 'none';
@@ -157,8 +187,6 @@
         startInput.style.display = editing ? '' : 'none';
         endDisplay.style.display = editing ? 'none' : '';
         endInput.style.display = editing ? '' : 'none';
-        sortDisplay.style.display = editing ? 'none' : '';
-        sortInput.style.display = editing ? '' : 'none';
         editBtn.style.display = editing ? 'none' : '';
         saveBtn.style.display = editing ? '' : 'none';
     }

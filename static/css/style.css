@@ -1067,6 +1067,30 @@ table.sortable thead th:empty:hover {
     background: var(--gray-100);
 }
 
+/* ---- Inline sort order input ---- */
+
+input.sort-input {
+    width: 60px;
+    padding: 2px 6px;
+    font-size: 14px;
+    text-align: center;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    transition: border-color 0.15s;
+    -moz-appearance: textfield;
+}
+input.sort-input::-webkit-outer-spin-button,
+input.sort-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+}
+input.sort-input:hover,
+input.sort-input:focus {
+    border-color: var(--gray-300);
+    background: #fff;
+    outline: none;
+}
+
 /* ---- Resizable table columns ---- */
 
 table.resizable th {
@@ -2033,3 +2057,56 @@ table.resizable th .resize-handle.active {
 /* Allow help-tip popups inside table headers to escape overflow clipping */
 .table-with-tips { overflow: visible; }
 .table-with-tips thead th { position: relative; }
+
+/* ---- Searchable select widget ---- */
+.ss-container { position: relative; width: 100%; }
+.ss-display {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--gray-300);
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 16px;
+    color: var(--gray-700);
+    min-height: 44px;
+    box-sizing: border-box;
+    user-select: none;
+}
+.ss-display.open { border-color: var(--blue); }
+.ss-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-arrow { margin-left: 8px; font-size: 11px; color: var(--gray-400); transition: transform 0.2s; }
+.ss-display.open .ss-arrow { transform: rotate(180deg); }
+.ss-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0; right: 0;
+    background: #fff;
+    border: 1px solid var(--gray-300);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    z-index: 200;
+}
+.ss-search {
+    width: 100%;
+    padding: 10px 12px;
+    border: none;
+    border-bottom: 1px solid var(--gray-200);
+    font-size: 15px;
+    outline: none;
+    box-sizing: border-box;
+    border-radius: 6px 6px 0 0;
+}
+.ss-options { max-height: 220px; overflow-y: auto; }
+.ss-option {
+    padding: 11px 14px;
+    cursor: pointer;
+    font-size: 15px;
+    border-bottom: 1px solid var(--gray-100);
+}
+.ss-option:last-child { border-bottom: none; }
+.ss-option:active { background: #eff6ff; }
+.ss-option.hidden { display: none; }
+.ss-no-results { padding: 12px 14px; color: var(--gray-400); font-size: 14px; font-style: italic; }

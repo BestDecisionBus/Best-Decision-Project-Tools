@@ -48,6 +48,10 @@
                         <input type="text" id="cat-name" name="name" placeholder="Materials" required>
                     </div>
                     <div class="form-group" style="flex: 1;">
+                        <label for="cat-account">Account Code</label>
+                        <input type="text" id="cat-account" name="account_code" placeholder="5100">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
                         <label for="cat-sort">Sort Order</label>
                         <input type="number" id="cat-sort" name="sort_order" value="0" step="1">
                     </div>
@@ -57,17 +61,50 @@
                 </div>
             </form>
         </div>
+
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Import from CSV</h3>
+            <p style="font-size: 13px; color: var(--gray-500); margin-bottom: 12px;">
+                <a href="{{ url_for('admin.admin_category_csv_sample') }}">Download sample CSV</a>
+                then upload your completed file below.
+            </p>
+            <form method="POST" action="{{ url_for('admin.admin_category_csv_import') }}"
+                  enctype="multipart/form-data">
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <div>
+                        <p style="font-size: 12px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; margin: 0 0 8px;">Import Mode</p>
+                        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                            <label style="font-weight: normal; display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--gray-800);">
+                                <input type="radio" name="import_mode" value="append" checked> Append to current list
+                            </label>
+                            <label style="font-weight: normal; display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--gray-800);">
+                                <input type="radio" name="import_mode" value="replace"> Deactivate existing &amp; replace
+                            </label>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
+                        <div class="form-group" style="flex: 1;">
+                            <label for="cat-csv-file">CSV File</label>
+                            <input type="file" id="cat-csv-file" name="csv_file" accept=".csv" required>
+                        </div>
+                        <div><button type="submit" class="btn btn-blue">Import</button></div>
+                    </div>
+                </div>
+            </form>
+        </div>
         {% endif %}
 
         {% if categories %}
         <div class="table-wrap">
-            <table class="resizable">
+            <table class="resizable sortable">
                 <thead>
                     <tr>
                         <th>Name</th>
+                        <th>Account Code</th>
                         <th>Sort Order</th>
                         <th>Status</th>
-                        <th>Actions</th>
+                        <th data-no-sort>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -79,9 +116,14 @@
                                    style="display: none; width: 100%;">
                         </td>
                         <td>
-                            <span id="catsort-display-{{ cat.id }}">{{ cat.sort_order }}</span>
+                            <span id="cataccount-display-{{ cat.id }}">{{ cat.account_code if cat.account_code else '—' }}</span>
+                            <input type="text" id="cataccount-input-{{ cat.id }}" value="{{ cat.account_code or '' }}"
+                                   style="display: none; width: 100%;">
+                        </td>
+                        <td>
                             <input type="number" id="catsort-input-{{ cat.id }}" value="{{ cat.sort_order }}"
-                                   style="display: none; width: 80px;">
+                                   class="sort-input" onchange="saveSortOrder(this)"
+                                   data-endpoint="/admin/categories/{{ cat.id }}/sort">
                         </td>
                         <td>
                             {% if cat.is_active %}
@@ -119,26 +161,27 @@
     function toggleCategoryEdit(id) {
         var nameDisplay = document.getElementById('catname-display-' + id);
         var nameInput = document.getElementById('catname-input-' + id);
-        var sortDisplay = document.getElementById('catsort-display-' + id);
-        var sortInput = document.getElementById('catsort-input-' + id);
+        var accountDisplay = document.getElementById('cataccount-display-' + id);
+        var accountInput = document.getElementById('cataccount-input-' + id);
         var editBtn = document.getElementById('catedit-btn-' + id);
         var saveBtn = document.getElementById('catsave-btn-' + id);
         var editing = nameInput.style.display === 'none';
         nameDisplay.style.display = editing ? 'none' : '';
         nameInput.style.display = editing ? '' : 'none';
-        sortDisplay.style.display = editing ? 'none' : '';
-        sortInput.style.display = editing ? '' : 'none';
+        accountDisplay.style.display = editing ? 'none' : '';
+        accountInput.style.display = editing ? '' : 'none';
         editBtn.style.display = editing ? 'none' : '';
         saveBtn.style.display = editing ? '' : 'none';
     }
 
     function saveCategory(id) {
         var name = document.getElementById('catname-input-' + id).value;
+        var account_code = document.getElementById('cataccount-input-' + id).value;
         var sort_order = document.getElementById('catsort-input-' + id).value;
         fetch('/admin/categories/' + id + '/update', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({name: name, sort_order: sort_order})
+            body: JSON.stringify({name: name, account_code: account_code, sort_order: sort_order})
         }).then(function(resp) {
             if (resp.ok) { window._guardBypass = true; window.location.reload(); }
             else { alert('Error saving category.'); }

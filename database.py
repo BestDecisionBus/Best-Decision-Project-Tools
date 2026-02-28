@@ -366,6 +366,8 @@ def init_db():
     _add_column_if_missing(conn, "estimate_items", "unit_cost", "REAL DEFAULT 0")
     _add_column_if_missing(conn, "jobs", "is_archived", "INTEGER DEFAULT 0")
     _add_column_if_missing(conn, "estimates", "completed_at", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "categories", "account_code", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "products_services", "taxable", "INTEGER DEFAULT 0")
     conn.commit()
 
     # Migrate legacy category_1_id / category_2_id into junction table
@@ -1058,26 +1060,29 @@ def get_category(cat_id):
     return dict(row) if row else None
 
 
-def create_category(name, token_str, sort_order=0):
+def create_category(name, token_str, sort_order=0, account_code=""):
     conn = get_db()
     now = datetime.now().isoformat()
     conn.execute(
-        "INSERT INTO categories (name, token, sort_order, created_at) VALUES (?, ?, ?, ?)",
-        (name, token_str, sort_order, now),
+        "INSERT INTO categories (name, token, sort_order, account_code, created_at) VALUES (?, ?, ?, ?, ?)",
+        (name, token_str, sort_order, account_code or "", now),
     )
     conn.commit()
     conn.close()
 
 
-def update_category(cat_id, name, sort_order=None):
+def update_category(cat_id, name, sort_order=None, account_code=None):
     conn = get_db()
+    sets = ["name = ?"]
+    params = [name]
     if sort_order is not None:
-        conn.execute(
-            "UPDATE categories SET name = ?, sort_order = ? WHERE id = ?",
-            (name, sort_order, cat_id),
-        )
-    else:
-        conn.execute("UPDATE categories SET name = ? WHERE id = ?", (name, cat_id))
+        sets.append("sort_order = ?")
+        params.append(sort_order)
+    if account_code is not None:
+        sets.append("account_code = ?")
+        params.append(account_code)
+    params.append(cat_id)
+    conn.execute(f"UPDATE categories SET {', '.join(sets)} WHERE id = ?", params)
     conn.commit()
     conn.close()
 
@@ -1090,6 +1095,22 @@ def toggle_category(cat_id):
     )
     conn.commit()
     conn.close()
+
+
+def bulk_deactivate_categories(token_str):
+    conn = get_db()
+    conn.execute("UPDATE categories SET is_active = 0 WHERE token = ?", (token_str,))
+    conn.commit()
+    conn.close()
+
+
+def get_max_sort_order_categories(token_str):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), 0) AS mx FROM categories WHERE token = ?", (token_str,)
+    ).fetchone()
+    conn.close()
+    return row["mx"] if row else 0
 
 
 # ---------------------------------------------------------------------------
@@ -1151,6 +1172,22 @@ def toggle_common_task(task_id):
     )
     conn.commit()
     conn.close()
+
+
+def bulk_deactivate_common_tasks(token_str):
+    conn = get_db()
+    conn.execute("UPDATE common_tasks SET is_active = 0 WHERE token = ?", (token_str,))
+    conn.commit()
+    conn.close()
+
+
+def get_max_sort_order_common_tasks(token_str):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), 0) AS mx FROM common_tasks WHERE token = ?", (token_str,)
+    ).fetchone()
+    conn.close()
+    return row["mx"] if row else 0
 
 
 # ---------------------------------------------------------------------------
@@ -1239,6 +1276,22 @@ def toggle_shift_type(shift_id):
     )
     conn.commit()
     conn.close()
+
+
+def bulk_deactivate_shift_types(token_str):
+    conn = get_db()
+    conn.execute("UPDATE shift_types SET is_active = 0 WHERE token = ?", (token_str,))
+    conn.commit()
+    conn.close()
+
+
+def get_max_sort_order_shift_types(token_str):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), 0) AS mx FROM shift_types WHERE token = ?", (token_str,)
+    ).fetchone()
+    conn.close()
+    return row["mx"] if row else 0
 
 
 # ---------------------------------------------------------------------------
@@ -3229,6 +3282,22 @@ def toggle_message_snippet(snippet_id):
     conn.close()
 
 
+def bulk_deactivate_message_snippets(token_str):
+    conn = get_db()
+    conn.execute("UPDATE message_snippets SET is_active = 0 WHERE token = ?", (token_str,))
+    conn.commit()
+    conn.close()
+
+
+def get_max_sort_order_message_snippets(token_str):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), 0) AS mx FROM message_snippets WHERE token = ?", (token_str,)
+    ).fetchone()
+    conn.close()
+    return row["mx"] if row else 0
+
+
 # ---------------------------------------------------------------------------
 # Products & Services
 # ---------------------------------------------------------------------------
@@ -3256,12 +3325,12 @@ def get_product_service(ps_id):
     return dict(row) if row else None
 
 
-def create_product_service(name, unit_price, token_str, sort_order=0, unit_cost=0, item_type='product'):
+def create_product_service(name, unit_price, token_str, sort_order=0, unit_cost=0, item_type='product', taxable=0):
     conn = get_db()
     now = datetime.now().isoformat()
     cur = conn.execute(
-        "INSERT INTO products_services (name, unit_price, unit_cost, item_type, token, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (name, unit_price, unit_cost, item_type, token_str, sort_order, now),
+        "INSERT INTO products_services (name, unit_price, unit_cost, item_type, taxable, token, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (name, unit_price, unit_cost, item_type, taxable, token_str, sort_order, now),
     )
     ps_id = cur.lastrowid
     conn.commit()
@@ -3272,7 +3341,7 @@ def create_product_service(name, unit_price, token_str, sort_order=0, unit_cost=
 
 def update_product_service(ps_id, **kwargs):
     conn = get_db()
-    allowed = {"name", "unit_price", "unit_cost", "sort_order", "item_type"}
+    allowed = {"name", "unit_price", "unit_cost", "sort_order", "item_type", "taxable"}
     sets = []
     params = []
     for k, v in kwargs.items():
@@ -3296,3 +3365,19 @@ def toggle_product_service(ps_id):
     )
     conn.commit()
     conn.close()
+
+
+def bulk_deactivate_products_services(token_str):
+    conn = get_db()
+    conn.execute("UPDATE products_services SET is_active = 0 WHERE token = ?", (token_str,))
+    conn.commit()
+    conn.close()
+
+
+def get_max_sort_order_products_services(token_str):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), 0) AS mx FROM products_services WHERE token = ?", (token_str,)
+    ).fetchone()
+    conn.close()
+    return row["mx"] if row else 0

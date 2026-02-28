@@ -213,6 +213,7 @@ All configuration is via environment variables in `.env`:
 | View financial KPIs | Admin > CFO Dashboard |
 | Set margin / overhead targets | CFO Dashboard > edit Income Target % and Monthly Overhead $ |
 | Manage products/services catalog | Admin > Products & Services |
+| Bulk import any list (categories, tasks, shifts, products, snippets) | Admin > list page > Import from CSV |
 | Manage shift types | Admin > Shift Types |
 | Manage message snippets | Admin > Message Snippets |
 | View audit trail | Admin > Audit Log |
@@ -568,10 +569,25 @@ sudo systemctl restart bdb-tools
 | GET/POST | `/admin/employees` | Admin | Employee management |
 | GET/POST | `/admin/jobs` | Admin | Job management |
 | GET/POST | `/admin/categories` | Admin | Expense category management |
+| GET | `/admin/categories/csv-sample` | Admin | Download sample CSV for categories |
+| POST | `/admin/categories/csv-import` | Admin | Bulk import categories from CSV |
+| POST | `/admin/categories/<id>/sort` | Admin | Update sort order (inline, no page reload) |
 | GET/POST | `/admin/common-tasks` | Admin | Common task management (schedule note presets) |
+| GET | `/admin/common-tasks/csv-sample` | Admin | Download sample CSV for common tasks |
+| POST | `/admin/common-tasks/csv-import` | Admin | Bulk import common tasks from CSV |
+| POST | `/admin/common-tasks/<id>/sort` | Admin | Update sort order (inline) |
 | GET/POST | `/admin/shift-types` | Admin | Shift type management (custom schedule presets) |
+| GET | `/admin/shift-types/csv-sample` | Admin | Download sample CSV for shift types |
+| POST | `/admin/shift-types/csv-import` | Admin | Bulk import shift types from CSV |
+| POST | `/admin/shift-types/<id>/sort` | Admin | Update sort order (inline) |
 | GET/POST | `/admin/products-services` | Admin | Products & services catalog for estimate line items |
+| GET | `/admin/products-services/csv-sample` | Admin | Download sample CSV for products/services |
+| POST | `/admin/products-services/csv-import` | Admin | Bulk import products/services from CSV |
+| POST | `/admin/products-services/<id>/sort` | Admin | Update sort order (inline) |
 | GET/POST | `/admin/message-snippets` | Admin | Reusable message snippet management |
+| GET | `/admin/message-snippets/csv-sample` | Admin | Download sample CSV for message snippets |
+| POST | `/admin/message-snippets/csv-import` | Admin | Bulk import message snippets from CSV |
+| POST | `/admin/message-snippets/<id>/sort` | Admin | Update sort order (inline) |
 | GET | `/admin/guide` | Admin | Admin guide (context-aware) |
 
 ---
@@ -601,7 +617,7 @@ tokens ─────┬── users
 | `users` | Admin panel users | username, password_hash, role, token (NULL = BDB user) |
 | `employees` | Company workers | name, employee_id, token, username, hourly_wage, receipt_access, estimate_access |
 | `jobs` | Job sites | job_name, job_address, latitude, longitude, token |
-| `categories` | Expense categories | name, token, sort_order |
+| `categories` | Expense categories | name, token, sort_order, account_code |
 | `common_tasks` | Schedule note presets | name, token, sort_order |
 | `shift_types` | Custom shift presets | name, start_time, end_time, token, sort_order |
 | `time_entries` | Clock records | employee_id, job_id, clock_in/out times + GPS, manual overrides, status |
@@ -611,7 +627,7 @@ tokens ─────┬── users
 | `job_photos` | Site photos | job_id, week_folder, image_file, thumb_file, caption, GPS |
 | `estimates` | Estimate / project records | job_id, token, title, transcription, approval_status, estimate_value, est/actual materials + labor costs, collected, completion_pct, customer info, sales_tax_rate, estimate_number |
 | `estimate_items` | Estimate line items | estimate_id, description, quantity, unit, unit_price, total, taxable, item_type, unit_cost |
-| `products_services` | Catalog for estimate items | name, unit_price, unit_cost, item_type, token, sort_order |
+| `products_services` | Catalog for estimate items | name, unit_price, unit_cost, item_type, taxable, token, sort_order |
 | `message_snippets` | Reusable text blocks | name, token, sort_order |
 | `job_tasks` | Per-job task checklists | job_id, name, source, sort_order, is_active, token |
 | `audit_log` | Change history | time_entry_id, action, field_changed, old_value, new_value, changed_by, reason |

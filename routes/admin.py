@@ -1,8 +1,10 @@
+import csv
+import io
 import os
 import shutil
 
 from flask import (
-    Blueprint, abort, flash, jsonify, redirect, render_template, request,
+    Blueprint, Response, abort, flash, jsonify, redirect, render_template, request,
     url_for,
 )
 from flask_login import current_user, login_required
@@ -521,6 +523,7 @@ def admin_category_create():
     h._verify_token_access(token_str)
     name = request.form.get("name", "").strip()
     sort_order = request.form.get("sort_order", "0").strip()
+    account_code = request.form.get("account_code", "").strip()
     if not name or not token_str:
         flash("Category name and company are required.", "error")
     else:
@@ -528,7 +531,7 @@ def admin_category_create():
             sort_order_int = int(sort_order)
         except (ValueError, TypeError):
             sort_order_int = 0
-        database.create_category(name, token_str, sort_order_int)
+        database.create_category(name, token_str, sort_order_int, account_code=account_code)
         flash(f"Category '{name}' created.", "success")
     return redirect(url_for("admin.admin_categories", token=token_str))
 
@@ -547,13 +550,15 @@ def admin_category_update(cat_id):
         abort(400)
     name = data.get("name", "").strip()
     sort_order = data.get("sort_order")
+    account_code = data.get("account_code")
     if not name:
         return jsonify({"success": False, "error": "Name is required."}), 400
     try:
         sort_order_int = int(sort_order) if sort_order is not None else None
     except (ValueError, TypeError):
         sort_order_int = None
-    database.update_category(cat_id, name, sort_order_int)
+    account_code_str = account_code.strip() if account_code is not None else None
+    database.update_category(cat_id, name, sort_order_int, account_code=account_code_str)
     return jsonify({"success": True})
 
 
@@ -759,7 +764,8 @@ def admin_product_service_create():
         item_type = request.form.get("item_type", "product").strip()
         if item_type not in ("product", "service"):
             item_type = "product"
-        database.create_product_service(name, unit_price, token_str, sort_order_int, unit_cost, item_type)
+        taxable = 1 if request.form.get("taxable") else 0
+        database.create_product_service(name, unit_price, token_str, sort_order_int, unit_cost, item_type, taxable)
         flash(f"Product/service '{name}' created.", "success")
     return redirect(url_for("admin.admin_products_services", token=token_str))
 
@@ -794,6 +800,7 @@ def admin_product_service_update(ps_id):
     item_type = data.get("item_type")
     if item_type not in (None, "product", "service"):
         item_type = "product"
+    taxable_val = data.get("taxable")
     updates = {"name": name}
     if unit_price is not None:
         updates["unit_price"] = unit_price
@@ -803,6 +810,8 @@ def admin_product_service_update(ps_id):
         updates["sort_order"] = sort_order_int
     if item_type is not None:
         updates["item_type"] = item_type
+    if taxable_val is not None:
+        updates["taxable"] = 1 if taxable_val else 0
     database.update_product_service(ps_id, **updates)
     return jsonify({"success": True})
 
@@ -897,3 +906,370 @@ def admin_shift_type_toggle(shift_id):
     database.toggle_shift_type(shift_id)
     flash("Shift type status toggled.", "success")
     return redirect(url_for("admin.admin_shift_types", token=shift["token"] if shift else ""))
+
+
+# ---------------------------------------------------------------------------
+# Sort Order Quick-Update Endpoints
+# ---------------------------------------------------------------------------
+
+@admin_bp.route("/admin/categories/<int:cat_id>/sort", methods=["POST"])
+@login_required
+def admin_category_sort(cat_id):
+    h = _helpers()
+    cat = database.get_category(cat_id)
+    if not cat:
+        abort(404)
+    h._verify_token_access(cat["token"])
+    data = request.get_json()
+    try:
+        sort_order_int = int(data.get("sort_order", 0))
+    except (ValueError, TypeError):
+        return jsonify({"success": False}), 400
+    database.update_category(cat_id, cat["name"], sort_order_int,
+                             account_code=cat.get("account_code", ""))
+    return jsonify({"success": True})
+
+
+@admin_bp.route("/admin/common-tasks/<int:task_id>/sort", methods=["POST"])
+@login_required
+def admin_common_task_sort(task_id):
+    h = _helpers()
+    task = database.get_common_task(task_id)
+    if not task:
+        abort(404)
+    h._verify_token_access(task["token"])
+    data = request.get_json()
+    try:
+        sort_order_int = int(data.get("sort_order", 0))
+    except (ValueError, TypeError):
+        return jsonify({"success": False}), 400
+    database.update_common_task(task_id, task["name"], sort_order_int)
+    return jsonify({"success": True})
+
+
+@admin_bp.route("/admin/message-snippets/<int:snippet_id>/sort", methods=["POST"])
+@login_required
+def admin_message_snippet_sort(snippet_id):
+    h = _helpers()
+    snippet = database.get_message_snippet(snippet_id)
+    if not snippet:
+        abort(404)
+    h._verify_token_access(snippet["token"])
+    data = request.get_json()
+    try:
+        sort_order_int = int(data.get("sort_order", 0))
+    except (ValueError, TypeError):
+        return jsonify({"success": False}), 400
+    database.update_message_snippet(snippet_id, snippet["name"], sort_order_int)
+    return jsonify({"success": True})
+
+
+@admin_bp.route("/admin/products-services/<int:ps_id>/sort", methods=["POST"])
+@login_required
+def admin_product_service_sort(ps_id):
+    h = _helpers()
+    ps = database.get_product_service(ps_id)
+    if not ps:
+        abort(404)
+    h._verify_token_access(ps["token"])
+    data = request.get_json()
+    try:
+        sort_order_int = int(data.get("sort_order", 0))
+    except (ValueError, TypeError):
+        return jsonify({"success": False}), 400
+    database.update_product_service(ps_id, name=ps["name"], sort_order=sort_order_int)
+    return jsonify({"success": True})
+
+
+@admin_bp.route("/admin/shift-types/<int:shift_id>/sort", methods=["POST"])
+@login_required
+def admin_shift_type_sort(shift_id):
+    h = _helpers()
+    shift = database.get_shift_type(shift_id)
+    if not shift:
+        abort(404)
+    h._verify_token_access(shift["token"])
+    data = request.get_json()
+    try:
+        sort_order_int = int(data.get("sort_order", 0))
+    except (ValueError, TypeError):
+        return jsonify({"success": False}), 400
+    database.update_shift_type(shift_id, shift["name"], shift["start_time"],
+                               shift["end_time"], sort_order_int)
+    return jsonify({"success": True})
+
+
+# ---------------------------------------------------------------------------
+# CSV Bulk Import / Sample Download
+# ---------------------------------------------------------------------------
+
+def _parse_taxable(val):
+    """Return 1 if val looks truthy, else 0."""
+    if val is None:
+        return 0
+    return 1 if str(val).strip().lower() in ("1", "yes", "true", "y") else 0
+
+
+# --- Expense Categories ---
+
+@admin_bp.route("/admin/categories/csv-sample")
+@login_required
+def admin_category_csv_sample():
+    content = "name,account_code\nMaterials,5100\nLabor,5200\nEquipment,\n"
+    return Response(
+        content, mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=categories_sample.csv"},
+    )
+
+
+@admin_bp.route("/admin/categories/csv-import", methods=["POST"])
+@login_required
+def admin_category_csv_import():
+    h = _helpers()
+    token_str = request.form.get("token", "").strip()
+    h._verify_token_access(token_str)
+    mode = request.form.get("import_mode", "append")
+    file = request.files.get("csv_file")
+    if not file or not file.filename.lower().endswith(".csv"):
+        flash("Please upload a .csv file.", "error")
+        return redirect(url_for("admin.admin_categories", token=token_str))
+    raw = file.stream.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")
+    reader = csv.DictReader(io.StringIO(text))
+    if mode == "replace":
+        database.bulk_deactivate_categories(token_str)
+    next_sort = (database.get_max_sort_order_categories(token_str) + 1) if mode == "append" else 1
+    imported = skipped = 0
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        account_code = (row.get("account_code") or "").strip()
+        database.create_category(name, token_str, next_sort, account_code=account_code)
+        next_sort += 1
+        imported += 1
+    msg = f"Imported {imported} categor{'y' if imported == 1 else 'ies'}."
+    if skipped:
+        msg += f" Skipped {skipped} blank row{'s' if skipped != 1 else ''}."
+    if mode == "replace":
+        msg += " Existing categories deactivated."
+    flash(msg, "success")
+    return redirect(url_for("admin.admin_categories", token=token_str))
+
+
+# --- Scheduled Tasks ---
+
+@admin_bp.route("/admin/common-tasks/csv-sample")
+@login_required
+def admin_common_task_csv_sample():
+    content = "name\nMow lawn\nEdge walkways\nBlow debris\n"
+    return Response(
+        content, mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=scheduled_tasks_sample.csv"},
+    )
+
+
+@admin_bp.route("/admin/common-tasks/csv-import", methods=["POST"])
+@login_required
+def admin_common_task_csv_import():
+    h = _helpers()
+    token_str = request.form.get("token", "").strip()
+    h._verify_token_access(token_str)
+    mode = request.form.get("import_mode", "append")
+    file = request.files.get("csv_file")
+    if not file or not file.filename.lower().endswith(".csv"):
+        flash("Please upload a .csv file.", "error")
+        return redirect(url_for("admin.admin_common_tasks", token=token_str))
+    raw = file.stream.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")
+    reader = csv.DictReader(io.StringIO(text))
+    if mode == "replace":
+        database.bulk_deactivate_common_tasks(token_str)
+    next_sort = (database.get_max_sort_order_common_tasks(token_str) + 1) if mode == "append" else 1
+    imported = skipped = 0
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        database.create_common_task(name, token_str, next_sort)
+        next_sort += 1
+        imported += 1
+    msg = f"Imported {imported} scheduled task{'s' if imported != 1 else ''}."
+    if skipped:
+        msg += f" Skipped {skipped} blank row{'s' if skipped != 1 else ''}."
+    if mode == "replace":
+        msg += " Existing tasks deactivated."
+    flash(msg, "success")
+    return redirect(url_for("admin.admin_common_tasks", token=token_str))
+
+
+# --- Message Snippets ---
+
+@admin_bp.route("/admin/message-snippets/csv-sample")
+@login_required
+def admin_message_snippet_csv_sample():
+    content = "name\nOn my way!\nRunning 10 minutes late.\nJob complete, have a great day!\n"
+    return Response(
+        content, mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=message_snippets_sample.csv"},
+    )
+
+
+@admin_bp.route("/admin/message-snippets/csv-import", methods=["POST"])
+@login_required
+def admin_message_snippet_csv_import():
+    h = _helpers()
+    token_str = request.form.get("token", "").strip()
+    h._verify_token_access(token_str)
+    mode = request.form.get("import_mode", "append")
+    file = request.files.get("csv_file")
+    if not file or not file.filename.lower().endswith(".csv"):
+        flash("Please upload a .csv file.", "error")
+        return redirect(url_for("admin.admin_message_snippets", token=token_str))
+    raw = file.stream.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")
+    reader = csv.DictReader(io.StringIO(text))
+    if mode == "replace":
+        database.bulk_deactivate_message_snippets(token_str)
+    next_sort = (database.get_max_sort_order_message_snippets(token_str) + 1) if mode == "append" else 1
+    imported = skipped = 0
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        database.create_message_snippet(name, token_str, next_sort)
+        next_sort += 1
+        imported += 1
+    msg = f"Imported {imported} message snippet{'s' if imported != 1 else ''}."
+    if skipped:
+        msg += f" Skipped {skipped} blank row{'s' if skipped != 1 else ''}."
+    if mode == "replace":
+        msg += " Existing snippets deactivated."
+    flash(msg, "success")
+    return redirect(url_for("admin.admin_message_snippets", token=token_str))
+
+
+# --- Products & Services ---
+
+@admin_bp.route("/admin/products-services/csv-sample")
+@login_required
+def admin_product_service_csv_sample():
+    content = "name,unit_price,unit_cost,item_type,taxable\nPlywood (sheet),45.00,30.00,product,0\nConsultation,150.00,0.00,service,0\nNails (box),8.00,4.00,product,1\n"
+    return Response(
+        content, mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=products_services_sample.csv"},
+    )
+
+
+@admin_bp.route("/admin/products-services/csv-import", methods=["POST"])
+@login_required
+def admin_product_service_csv_import():
+    h = _helpers()
+    token_str = request.form.get("token", "").strip()
+    h._verify_token_access(token_str)
+    mode = request.form.get("import_mode", "append")
+    file = request.files.get("csv_file")
+    if not file or not file.filename.lower().endswith(".csv"):
+        flash("Please upload a .csv file.", "error")
+        return redirect(url_for("admin.admin_products_services", token=token_str))
+    raw = file.stream.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")
+    reader = csv.DictReader(io.StringIO(text))
+    if mode == "replace":
+        database.bulk_deactivate_products_services(token_str)
+    next_sort = (database.get_max_sort_order_products_services(token_str) + 1) if mode == "append" else 1
+    imported = skipped = 0
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        try:
+            unit_price = float(row.get("unit_price") or 0)
+        except (ValueError, TypeError):
+            unit_price = 0.0
+        try:
+            unit_cost = float(row.get("unit_cost") or 0)
+        except (ValueError, TypeError):
+            unit_cost = 0.0
+        item_type = (row.get("item_type") or "product").strip().lower()
+        if item_type not in ("product", "service"):
+            item_type = "product"
+        taxable = _parse_taxable(row.get("taxable"))
+        database.create_product_service(name, unit_price, token_str, next_sort, unit_cost, item_type, taxable)
+        next_sort += 1
+        imported += 1
+    msg = f"Imported {imported} product{'s' if imported != 1 else ''}/service{'s' if imported != 1 else ''}."
+    if skipped:
+        msg += f" Skipped {skipped} blank row{'s' if skipped != 1 else ''}."
+    if mode == "replace":
+        msg += " Existing items deactivated."
+    flash(msg, "success")
+    return redirect(url_for("admin.admin_products_services", token=token_str))
+
+
+# --- Shift Types ---
+
+@admin_bp.route("/admin/shift-types/csv-sample")
+@login_required
+def admin_shift_type_csv_sample():
+    content = "name,start_time,end_time\nMorning Shift,07:00,15:00\nAfternoon Shift,15:00,23:00\nNight Shift,23:00,07:00\n"
+    return Response(
+        content, mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=shift_types_sample.csv"},
+    )
+
+
+@admin_bp.route("/admin/shift-types/csv-import", methods=["POST"])
+@login_required
+def admin_shift_type_csv_import():
+    h = _helpers()
+    token_str = request.form.get("token", "").strip()
+    h._verify_token_access(token_str)
+    mode = request.form.get("import_mode", "append")
+    file = request.files.get("csv_file")
+    if not file or not file.filename.lower().endswith(".csv"):
+        flash("Please upload a .csv file.", "error")
+        return redirect(url_for("admin.admin_shift_types", token=token_str))
+    raw = file.stream.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")
+    reader = csv.DictReader(io.StringIO(text))
+    if mode == "replace":
+        database.bulk_deactivate_shift_types(token_str)
+    next_sort = (database.get_max_sort_order_shift_types(token_str) + 1) if mode == "append" else 1
+    imported = skipped = 0
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        start_time = (row.get("start_time") or "07:00").strip() or "07:00"
+        end_time = (row.get("end_time") or "17:00").strip() or "17:00"
+        database.create_shift_type(name, start_time, end_time, token_str, next_sort)
+        next_sort += 1
+        imported += 1
+    msg = f"Imported {imported} shift type{'s' if imported != 1 else ''}."
+    if skipped:
+        msg += f" Skipped {skipped} blank row{'s' if skipped != 1 else ''}."
+    if mode == "replace":
+        msg += " Existing shift types deactivated."
+    flash(msg, "success")
+    return redirect(url_for("admin.admin_shift_types", token=token_str))

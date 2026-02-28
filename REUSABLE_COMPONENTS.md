@@ -226,22 +226,28 @@ Audio format validation follows the same pattern — see `routes/receipts.py` an
 
 ## Admin Table Pattern
 
-Standard responsive table with action buttons:
+All admin list tables use `class="resizable sortable"` for column resize handles and click-to-sort. Mark the Actions column with `data-no-sort` to exclude it from sorting. Sort order inputs use `class="sort-input"` (ghost input style — auto-saves on change via `saveSortOrder()`).
 
 ```html
-<div class="table-responsive">
-    <table class="admin-table">
+<div class="table-wrap">
+    <table class="resizable sortable">
         <thead>
             <tr>
                 <th>Name</th>
+                <th>Sort Order</th>
                 <th>Status</th>
-                <th></th>
+                <th data-no-sort>Actions</th>
             </tr>
         </thead>
         <tbody>
             {% for item in items %}
             <tr>
                 <td>{{ item.name }}</td>
+                <td>
+                    <input type="number" value="{{ item.sort_order }}"
+                           class="sort-input" onchange="saveSortOrder(this)"
+                           data-endpoint="/admin/items/{{ item.id }}/sort">
+                </td>
                 <td>
                     {% if item.is_active %}
                     <span class="badge badge-active">Active</span>

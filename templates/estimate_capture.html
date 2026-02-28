@@ -30,13 +30,19 @@
         <div id="estimate-form">
         {# Step 1: Select Job #}
         <div class="form-group">
-            <label for="job-select">Select Job</label>
-            <select id="job-select" required>
-                <option value="">-- Choose Job --</option>
-                {% for job in jobs %}
-                <option value="{{ job.id }}">{{ job.job_name }}</option>
-                {% endfor %}
-            </select>
+            <label>Select Job</label>
+            <div class="ss-container" id="job-select-container">
+                <div class="ss-display" id="job-select-display" onclick="ss_toggle('job-select')">
+                    <span class="ss-text" id="job-select-text">-- Choose Job --</span>
+                    <span class="ss-arrow">&#9660;</span>
+                </div>
+                <div class="ss-dropdown" id="job-select-dropdown" style="display:none;">
+                    <input type="text" class="ss-search" placeholder="Search jobs..."
+                           oninput="ss_filter('job-select', this.value)" autocomplete="off">
+                    <div class="ss-options" id="job-select-options"></div>
+                </div>
+            </div>
+            <input type="hidden" id="job-select" value="">
         </div>
 
         {# Quick Add Job #}
@@ -171,7 +177,14 @@
     </div>
     {% include '_footer.html' %}
 
+    <script src="/static/js/searchable-select.js?v={{ cache_bust }}"></script>
     <script>
+    var JOBS = {{ jobs | tojson }};
+    ss_setOptions('job-select',
+        JOBS.map(function(j) { return { value: j.id, label: j.job_name }; }),
+        '-- Choose Job --'
+    );
+
     function formatPhone(el) {
         var digits = el.value.replace(/\D/g, '').slice(0, 10);
         if (digits.length === 0) { el.value = ''; return; }
@@ -294,12 +307,9 @@
             .then(r => r.json())
             .then(data => {
                 if (data.ok) {
-                    var sel = document.getElementById('job-select');
-                    var opt = document.createElement('option');
-                    opt.value = data.job.id;
-                    opt.textContent = data.job.job_name;
-                    sel.appendChild(opt);
-                    sel.value = data.job.id;
+                    SS_DATA['job-select'].options.push({ value: data.job.id, label: data.job.job_name });
+                    ss_setOptions('job-select', SS_DATA['job-select'].options, '-- Choose Job --');
+                    ss_select('job-select', data.job.id, data.job.job_name);
                     toggleAddJob();
                     document.getElementById('new-job-name').value = '';
                     document.getElementById('new-job-address').value = '';
@@ -548,7 +558,7 @@
     }
 
     function resetForm() {
-        document.getElementById('job-select').value = '';
+        ss_reset('job-select');
         document.getElementById('customer-name').value = '';
         document.getElementById('customer-phone').value = '';
         document.getElementById('customer-email').value = '';

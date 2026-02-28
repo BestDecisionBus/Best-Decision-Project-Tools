@@ -41,13 +41,19 @@
 
         <!-- Select Job (shown when not clocked in) -->
         <div id="job-section" class="tk-section" style="display: none;">
-            <label for="job-select">Select Job</label>
-            <select id="job-select" class="tk-select">
-                <option value="">-- Choose Job --</option>
-                {% for job in jobs %}
-                <option value="{{ job.id }}">{{ job.job_name }} — {{ job.job_address }}</option>
-                {% endfor %}
-            </select>
+            <label>Select Job</label>
+            <div class="ss-container" id="job-select-container">
+                <div class="ss-display" id="job-select-display" onclick="ss_toggle('job-select')">
+                    <span class="ss-text" id="job-select-text">-- Choose Job --</span>
+                    <span class="ss-arrow">&#9660;</span>
+                </div>
+                <div class="ss-dropdown" id="job-select-dropdown" style="display:none;">
+                    <input type="text" class="ss-search" placeholder="Search jobs..."
+                           oninput="ss_filter('job-select', this.value)" autocomplete="off">
+                    <div class="ss-options" id="job-select-options"></div>
+                </div>
+            </div>
+            <input type="hidden" id="job-select" value="">
         </div>
 
         <!-- Clock In Button -->
@@ -78,9 +84,15 @@
         </div>
     </div>
     {% include '_footer.html' %}
+    <script src="/static/js/searchable-select.js?v={{ cache_bust }}"></script>
     <script>
     var TOKEN = "{{ token.token }}";
     var EMPLOYEE_ID = {{ employee.id }};
+    var JOBS = {{ jobs | tojson }};
+    ss_setOptions('job-select',
+        JOBS.map(function(j) { return { value: j.id, label: j.job_name + (j.job_address ? ' \u2014 ' + j.job_address : '') }; }),
+        '-- Choose Job --'
+    );
     </script>
     <script src="/static/js/timekeeper.js?v={{ cache_bust }}"></script>
 </body>

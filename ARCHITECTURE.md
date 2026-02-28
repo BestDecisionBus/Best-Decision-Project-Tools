@@ -160,7 +160,7 @@ Every tenant-scoped table has a `token TEXT NOT NULL` column referencing `tokens
 | `users` | Partial (token NULL = BDB) | Admin panel logins |
 | `employees` | Yes | Field workers with access control flags |
 | `jobs` | Yes | Job sites with geocoded coordinates |
-| `categories` | Yes | Expense categories for receipt tagging |
+| `categories` | Yes | Expense categories for receipt tagging — includes optional `account_code` (GL code) |
 | `common_tasks` | Yes | Preset note text for schedule entries |
 | `shift_types` | Yes | Named shift time ranges (e.g., Full Day 7am–5pm) |
 | `time_entries` | Yes | Clock records with GPS, manual overrides, status |
@@ -170,7 +170,7 @@ Every tenant-scoped table has a `token TEXT NOT NULL` column referencing `tokens
 | `job_photos` | Yes | GPS-tagged site photos organized by job + week |
 | `estimates` | Yes | Estimate/project records with full financial tracking |
 | `estimate_items` | Yes | Line items: description, qty, unit, price, cost, taxable |
-| `products_services` | Yes | Reusable product/service catalog for estimate line items |
+| `products_services` | Yes | Reusable product/service catalog for estimate line items — includes `taxable` flag |
 | `message_snippets` | Yes | Reusable text blocks for estimate customer messages |
 | `job_tasks` | Yes | Per-job task checklists |
 | `audit_log` | Yes | Field-level change history for time entries |

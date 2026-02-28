@@ -190,6 +190,116 @@ def admin_item_delete(item_id):
 
 ---
 
+## Routes — Bulk CSV Import
+
+```python
+import csv, io
+from flask import Response
+
+# Sample download (GET)
+@admin_bp.route("/admin/items/csv-sample")
+@login_required
+def admin_item_csv_sample():
+    content = "name,sort_order\nExample Item,1\n"
+    return Response(
+        content, mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=items_sample.csv"},
+    )
+
+# Import (POST) — handles UTF-8, UTF-8 BOM, and Windows cp1252 files
+@admin_bp.route("/admin/items/csv-import", methods=["POST"])
+@login_required
+def admin_item_csv_import():
+    h = _helpers()
+    token_str = request.form.get("token", "").strip()
+    h._verify_token_access(token_str)
+    mode = request.form.get("import_mode", "append")  # "append" or "replace"
+    file = request.files.get("csv_file")
+    if not file or not file.filename.lower().endswith(".csv"):
+        flash("Please upload a .csv file.", "error")
+        return redirect(url_for("admin.admin_items", token=token_str))
+    raw = file.stream.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")   # handles Excel-saved Windows files
+    reader = csv.DictReader(io.StringIO(text))
+    if mode == "replace":
+        database.bulk_deactivate_items(token_str)
+    next_sort = (database.get_max_sort_order_items(token_str) + 1) if mode == "append" else 1
+    imported = skipped = 0
+    for row in reader:
+        name = (row.get("name") or "").strip()
+        if not name:
+            skipped += 1
+            continue
+        database.create_item(name, token_str, next_sort)
+        next_sort += 1
+        imported += 1
+    flash(f"Imported {imported} item{'s' if imported != 1 else ''}.", "success")
+    return redirect(url_for("admin.admin_items", token=token_str))
+```
+
+**Import mode template (inside a `meta-card`):**
+```html
+<div style="display: flex; flex-direction: column; gap: 12px;">
+    <div>
+        <p style="font-size: 12px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; margin: 0 0 8px;">Import Mode</p>
+        <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+            <label style="font-weight: normal; display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--gray-800);">
+                <input type="radio" name="import_mode" value="append" checked> Append to current list
+            </label>
+            <label style="font-weight: normal; display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--gray-800);">
+                <input type="radio" name="import_mode" value="replace"> Deactivate existing &amp; replace
+            </label>
+        </div>
+    </div>
+    <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
+        <div class="form-group" style="flex: 1;">
+            <label for="csv-file">CSV File</label>
+            <input type="file" id="csv-file" name="csv_file" accept=".csv" required>
+        </div>
+        <div><button type="submit" class="btn btn-blue">Import</button></div>
+    </div>
+</div>
+```
+
+---
+
+## Routes — Inline Sort Order Endpoint
+
+```python
+# Lightweight endpoint — updates only sort_order, reads other fields from DB first
+@admin_bp.route("/admin/items/<int:item_id>/sort", methods=["POST"])
+@login_required
+def admin_item_sort(item_id):
+    h = _helpers()
+    item = database.get_item(item_id)
+    if not item:
+        abort(404)
+    h._verify_token_access(item["token"])
+    data = request.get_json()
+    try:
+        sort_order = int(data.get("sort_order", 0))
+    except (ValueError, TypeError):
+        return jsonify({"success": False}), 400
+    database.update_item(item_id, sort_order=sort_order)
+    return jsonify({"success": True})
+```
+
+**Template cell (always-visible ghost input, auto-saves):**
+```html
+<td>
+    <input type="number" class="sort-input" value="{{ item.sort_order }}"
+           onchange="saveSortOrder(this)"
+           data-endpoint="/admin/items/{{ item.id }}/sort">
+</td>
+```
+
+The `saveSortOrder()` function is defined in `static/js/admin.js` — flashes the cell border green on success, red on failure, no page reload.
+
+---
+
 ## Routes — JSON API Endpoint
 
 ```python

@@ -488,3 +488,16 @@
         });
     });
 })();
+
+// Inline sort order quick-save
+function saveSortOrder(input) {
+    var endpoint = input.dataset.endpoint;
+    fetch(endpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sort_order: parseInt(input.value) || 0})
+    }).then(function(resp) {
+        input.style.borderColor = resp.ok ? 'var(--green)' : 'var(--red, #dc2626)';
+        setTimeout(function() { input.style.borderColor = ''; }, 800);
+    });
+}
