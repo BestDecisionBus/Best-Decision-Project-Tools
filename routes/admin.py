@@ -232,11 +232,21 @@ def admin_tokens():
     if not current_user.is_bdb:
         abort(403)
     tokens = database.get_all_tokens()
-    # Build dict of company users keyed by token id
     token_users = {}
+    user_extra_tokens = {}
     for t in tokens:
-        token_users[t["id"]] = database.get_users_by_token(t["token"])
-    return render_template("admin/tokens.html", tokens=tokens, token_users=token_users)
+        users_for_token = database.get_all_users_for_token(t["token"])
+        token_users[t["id"]] = users_for_token
+        for u in users_for_token:
+            if u["id"] not in user_extra_tokens:
+                user_extra_tokens[u["id"]] = database.get_extra_tokens_for_user(u["id"])
+    return render_template(
+        "admin/tokens.html",
+        tokens=tokens,
+        token_users=token_users,
+        user_extra_tokens=user_extra_tokens,
+        all_tokens=tokens,
+    )
 
 
 @admin_bp.route("/admin/tokens/create", methods=["POST"])
@@ -441,6 +451,48 @@ def admin_company_user_reset_password(user_id):
         else:
             database.update_company_user_password(user_id, new_password)
             flash(f"Password reset for '{user['username']}'.", "success")
+    return redirect(url_for("admin.admin_tokens"))
+
+
+@admin_bp.route("/admin/company-users/<int:user_id>/add-token", methods=["POST"])
+@login_required
+def admin_company_user_add_token(user_id):
+    if not current_user.is_bdb or not current_user.is_admin:
+        abort(403)
+    user = database.get_user_by_id(user_id)
+    if not user or user.get("token") is None:
+        flash("Invalid user.", "error")
+        return redirect(url_for("admin.admin_tokens"))
+    token_str = request.form.get("extra_token", "").strip()
+    if not token_str:
+        flash("Select a company to add.", "error")
+        return redirect(url_for("admin.admin_tokens"))
+    token_data = database.get_token(token_str)
+    if not token_data:
+        flash("Company not found.", "error")
+        return redirect(url_for("admin.admin_tokens"))
+    database.add_user_token(user_id, token_str)
+    flash(f"Granted '{user['username']}' access to {token_data['company_name']}.", "success")
+    return redirect(url_for("admin.admin_tokens"))
+
+
+@admin_bp.route("/admin/company-users/<int:user_id>/remove-token", methods=["POST"])
+@login_required
+def admin_company_user_remove_token(user_id):
+    if not current_user.is_bdb or not current_user.is_admin:
+        abort(403)
+    user = database.get_user_by_id(user_id)
+    if not user or user.get("token") is None:
+        flash("Invalid user.", "error")
+        return redirect(url_for("admin.admin_tokens"))
+    token_str = request.form.get("remove_token", "").strip()
+    result = database.remove_user_token(user_id, token_str)
+    if not result:
+        flash("Cannot remove a user's primary company. Delete the user instead.", "error")
+    else:
+        token_data = database.get_token(token_str)
+        name = token_data["company_name"] if token_data else token_str
+        flash(f"Removed access to {name} from '{user['username']}'.", "success")
     return redirect(url_for("admin.admin_tokens"))
 
 

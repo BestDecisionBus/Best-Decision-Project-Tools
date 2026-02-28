@@ -150,14 +150,60 @@
                             <tr>
                                 <th style="text-align: left; padding: 4px 8px;">Username</th>
                                 <th style="text-align: left; padding: 4px 8px;">Role</th>
+                                <th style="text-align: left; padding: 4px 8px;">Also Accesses</th>
+                                <th style="text-align: left; padding: 4px 8px;">Grant Access</th>
                                 <th style="text-align: right; padding: 4px 8px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for u in token_users[t.id] %}
                             <tr>
-                                <td style="padding: 4px 8px;">{{ u.username }}</td>
+                                <td style="padding: 4px 8px;">
+                                    {{ u.username }}
+                                    {% if u.is_extra %}<span style="font-size: 10px; color: var(--gray-400);">(extra)</span>{% endif %}
+                                </td>
                                 <td style="padding: 4px 8px;"><span class="badge badge-active" style="font-size: 10px;">{{ u.role }}</span></td>
+                                <td style="padding: 4px 8px;">
+                                    {% set extras = user_extra_tokens.get(u.id, []) %}
+                                    {% if extras %}
+                                        {% for et in extras %}
+                                        <span style="display: inline-flex; align-items: center; gap: 3px; margin-right: 4px; margin-bottom: 2px;
+                                                     background: var(--gray-100); border: 1px solid var(--gray-300);
+                                                     border-radius: 4px; padding: 1px 5px; font-size: 11px;">
+                                            {{ et.company_name }}
+                                            <form method="POST" action="{{ url_for('admin.admin_company_user_remove_token', user_id=u.id) }}"
+                                                  style="display:inline; margin:0;"
+                                                  onsubmit="return confirm('Remove {{ et.company_name }} access from {{ u.username }}?');">
+                                                <input type="hidden" name="remove_token" value="{{ et.token }}">
+                                                <button type="submit" style="background:none; border:none; cursor:pointer;
+                                                        color: var(--red); font-size: 13px; padding: 0; line-height:1; font-weight: bold;">&times;</button>
+                                            </form>
+                                        </span>
+                                        {% endfor %}
+                                    {% else %}
+                                        <span style="color: var(--gray-400); font-size: 11px;">—</span>
+                                    {% endif %}
+                                </td>
+                                <td style="padding: 4px 8px;">
+                                    {% if not u.is_extra %}
+                                    {% set assigned = ([u.token] + (user_extra_tokens.get(u.id, [])|map(attribute='token')|list)) %}
+                                    {% set available = all_tokens|selectattr('token', 'ne', u.token)|rejectattr('token', 'in', user_extra_tokens.get(u.id, [])|map(attribute='token')|list)|list %}
+                                    {% if available %}
+                                    <form method="POST" action="{{ url_for('admin.admin_company_user_add_token', user_id=u.id) }}"
+                                          style="display: flex; gap: 4px; align-items: center;">
+                                        <select name="extra_token" style="font-size: 11px; padding: 2px 4px;">
+                                            <option value="">Add company...</option>
+                                            {% for at in available %}
+                                            <option value="{{ at.token }}">{{ at.company_name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <button type="submit" class="btn btn-blue btn-sm" style="font-size: 11px; padding: 2px 6px;">Grant</button>
+                                    </form>
+                                    {% else %}
+                                        <span style="color: var(--gray-400); font-size: 11px;">All assigned</span>
+                                    {% endif %}
+                                    {% endif %}
+                                </td>
                                 <td style="padding: 4px 8px; text-align: right;">
                                     <form method="POST" action="{{ url_for('admin.admin_company_user_reset_password', user_id=u.id) }}" style="display: inline;">
                                         <input type="text" name="new_password" placeholder="New password" required style="width: 120px; font-size: 12px; padding: 2px 6px;">

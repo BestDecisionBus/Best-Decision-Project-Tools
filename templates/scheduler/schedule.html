@@ -26,18 +26,15 @@
 
         <h2>Scheduler</h2>
 
-        {% if current_user.is_bdb %}
-            {% if tokens|length > 1 %}
+        {% if current_user.is_bdb or tokens|length > 1 %}
             <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
                 <label for="token-select">Company</label>
                 <select id="token-select" onchange="window.location.href='?token=' + this.value">
-                    <option value="">Select Company</option>
                     {% for t in tokens %}
                     <option value="{{ t.token }}" {% if token_data and token_data.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
                     {% endfor %}
                 </select>
             </div>
-            {% endif %}
         {% else %}
             {% if token_data %}
             <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ token_data.company_name }}</strong></p>

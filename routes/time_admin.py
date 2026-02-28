@@ -1851,6 +1851,18 @@ def admin_export_payroll_cost_pdf():
     burden_pct = token_data.get("labor_burden_pct", 0) if token_data else 0
     company_logo = _company_logo_path(token_str)
 
+    eff_rates = database.get_effective_rates_for_entries(token_str, entries)
+
+    def _entry_base_pay(e):
+        hrs = float(e.get("total_hours") or 0)
+        if hrs <= 0 or e.get("hourly_wage") is None:
+            return 0.0
+        week = database._get_week_start_sunday(e["clock_in_time"])
+        rate_info = eff_rates.get((e["employee_id"], week))
+        if rate_info and rate_info["effective_rate"]:
+            return hrs * rate_info["effective_rate"]
+        return hrs * e["hourly_wage"]
+
     from fpdf import FPDF
 
     pdf = FPDF(orientation="L", unit="mm", format="A4")
@@ -2082,6 +2094,18 @@ def admin_export_combined_pdf():
     company = token_data["company_name"] if token_data else "Unknown"
     burden_pct = token_data.get("labor_burden_pct", 0) if token_data else 0
     company_logo = _company_logo_path(token_str)
+
+    eff_rates = database.get_effective_rates_for_entries(token_str, entries)
+
+    def _entry_base_pay(e):
+        hrs = float(e.get("total_hours") or 0)
+        if hrs <= 0 or e.get("hourly_wage") is None:
+            return 0.0
+        week = database._get_week_start_sunday(e["clock_in_time"])
+        rate_info = eff_rates.get((e["employee_id"], week))
+        if rate_info and rate_info["effective_rate"]:
+            return hrs * rate_info["effective_rate"]
+        return hrs * e["hourly_wage"]
 
     from fpdf import FPDF
 

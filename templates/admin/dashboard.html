@@ -21,11 +21,11 @@
 
         <h2>Dashboard</h2>
 
-        {% if current_user.is_bdb %}
+        {% if current_user.is_bdb or tokens|length > 1 %}
             <div class="token-selector">
                 <label>Company</label>
                 <select class="token-select" onchange="window.location.href='?token=' + this.value">
-                    <option value="" {% if not selected_token %}selected{% endif %}>All Companies</option>
+                    {% if current_user.is_bdb %}<option value="" {% if not selected_token %}selected{% endif %}>All Companies</option>{% endif %}
                     {% for t in tokens %}
                     <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
                     {% endfor %}

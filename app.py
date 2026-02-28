@@ -299,32 +299,57 @@ def haversine_miles(lat1, lng1, lat2, lng2):
 def _get_tokens_for_user():
     if current_user.is_bdb:
         return database.get_all_tokens()
+    tokens = database.get_tokens_for_user(current_user.id)
+    if tokens:
+        return tokens
+    # Fallback for users not yet in user_tokens (should not occur after migration)
     token_data = database.get_token(current_user.token)
     return [token_data] if token_data else []
 
 
 def _get_selected_token(tokens):
-    if not current_user.is_bdb:
-        token_data = database.get_token(current_user.token)
-        return (current_user.token, token_data) if token_data else ("", None)
+    # Single-company users: always their one token, no switcher needed
+    if not current_user.is_bdb and len(tokens) == 1:
+        token_data = tokens[0] if tokens else None
+        token_str = token_data["token"] if token_data else ""
+        return token_str, token_data
+
+    # BDB users and multi-token company users: allow switching via URL param or session
+    valid_token_strs = {t["token"] for t in tokens}
 
     if "token" in request.args:
         token_str = request.args["token"]
         if token_str == "":
             session.pop("admin_selected_token", None)
             return "", None
-        session["admin_selected_token"] = token_str
+        if token_str in valid_token_strs:
+            session["admin_selected_token"] = token_str
+        else:
+            token_str = session.get("admin_selected_token", "")
     else:
         token_str = session.get("admin_selected_token", "")
 
-    selected = None
-    if token_str:
-        selected = database.get_token(token_str)
+    # Clear stale session token if no longer in allowed set
+    if token_str and token_str not in valid_token_strs:
+        session.pop("admin_selected_token", None)
+        token_str = ""
+
+    # Multi-token company users default to their primary token if nothing selected
+    if not token_str and not current_user.is_bdb and current_user.token:
+        token_str = current_user.token
+        session["admin_selected_token"] = token_str
+
+    selected = database.get_token(token_str) if token_str else None
     return token_str, selected
 
 
 def _verify_token_access(token_str):
-    if not current_user.is_bdb and token_str != current_user.token:
+    if current_user.is_bdb:
+        return
+    allowed = {t["token"] for t in database.get_tokens_for_user(current_user.id)}
+    if not allowed:
+        allowed = {current_user.token}
+    if token_str not in allowed:
         abort(403)
 
 

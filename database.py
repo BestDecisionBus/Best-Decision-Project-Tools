@@ -46,6 +46,18 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_users_token ON users(token);
 
+        CREATE TABLE IF NOT EXISTS user_tokens (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            token      TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (token)   REFERENCES tokens(token),
+            UNIQUE (user_id, token)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_tokens_user  ON user_tokens(user_id);
+        CREATE INDEX IF NOT EXISTS idx_user_tokens_token ON user_tokens(token);
+
         CREATE TABLE IF NOT EXISTS employees (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             name          TEXT NOT NULL,
@@ -359,6 +371,9 @@ def init_db():
     # Migrate legacy category_1_id / category_2_id into junction table
     _migrate_submission_categories(conn)
 
+    # Back-fill user_tokens for all existing single-token users
+    _migrate_user_tokens(conn)
+
     # Seed default users
     _ensure_user(conn, config.ADMIN_USERNAME, config.ADMIN_PASSWORD, "admin")
     _ensure_user(conn, config.VIEWER_USERNAME, config.VIEWER_PASSWORD, "viewer")
@@ -393,6 +408,16 @@ def _seed_shift_types_all():
     conn.close()
     for t in tokens:
         seed_default_shift_types(t["token"])
+
+
+def _migrate_user_tokens(conn):
+    """Back-fill user_tokens for every existing single-token user (idempotent)."""
+    now = datetime.now().isoformat()
+    conn.execute("""
+        INSERT OR IGNORE INTO user_tokens (user_id, token, created_at)
+        SELECT id, token, ? FROM users WHERE token IS NOT NULL
+    """, (now,))
+    conn.commit()
 
 
 def _migrate_submission_categories(conn):
@@ -449,9 +474,14 @@ def verify_user(username, password):
 
 def create_company_user(username, password, role, token_str):
     conn = get_db()
-    conn.execute(
+    now = datetime.now().isoformat()
+    cur = conn.execute(
         "INSERT INTO users (username, password_hash, role, token) VALUES (?, ?, ?, ?)",
         (username, generate_password_hash(password), role, token_str),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO user_tokens (user_id, token, created_at) VALUES (?, ?, ?)",
+        (cur.lastrowid, token_str, now),
     )
     conn.commit()
     conn.close()
@@ -490,6 +520,81 @@ def get_bdb_users():
     rows = conn.execute(
         "SELECT id, username, role FROM users WHERE token IS NULL ORDER BY username ASC"
     ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_tokens_for_user(user_id):
+    """Return list of token dicts the user has access to (via user_tokens junction table)."""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT t.*
+        FROM tokens t
+        JOIN user_tokens ut ON ut.token = t.token
+        WHERE ut.user_id = ?
+        ORDER BY t.company_name ASC
+    """, (user_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_extra_tokens_for_user(user_id):
+    """Return tokens assigned beyond the user's primary token (for admin UI display)."""
+    conn = get_db()
+    user = conn.execute("SELECT token FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user or not user["token"]:
+        conn.close()
+        return []
+    rows = conn.execute("""
+        SELECT t.*
+        FROM tokens t
+        JOIN user_tokens ut ON ut.token = t.token
+        WHERE ut.user_id = ? AND t.token != ?
+        ORDER BY t.company_name ASC
+    """, (user_id, user["token"])).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def add_user_token(user_id, token_str):
+    """Grant a company user access to an additional token. Idempotent."""
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        "INSERT OR IGNORE INTO user_tokens (user_id, token, created_at) VALUES (?, ?, ?)",
+        (user_id, token_str, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_user_token(user_id, token_str):
+    """Remove an extra token from a company user. Refuses to remove the primary token."""
+    conn = get_db()
+    user = conn.execute("SELECT token FROM users WHERE id = ?", (user_id,)).fetchone()
+    if user and user["token"] == token_str:
+        conn.close()
+        return False
+    conn.execute(
+        "DELETE FROM user_tokens WHERE user_id = ? AND token = ?",
+        (user_id, token_str),
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_all_users_for_token(token_str):
+    """Return all users who have access to token_str (primary or extra)."""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT DISTINCT u.id, u.username, u.role, u.token,
+               CASE WHEN u.token = ? THEN 0 ELSE 1 END AS is_extra
+        FROM users u
+        JOIN user_tokens ut ON ut.user_id = u.id
+        WHERE ut.token = ?
+        ORDER BY u.username ASC
+    """, (token_str, token_str)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -626,7 +731,7 @@ def regenerate_token(token_id):
     for table in ("employees", "jobs", "categories", "time_entries", "submissions",
                    "schedules", "job_photos", "audit_log", "users",
                    "estimates", "estimate_items", "job_tasks", "message_snippets",
-                   "products_services"):
+                   "products_services", "user_tokens"):
         conn.execute(f"UPDATE {table} SET token = ? WHERE token = ?", (new_token, old_token))
     conn.execute("UPDATE tokens SET token = ? WHERE id = ?", (new_token, token_id))
     conn.commit()
@@ -648,7 +753,8 @@ def delete_token(token_id):
     """, (token_str,))
     for table in ("audit_log", "time_entries", "submissions", "schedules", "job_photos",
                    "estimate_items", "estimates", "job_tasks", "message_snippets",
-                   "products_services", "categories", "employees", "jobs", "users"):
+                   "products_services", "categories", "employees", "jobs", "users",
+                   "user_tokens"):
         conn.execute(f"DELETE FROM {table} WHERE token = ?", (token_str,))
     conn.execute("DELETE FROM tokens WHERE id = ?", (token_id,))
     conn.commit()
