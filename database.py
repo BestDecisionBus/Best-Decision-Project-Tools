@@ -475,6 +475,52 @@ def init_db():
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_job_template_links_token ON job_task_template_links(token)"
     )
+
+    # Estimate-level task template pool (which task lists are available for this project)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS estimate_task_template_links (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            estimate_id INTEGER NOT NULL,
+            template_id INTEGER NOT NULL,
+            token       TEXT NOT NULL,
+            applied_at  TEXT NOT NULL,
+            UNIQUE(estimate_id, template_id)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_est_template_links_est ON estimate_task_template_links(estimate_id)"
+    )
+
+    # Per-schedule-entry task list assignments (which lists does THIS employee see on THIS shift)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS schedule_task_links (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            schedule_id INTEGER NOT NULL,
+            template_id INTEGER NOT NULL,
+            token       TEXT NOT NULL,
+            UNIQUE(schedule_id, template_id)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sched_task_links_sched ON schedule_task_links(schedule_id)"
+    )
+
+    # Per-schedule common task selections (multi-select standard tasks)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS schedule_common_task_links (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            schedule_id   INTEGER NOT NULL,
+            common_task_id INTEGER NOT NULL,
+            token         TEXT NOT NULL,
+            UNIQUE(schedule_id, common_task_id)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sched_ct_links ON schedule_common_task_links(schedule_id)"
+    )
+
+    _add_column_if_missing(conn, "job_tasks",  "estimate_id",          "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "schedules",  "include_project_tasks","INTEGER DEFAULT 0")
     conn.commit()
 
     # Migrate legacy category_1_id / category_2_id into junction table
@@ -4032,6 +4078,109 @@ def get_merged_tasks_for_job(token_str: str, job_id: int, estimate_id, shift_dat
 
 
 # ===========================================================================
+# SCHEDULE-BASED TASK LIST (new employee task view — explicit assignment only)
+# ===========================================================================
+
+def get_tasks_for_schedule(token_str: str, schedule_id: int, shift_date: str) -> list:
+    """Return flat task list for a specific schedule entry.
+
+    Only returns tasks that were explicitly assigned by the scheduler:
+    - Project Specific Tasks (if include_project_tasks=1)
+    - Task template items from schedule_task_links
+    """
+    sched = get_schedule(schedule_id)
+    if not sched or sched["token"] != token_str:
+        return []
+
+    estimate_id = sched.get("estimate_id")
+    include_pt = sched.get("include_project_tasks", 0)
+
+    completions = get_completions_for_job_date(token_str, sched["job_id"], shift_date)
+    completed_keys = set()
+    completion_map = {}
+    for c in completions:
+        key = (c["task_source"], c["task_ref_id"], c["task_description"])
+        completed_keys.add(key)
+        completion_map[key] = c
+
+    tasks = []
+    conn = get_db()
+
+    # Source 1: Project Specific Tasks (only when scheduler opted in)
+    if estimate_id and include_pt:
+        pt_rows = conn.execute(
+            "SELECT * FROM job_tasks WHERE token=? AND estimate_id=? AND is_active=1 "
+            "ORDER BY sort_order ASC, id ASC",
+            (token_str, estimate_id),
+        ).fetchall()
+        for row in pt_rows:
+            key = ("job_task", row["id"], row["name"])
+            comp = completion_map.get(key)
+            tasks.append({
+                "source": "job_task",
+                "ref_id": row["id"],
+                "description": row["name"],
+                "section": "Project Specific Tasks",
+                "is_complete": key in completed_keys,
+                "completed_by": comp["employee_name"] if comp else None,
+                "completed_at": comp["completed_at"] if comp else None,
+            })
+
+    # Source 2: Template items from schedule_task_links (deduplicated by item id)
+    # Ordered by template name so items from the same list stay together
+    tmpl_rows = conn.execute(
+        """SELECT tti.*, tt.name AS template_name
+           FROM task_template_items tti
+           JOIN schedule_task_links stl ON stl.template_id = tti.template_id
+           JOIN task_templates tt ON tt.id = tti.template_id
+           WHERE stl.schedule_id = ? AND stl.token = ? AND tti.is_active = 1
+           ORDER BY tt.name ASC, tti.sort_order ASC, tti.id ASC""",
+        (schedule_id, token_str),
+    ).fetchall()
+    seen = set()
+    for row in tmpl_rows:
+        if row["id"] in seen:
+            continue
+        seen.add(row["id"])
+        key = ("template_item", row["id"], row["description"])
+        comp = completion_map.get(key)
+        tasks.append({
+            "source": "template_item",
+            "ref_id": row["id"],
+            "description": row["description"],
+            "section": row["template_name"],
+            "is_complete": key in completed_keys,
+            "completed_by": comp["employee_name"] if comp else None,
+            "completed_at": comp["completed_at"] if comp else None,
+        })
+
+    # Source 3: Standard (common) tasks from schedule_common_task_links
+    ct_rows = conn.execute(
+        """SELECT ct.*
+           FROM common_tasks ct
+           JOIN schedule_common_task_links sctl ON sctl.common_task_id = ct.id
+           WHERE sctl.schedule_id = ?
+           ORDER BY ct.name ASC""",
+        (schedule_id,),
+    ).fetchall()
+    for row in ct_rows:
+        key = ("common_task", row["id"], row["name"])
+        comp = completion_map.get(key)
+        tasks.append({
+            "source": "common_task",
+            "ref_id": row["id"],
+            "description": row["name"],
+            "section": "Standard Tasks",
+            "is_complete": key in completed_keys,
+            "completed_by": comp["employee_name"] if comp else None,
+            "completed_at": comp["completed_at"] if comp else None,
+        })
+
+    conn.close()
+    return tasks
+
+
+# ===========================================================================
 # PROJECT NAME HELPERS
 # ===========================================================================
 
@@ -4125,6 +4274,163 @@ def remove_template_from_job(job_id: int, template_id: int, token_str: str) -> N
     conn.execute(
         "DELETE FROM job_task_template_links WHERE job_id = ? AND template_id = ? AND token = ?",
         (job_id, template_id, token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ===========================================================================
+# ESTIMATE–TEMPLATE LINKS (pool of available task lists for a project)
+# ===========================================================================
+
+def get_templates_for_estimate(estimate_id: int, token_str: str) -> list:
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT tt.* FROM task_templates tt
+           JOIN estimate_task_template_links ettl ON ettl.template_id = tt.id
+           WHERE ettl.estimate_id = ? AND ettl.token = ?
+           ORDER BY tt.name ASC""",
+        (estimate_id, token_str),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def apply_template_to_estimate(estimate_id: int, template_id: int, token_str: str) -> None:
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        """INSERT OR IGNORE INTO estimate_task_template_links
+           (estimate_id, template_id, token, applied_at) VALUES (?, ?, ?, ?)""",
+        (estimate_id, template_id, token_str, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_template_from_estimate(estimate_id: int, template_id: int, token_str: str) -> None:
+    conn = get_db()
+    conn.execute(
+        "DELETE FROM estimate_task_template_links WHERE estimate_id=? AND template_id=? AND token=?",
+        (estimate_id, template_id, token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ===========================================================================
+# SCHEDULE–TASK LINKS (which task lists an employee sees on a specific shift)
+# ===========================================================================
+
+def get_task_links_for_schedule(schedule_id: int) -> list:
+    """Return list of template dicts assigned to a schedule entry."""
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT tt.* FROM task_templates tt
+           JOIN schedule_task_links stl ON stl.template_id = tt.id
+           WHERE stl.schedule_id = ?
+           ORDER BY tt.name ASC""",
+        (schedule_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_task_link_ids_for_schedule(schedule_id: int) -> list:
+    """Return list of template IDs assigned to a schedule entry."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT template_id FROM schedule_task_links WHERE schedule_id = ?",
+        (schedule_id,),
+    ).fetchall()
+    conn.close()
+    return [r["template_id"] for r in rows]
+
+
+def set_task_links_for_schedule(schedule_id: int, template_ids: list, token_str: str) -> None:
+    """Replace all task template links for a schedule entry."""
+    conn = get_db()
+    conn.execute("DELETE FROM schedule_task_links WHERE schedule_id = ?", (schedule_id,))
+    for tid in template_ids:
+        conn.execute(
+            "INSERT OR IGNORE INTO schedule_task_links (schedule_id, template_id, token) VALUES (?, ?, ?)",
+            (schedule_id, int(tid), token_str),
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_common_task_link_ids_for_schedule(schedule_id: int) -> list:
+    """Return list of common_task IDs assigned to a schedule entry."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT common_task_id FROM schedule_common_task_links WHERE schedule_id = ?",
+        (schedule_id,),
+    ).fetchall()
+    conn.close()
+    return [r["common_task_id"] for r in rows]
+
+
+def set_common_task_links_for_schedule(schedule_id: int, common_task_ids: list, token_str: str) -> None:
+    """Replace all common task links for a schedule entry."""
+    conn = get_db()
+    conn.execute("DELETE FROM schedule_common_task_links WHERE schedule_id = ?", (schedule_id,))
+    for ctid in common_task_ids:
+        conn.execute(
+            "INSERT OR IGNORE INTO schedule_common_task_links (schedule_id, common_task_id, token) VALUES (?, ?, ?)",
+            (schedule_id, int(ctid), token_str),
+        )
+    conn.commit()
+    conn.close()
+
+
+def update_schedule_project_tasks_flag(schedule_id: int, flag: int) -> None:
+    """Set include_project_tasks flag on a schedule entry."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE schedules SET include_project_tasks = ? WHERE id = ?",
+        (1 if flag else 0, schedule_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ===========================================================================
+# PROJECT SPECIFIC TASKS (estimate-level job_tasks)
+# ===========================================================================
+
+def get_project_tasks_by_estimate(estimate_id: int, token_str: str) -> list:
+    """Return active project-specific tasks for an estimate."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM job_tasks WHERE token=? AND estimate_id=? AND is_active=1 "
+        "ORDER BY sort_order ASC, id ASC",
+        (token_str, estimate_id),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def create_project_task(estimate_id: int, job_id: int, name: str, token_str: str) -> int:
+    """Create a project-specific task linked to an estimate."""
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO job_tasks (estimate_id, job_id, name, token, is_active, sort_order) "
+        "VALUES (?, ?, ?, ?, 1, 0)",
+        (estimate_id, job_id, name.strip(), token_str),
+    )
+    new_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def delete_project_task(task_id: int, token_str: str) -> None:
+    """Soft-delete a project-specific task."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE job_tasks SET is_active=0 WHERE id=? AND token=?",
+        (task_id, token_str),
     )
     conn.commit()
     conn.close()

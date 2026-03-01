@@ -259,6 +259,7 @@
                         <td style="text-align: center; padding: 0 4px;"><input type="checkbox" class="li-taxable" {% if item.taxable %}checked{% endif %} onchange="saveItem(this); calcTotals();"></td>
                         <td><input type="text" class="est-input li-total" value="{{ '{:.2f}'.format(item.total) }}" readonly style="width: 100%; text-align: right; background: var(--gray-50); color: var(--gray-600); cursor: default;"></td>
                         <td style="white-space: nowrap;">
+                            <button type="button" class="btn btn-sm btn-green" onclick="addDescToTask(this)" style="padding: 2px 6px; font-size: 11px;" title="Add description to Project Specific Tasks">+ Task</button>
                             <button type="button" class="btn btn-sm" style="background: #7c3aed; color: #fff; padding: 2px 6px; font-size: 11px;" onclick="saveToPS(this)" title="Save to Products &amp; Services">Save</button>
                             <button type="button" class="btn btn-red btn-sm" onclick="deleteItem(this)" style="padding: 2px 6px; font-size: 11px;">X</button>
                         </td>
@@ -280,6 +281,7 @@
                         <td style="text-align: center; padding: 0 4px;"><input type="checkbox" class="li-taxable" onchange="calcTotals()"></td>
                         <td><input type="text" class="est-input li-total" value="" placeholder="0.00" readonly style="width: 100%; text-align: right; background: var(--gray-50); color: var(--gray-600); cursor: default;"></td>
                         <td style="white-space: nowrap;">
+                            <button type="button" class="btn btn-sm btn-green" onclick="addDescToTask(this)" style="padding: 2px 6px; font-size: 11px;" title="Add description to Project Specific Tasks">+ Task</button>
                             <button type="button" class="btn btn-sm" style="background: #7c3aed; color: #fff; padding: 2px 6px; font-size: 11px;" onclick="saveToPS(this)" title="Save to Products &amp; Services">Save</button>
                             <button type="button" class="btn btn-red btn-sm" onclick="deleteItem(this)" style="padding: 2px 6px; font-size: 11px;">X</button>
                         </td>
@@ -288,6 +290,7 @@
                 </tbody>
             </table>
             <button type="button" class="btn btn-sm btn-blue" onclick="addLineItem()">+ Add Line Item</button>
+            <button type="button" class="btn btn-sm btn-green" onclick="addAllToTasks(this)" style="margin-left: 8px;">+ Add All to Project Tasks</button>
 
             <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
                 <div style="width: 360px;">
@@ -330,46 +333,74 @@
         </div>
         {% endif %}
 
-        {# --- Job Tasks --- #}
-        <div style="background: #fff; border: 1px solid var(--gray-200); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <strong>Job (<span style="position: relative; text-decoration: underline dotted; cursor: help;" title="Add company-wide tasks to Scheduled Tasks under Lists">Custom</span>) Tasks for Scheduling</strong>
-                <form id="add-task-form" style="display: flex; gap: 8px;" onsubmit="addTask(event)">
-                    <input type="text" id="new-task-name" placeholder="Add task..." style="padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 4px; font-size: 13px;">
-                    <button type="submit" class="btn btn-sm btn-green">Add</button>
-                </form>
-            </div>
+        {# ---- Project Specific Tasks ---- #}
+        <div style="background:#fff; border:1px solid var(--gray-200); border-radius:8px; padding:20px; margin-bottom:16px;">
+            <h3 style="font-size:15px; font-weight:700; margin:0 0 4px;">Project Specific Tasks</h3>
+            <p style="font-size:13px; color:var(--gray-500); margin:0 0 12px;">
+                Ad-hoc tasks for this project. The scheduler can include these in any shift assignment.
+            </p>
+            <table id="project-tasks-table" style="width:100%; font-size:13px; margin-bottom:12px; border-collapse:collapse;{% if not project_tasks %} display:none;{% endif %}">
+                <tbody id="project-tasks-tbody">
+                {% for t in project_tasks %}
+                <tr>
+                    <td style="padding:5px 8px; border-bottom:1px solid var(--gray-100);">{{ t.name }}</td>
+                    <td style="padding:5px 8px; border-bottom:1px solid var(--gray-100); width:80px; text-align:right;">
+                        <form method="post" action="{{ url_for('estimates.admin_estimate_task_delete', estimate_id=estimate.id, task_id=t.id) }}" style="display:inline;">
+                            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Remove this task?')">Remove</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <p id="project-tasks-empty" style="font-size:13px; color:var(--gray-400); margin-bottom:12px;{% if project_tasks %} display:none;{% endif %}">No project-specific tasks added yet.</p>
+            <form method="post" action="{{ url_for('estimates.admin_estimate_task_create', estimate_id=estimate.id) }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <input type="text" name="name" placeholder="Task description" required
+                       style="font-size:13px; padding:5px 10px; border:1px solid var(--gray-300); border-radius:6px; flex:1; min-width:200px;">
+                <button type="submit" class="btn btn-sm btn-green">Add Task</button>
+            </form>
+        </div>
 
-            {% if tasks %}
-            <table class="admin-table">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>Task</th>
-                        <th>Source</th>
-                        <th>Active</th>
-                    </tr>
-                </thead>
+        {# ---- Available Task Lists (template pool for scheduler) ---- #}
+        <div style="background:#fff; border:1px solid var(--gray-200); border-radius:8px; padding:20px; margin-bottom:16px;">
+            <h3 style="font-size:15px; font-weight:700; margin:0 0 4px;">Available Task Lists</h3>
+            <p style="font-size:13px; color:var(--gray-500); margin:0 0 12px;">
+                Task lists the scheduler can assign to employees on this project.
+            </p>
+            {% if linked_templates %}
+            <table style="width:100%; font-size:13px; margin-bottom:12px; border-collapse:collapse;">
                 <tbody>
-                    {% for t in tasks %}
-                    <tr id="task-row-{{ t.id }}" style="{% if not t.is_active %}opacity: 0.5;{% endif %}">
-                        <td>{{ loop.index }}</td>
-                        <td>{{ t.name }}</td>
-                        <td><span class="badge" style="font-size: 10px;">{{ t.source }}</span></td>
-                        <td>
-                            <input type="checkbox" {% if t.is_active %}checked{% endif %}
-                                   onchange="toggleTask({{ t.id }}, this.checked)">
-                        </td>
-                    </tr>
-                    {% endfor %}
+                {% for t in linked_templates %}
+                <tr>
+                    <td style="padding:5px 8px; border-bottom:1px solid var(--gray-100);">{{ t.name }}</td>
+                    <td style="padding:5px 8px; border-bottom:1px solid var(--gray-100); width:80px; text-align:right;">
+                        <form method="post" action="{{ url_for('estimates.admin_estimate_remove_template', estimate_id=estimate.id, template_id=t.id) }}" style="display:inline;">
+                            <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Remove this task list?')">Remove</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
                 </tbody>
             </table>
             {% else %}
-            <p style="color: var(--gray-500); font-size: 13px;">No tasks yet.</p>
+            <p style="font-size:13px; color:var(--gray-400); margin-bottom:12px;">No task lists assigned to this project.</p>
+            {% endif %}
+            {% if available_templates %}
+            <form method="post" action="{{ url_for('estimates.admin_estimate_apply_template', estimate_id=estimate.id) }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <select name="template_id" style="font-size:13px; padding:5px 8px; border:1px solid var(--gray-300); border-radius:6px;">
+                    <option value="">— Select task list —</option>
+                    {% for t in available_templates %}
+                    <option value="{{ t.id }}">{{ t.name }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-sm btn-green">Add Task List</button>
+            </form>
+            {% else %}
+            <p style="font-size:12px; color:var(--gray-400);">All available task lists are already assigned.</p>
             {% endif %}
         </div>
 
-        {# --- Job Financials --- #}
+        {# --- Job Financials (last) --- #}
         <div style="border: 1px solid var(--blue); border-top: 2px solid var(--blue); background: #f0f5ff; border-radius: 8px; padding: 20px;">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
                 <label style="color: var(--blue-dark); font-size: 15px; text-transform: uppercase; font-weight: 700; margin: 0; letter-spacing: 0.5px;">Job Financials</label>
@@ -502,6 +533,7 @@
             </div>
         </div>
     </div>
+
 
     <script>
     var ESTIMATE_ID = {{ estimate.id if estimate else 0 }};
@@ -861,6 +893,7 @@
             '<td style="text-align: center; padding: 0 4px;"><input type="checkbox" class="li-taxable" onchange="saveItem(this); calcTotals();"></td>' +
             '<td><input type="text" class="est-input li-total" value="' + (price || '') + '" placeholder="0.00" readonly style="width: 100%; text-align: right; background: var(--gray-50); color: var(--gray-600); cursor: default;"></td>' +
             '<td style="white-space: nowrap;">' +
+            '<button type="button" class="btn btn-sm btn-green" onclick="addDescToTask(this)" style="padding: 2px 6px; font-size: 11px;" title="Add description to Project Specific Tasks">+ Task</button> ' +
             '<button type="button" class="btn btn-sm" style="background: #7c3aed; color: #fff; padding: 2px 6px; font-size: 11px;" onclick="saveToPS(this)" title="Save to Products &amp; Services">Save</button> ' +
             '<button type="button" class="btn btn-red btn-sm" onclick="deleteItem(this)" style="padding: 2px 6px; font-size: 11px;">X</button></td>';
         tbody.appendChild(tr);
@@ -943,6 +976,97 @@
         var body = encodeURIComponent('Please find the attached estimate. You can download it here:\n\n' + pdfUrl);
         var mailto = 'mailto:' + encodeURIComponent(email) + '?subject=' + subject + '&body=' + body;
         window.location.href = mailto;
+    }
+
+    function addDescToTask(btn) {
+        var row = btn.closest('tr');
+        var name = row.querySelector('.li-desc').value.trim();
+        if (!name) { alert('Enter a description first.'); return; }
+        btn.disabled = true;
+        fetch('/admin/estimates/' + ESTIMATE_ID + '/tasks/create-json', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: name})
+        }).then(function(r) { return r.json(); })
+        .then(function(data) {
+            btn.disabled = false;
+            if (data.ok) {
+                appendProjectTask(data.id, data.name);
+                btn.textContent = '\u2713';
+                btn.classList.remove('btn-green');
+                btn.style.background = '#15803d';
+                setTimeout(function() {
+                    btn.textContent = '+ Task';
+                    btn.style.background = '';
+                    btn.classList.add('btn-green');
+                }, 2000);
+            } else {
+                alert(data.error || 'Failed to add task.');
+            }
+        }).catch(function() { btn.disabled = false; alert('Network error.'); });
+    }
+
+    function addAllToTasks(btn) {
+        var rows = document.querySelectorAll('#line-items-body tr');
+        var names = [];
+        rows.forEach(function(row) {
+            var desc = row.querySelector('.li-desc');
+            if (desc && desc.value.trim()) names.push(desc.value.trim());
+        });
+        if (!names.length) { alert('No line items to add.'); return; }
+        btn.disabled = true;
+        var promises = names.map(function(name) {
+            return fetch('/admin/estimates/' + ESTIMATE_ID + '/tasks/create-json', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({name: name})
+            }).then(function(r) { return r.json(); });
+        });
+        Promise.all(promises).then(function(results) {
+            btn.disabled = false;
+            results.forEach(function(data) {
+                if (data.ok) appendProjectTask(data.id, data.name);
+            });
+            var count = results.filter(function(d) { return d.ok; }).length;
+            btn.textContent = '\u2713 Added ' + count;
+            btn.style.background = '#15803d';
+            setTimeout(function() {
+                btn.textContent = '+ Add All to Project Tasks';
+                btn.style.background = '';
+            }, 2500);
+        }).catch(function() { btn.disabled = false; alert('Network error.'); });
+    }
+
+    function appendProjectTask(id, name) {
+        var table = document.getElementById('project-tasks-table');
+        var tbody = document.getElementById('project-tasks-tbody');
+        var emptyMsg = document.getElementById('project-tasks-empty');
+        if (emptyMsg) emptyMsg.style.display = 'none';
+        if (table) table.style.display = '';
+
+        var tr = document.createElement('tr');
+
+        var nameTd = document.createElement('td');
+        nameTd.style.cssText = 'padding:5px 8px; border-bottom:1px solid var(--gray-100);';
+        nameTd.textContent = name;
+        tr.appendChild(nameTd);
+
+        var actionTd = document.createElement('td');
+        actionTd.style.cssText = 'padding:5px 8px; border-bottom:1px solid var(--gray-100); width:80px; text-align:right;';
+        var form = document.createElement('form');
+        form.method = 'post';
+        form.action = '/admin/estimates/' + ESTIMATE_ID + '/tasks/' + id + '/delete';
+        form.style.display = 'inline';
+        form.addEventListener('submit', function(e) { if (!confirm('Remove this task?')) e.preventDefault(); });
+        var removeBtn = document.createElement('button');
+        removeBtn.type = 'submit';
+        removeBtn.className = 'btn btn-sm btn-danger';
+        removeBtn.textContent = 'Remove';
+        form.appendChild(removeBtn);
+        actionTd.appendChild(form);
+        tr.appendChild(actionTd);
+
+        tbody.appendChild(tr);
     }
 
     function saveToPS(btn) {
@@ -1071,20 +1195,6 @@
         input.value = '';
     }
 
-    function addTask(e) {
-        e.preventDefault();
-        var name = document.getElementById('new-task-name').value.trim();
-        if (!name) return;
-        var fd = new FormData();
-        fd.append('name', name);
-        fetch('/admin/job-tasks/' + JOB_ID + '/create', {method: 'POST', body: fd})
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (data.ok) { location.reload(); }
-                else { alert(data.error || 'Failed'); }
-            });
-    }
-
     function downloadInternalPDF() {
         var checks = document.querySelectorAll('.photo-select');
         var ids = [];
@@ -1170,16 +1280,6 @@
         });
     }
 
-    function toggleTask(taskId, checked) {
-        fetch('/admin/job-tasks/' + taskId + '/toggle', {method: 'POST'})
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (data.ok) {
-                    var row = document.getElementById('task-row-' + taskId);
-                    if (row) row.style.opacity = data.is_active ? '1' : '0.5';
-                }
-            });
-    }
     </script>
 
     <script>

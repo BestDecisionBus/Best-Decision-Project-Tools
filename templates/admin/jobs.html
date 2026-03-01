@@ -180,8 +180,6 @@
                             <button type="button" class="btn btn-green btn-sm" id="jobsave-btn-{{ job.id }}"
                                     style="display: none;"
                                     onclick="saveJob({{ job.id }})">Save</button>
-                            <a href="{{ url_for('time_admin.admin_job_templates', job_id=job.id) }}"
-                               class="btn btn-blue btn-sm">Templates</a>
                             <form method="POST" action="{{ url_for('time_admin.admin_job_toggle', job_id=job.id) }}" style="display: inline;">
                                 {% if job.is_active %}
                                 <button type="submit" class="btn btn-red btn-sm">Deactivate</button>

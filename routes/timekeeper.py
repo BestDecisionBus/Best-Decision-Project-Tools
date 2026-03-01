@@ -114,38 +114,30 @@ def employee_tasks():
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-    # Jobs from today's schedule
+    # Tasks come from explicit schedule-entry assignments only
     schedules = database.get_schedules_for_employee_date(employee["id"], token_str, today)
-    # Also check active time entry
-    active_entry = database.get_active_time_entry_for_employee(employee["id"], token_str)
 
-    # Build deduplicated job_id list (active entry first)
-    job_ids = []
-    seen = set()
-    if active_entry and active_entry.get("job_id"):
-        jid = active_entry["job_id"]
-        if jid not in seen:
-            job_ids.append(jid)
-            seen.add(jid)
-    for s in schedules:
-        if s.get("job_id") and s["job_id"] not in seen:
-            job_ids.append(s["job_id"])
-            seen.add(s["job_id"])
-
-    # Get the estimate_id for each job (use most recent completed estimate)
     jobs_tasks = []
-    for job_id in job_ids:
-        job = database.get_job(job_id)
-        if not job or job["token"] != token_str:
+    for sched in schedules:
+        tasks = database.get_tasks_for_schedule(token_str, sched["id"], today)
+        if not tasks:
             continue
-        # Look up estimate_id from schedule if available
-        est_id = None
-        for s in schedules:
-            if s.get("job_id") == job_id and s.get("estimate_id"):
-                est_id = s["estimate_id"]
-                break
-        tasks = database.get_merged_tasks_for_job(token_str, job_id, est_id, today)
-        jobs_tasks.append({"job": job, "tasks": tasks, "estimate_id": est_id})
+        estimate_id = sched.get("estimate_id")
+        estimate = database.get_estimate(estimate_id) if estimate_id else None
+        display_name = database.get_project_display_name(estimate) if estimate else sched.get("job_name", "Work")
+        # Group tasks by section for display headers
+        sections = []
+        for task in tasks:
+            sec_name = task.get("section", "Tasks")
+            if not sections or sections[-1]["name"] != sec_name:
+                sections.append({"name": sec_name, "tasks": []})
+            sections[-1]["tasks"].append(task)
+        jobs_tasks.append({
+            "schedule": sched,
+            "display_name": display_name,
+            "sections": sections,
+            "estimate_id": estimate_id,
+        })
 
     return render_template(
         "employee/tasks.html",

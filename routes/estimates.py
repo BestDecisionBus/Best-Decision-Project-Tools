@@ -5,8 +5,9 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import (
-    Blueprint, jsonify, redirect, render_template, request, send_file, session, url_for,
+    Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for,
 )
+from flask_login import current_user
 
 import config
 import database
@@ -39,6 +40,13 @@ def _compute_finance_targets(token_str, token_data):
 def _helpers():
     import app as _app
     return _app
+
+
+def _require_admin(h=None):
+    """Abort 403 if the current user is not an admin or BDB user."""
+    user = h.current_user if h else current_user
+    if not user.is_admin and not user.is_bdb:
+        abort(403)
 
 
 # ---------------------------------------------------------------------------
@@ -591,7 +599,6 @@ def admin_estimate_detail(estimate_id):
 
     job = database.get_job(est["job_id"])
     photos = database.get_all_job_photos_for_job(est["job_id"])
-    tasks = database.get_job_tasks(est["job_id"])
     token_data = database.get_token(est["token"])
     items = database.get_estimate_items(estimate_id)
     snippets = database.get_message_snippets_by_token(est["token"], active_only=True)
@@ -603,12 +610,18 @@ def admin_estimate_detail(estimate_id):
     _margin_target, _markup_required = _compute_finance_targets(est["token"], token_data)
     customers = database.get_customers_by_token(est["token"], active_only=True)
 
+    # Task templates pool for this project
+    linked_templates = database.get_templates_for_estimate(estimate_id, est["token"])
+    all_templates = database.get_task_templates(est["token"])
+    available_templates = [t for t in all_templates
+                           if t["id"] not in {lt["id"] for lt in linked_templates}]
+    project_tasks = database.get_project_tasks_by_estimate(estimate_id, est["token"])
+
     return render_template(
         "admin/estimate_detail.html",
         estimate=est,
         job=job,
         photos=photos,
-        tasks=tasks,
         selected_token=token_data,
         items=items,
         snippets=snippets,
@@ -619,7 +632,100 @@ def admin_estimate_detail(estimate_id):
         margin_target=_margin_target,
         markup_required=_markup_required,
         customers=customers,
+        linked_templates=linked_templates,
+        available_templates=available_templates,
+        project_tasks=project_tasks,
     )
+
+
+# ---------------------------------------------------------------------------
+# Admin: Estimate — Task Template Pool (apply/remove)
+# ---------------------------------------------------------------------------
+
+@estimates_bp.route("/admin/estimates/<int:estimate_id>/templates/apply", methods=["POST"])
+def admin_estimate_apply_template(estimate_id):
+    h = _helpers()
+    if not h.current_user.is_authenticated:
+        return redirect(url_for("login"))
+    est = database.get_estimate(estimate_id)
+    if not est:
+        abort(404)
+    h._verify_token_access(est["token"])
+    _require_admin()
+    template_id = request.form.get("template_id", type=int)
+    if template_id:
+        database.apply_template_to_estimate(estimate_id, template_id, est["token"])
+        flash("Template added to project.", "success")
+    return redirect(url_for("estimates.admin_estimate_detail", estimate_id=estimate_id))
+
+
+@estimates_bp.route("/admin/estimates/<int:estimate_id>/templates/<int:template_id>/remove", methods=["POST"])
+def admin_estimate_remove_template(estimate_id, template_id):
+    h = _helpers()
+    if not h.current_user.is_authenticated:
+        return redirect(url_for("login"))
+    est = database.get_estimate(estimate_id)
+    if not est:
+        abort(404)
+    h._verify_token_access(est["token"])
+    _require_admin()
+    database.remove_template_from_estimate(estimate_id, template_id, est["token"])
+    flash("Template removed from project.", "success")
+    return redirect(url_for("estimates.admin_estimate_detail", estimate_id=estimate_id))
+
+
+# ---------------------------------------------------------------------------
+# Admin: Estimate — Project Specific Tasks CRUD
+# ---------------------------------------------------------------------------
+
+@estimates_bp.route("/admin/estimates/<int:estimate_id>/tasks/create", methods=["POST"])
+def admin_estimate_task_create(estimate_id):
+    h = _helpers()
+    if not h.current_user.is_authenticated:
+        return redirect(url_for("login"))
+    est = database.get_estimate(estimate_id)
+    if not est:
+        abort(404)
+    h._verify_token_access(est["token"])
+    _require_admin()
+    name = request.form.get("name", "").strip()
+    if name:
+        database.create_project_task(estimate_id, est["job_id"], name, est["token"])
+        flash("Task added.", "success")
+    return redirect(url_for("estimates.admin_estimate_detail", estimate_id=estimate_id))
+
+
+@estimates_bp.route("/admin/estimates/<int:estimate_id>/tasks/create-json", methods=["POST"])
+def admin_estimate_task_create_json(estimate_id):
+    h = _helpers()
+    if not h.current_user.is_authenticated:
+        return jsonify({"error": "Not authenticated"}), 401
+    est = database.get_estimate(estimate_id)
+    if not est:
+        return jsonify({"error": "Not found"}), 404
+    h._verify_token_access(est["token"])
+    _require_admin()
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "Name required"}), 400
+    task_id = database.create_project_task(estimate_id, est["job_id"], name, est["token"])
+    return jsonify({"ok": True, "id": task_id, "name": name})
+
+
+@estimates_bp.route("/admin/estimates/<int:estimate_id>/tasks/<int:task_id>/delete", methods=["POST"])
+def admin_estimate_task_delete(estimate_id, task_id):
+    h = _helpers()
+    if not h.current_user.is_authenticated:
+        return redirect(url_for("login"))
+    est = database.get_estimate(estimate_id)
+    if not est:
+        abort(404)
+    h._verify_token_access(est["token"])
+    _require_admin()
+    database.delete_project_task(task_id, est["token"])
+    flash("Task removed.", "success")
+    return redirect(url_for("estimates.admin_estimate_detail", estimate_id=estimate_id))
 
 
 # ---------------------------------------------------------------------------

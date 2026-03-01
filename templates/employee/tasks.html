@@ -39,14 +39,16 @@
         {% if jobs_tasks %}
         {% for entry in jobs_tasks %}
         <div class="meta-card" style="margin-bottom: 20px;">
-            <h3 style="margin-top: 0; font-size: 16px;">{{ entry.job.job_name }}</h3>
-            {% if entry.tasks %}
-            <ul class="task-checklist" id="tasklist-{{ entry.job.id }}">
-                {% for task in entry.tasks %}
-                <li id="task-item-{{ entry.job.id }}-{{ task.ref_id }}-{{ task.source }}">
+            <h3 style="margin-top: 0; font-size: 16px;">{{ entry.display_name }}</h3>
+            {% if entry.sections %}
+            {% for section in entry.sections %}
+            <p style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--blue); margin: {% if loop.first %}0{% else %}14px{% endif %} 0 6px; padding-left: 2px;">{{ section.name }}</p>
+            <ul class="task-checklist" id="tasklist-{{ entry.schedule.id }}-{{ loop.index }}">
+                {% for task in section.tasks %}
+                <li id="task-item-{{ entry.schedule.id }}-{{ task.ref_id }}-{{ task.source }}">
                     <input type="checkbox"
                            {% if task.is_complete %}checked{% endif %}
-                           onchange="toggleTask(this, {{ entry.job.id }}, '{{ task.source }}', {{ task.ref_id }}, {{ entry.estimate_id or 'null' }}, '{{ task.description | replace("'", "\\'") }}')">
+                           onchange="toggleTask(this, {{ entry.schedule.job_id }}, '{{ task.source }}', {{ task.ref_id }}, {{ entry.estimate_id or 'null' }}, '{{ task.description | replace("'", "\\'") }}')">
                     <span class="{% if task.is_complete %}task-done{% endif %}">{{ task.description }}</span>
                     {% if task.completed_by %}
                     <span style="font-size: 11px; color: var(--gray-400); margin-left: auto;">&#10003; {{ task.completed_by }}</span>
@@ -54,8 +56,9 @@
                 </li>
                 {% endfor %}
             </ul>
+            {% endfor %}
             {% else %}
-            <p style="color: var(--gray-400); font-size: 14px; margin: 0;">No tasks configured for this job.</p>
+            <p style="color: var(--gray-400); font-size: 14px; margin: 0;">No tasks assigned to this shift.</p>
             {% endif %}
         </div>
         {% endfor %}

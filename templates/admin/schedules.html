@@ -15,9 +15,15 @@
     .day-check:has(input:checked) { background: var(--blue); color: #fff; border-color: var(--blue); }
     .day-check input { display: none; }
     .sched-emp-row td { border-bottom: 2px solid var(--gray-400); padding-top: 6px; padding-bottom: 6px; }
-    .emp-cb-label { display: flex; align-items: center; gap: 8px; padding: 5px 8px; cursor: pointer; border-radius: 4px; font-size: 14px; }
+    .emp-cb-label { display: flex; align-items: center; gap: 8px; padding: 5px 8px; cursor: pointer; border-radius: 4px; font-size: 14px; color: var(--gray-800); }
     .emp-cb-label:hover { background: var(--gray-100); }
     .emp-cb-label input { width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; }
+    #schedule-modal .form-group select,
+    #schedule-modal .form-group input[type="date"],
+    #schedule-modal .form-group input[type="time"] {
+        height: 40px;
+        box-sizing: border-box;
+    }
     </style>
     <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest-admin.json">
@@ -56,6 +62,11 @@
             <button type="button" class="btn btn-blue btn-sm" id="prev-week">&larr; Previous Week</button>
             <strong id="week-label" style="font-size: 16px;"></strong>
             <button type="button" class="btn btn-blue btn-sm" id="next-week">Next Week &rarr;</button>
+        </div>
+
+        {# Add schedule button (top) #}
+        <div style="margin-bottom: 12px;">
+            <button type="button" class="btn btn-green" id="add-schedule-btn-top">Add Schedule</button>
         </div>
 
         {# Schedule grid #}
@@ -113,6 +124,12 @@
                         {% endfor %}
                     </select>
                 </div>
+                <div class="form-group" id="project-group" style="display:none;">
+                    <label for="sched-project">Project / Estimate (optional)</label>
+                    <select id="sched-project">
+                        <option value="">— None —</option>
+                    </select>
+                </div>
                 <div class="form-group">
                     <label for="sched-date">Date</label>
                     <input type="date" id="sched-date">
@@ -150,17 +167,22 @@
                         </div>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label for="sched-common-task">Standard Task (optional)</label>
-                    <select id="sched-common-task">
-                        <option value="">-- None --</option>
-                    </select>
+                <div class="form-group" id="common-task-group">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                        <label style="margin: 0;">Standard Tasks <span style="font-size: 12px; font-weight: 400; color: var(--gray-500);">(select one or more)</span></label>
+                        <span style="font-size: 12px; color: var(--blue); cursor: pointer;" onclick="toggleAllCommonTasks()">Select All / None</span>
+                    </div>
+                    <div id="common-task-checkbox-list" style="max-height: 140px; overflow-y: auto; border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px; background: #fff;">
+                        <!-- populated by loadCommonTasks() -->
+                    </div>
                 </div>
-                <div class="form-group" id="job-task-group" style="display: none;">
-                    <label for="sched-job-task">Job-Specific Task (optional)</label>
-                    <select id="sched-job-task">
-                        <option value="">-- None --</option>
-                    </select>
+                <div class="form-group" id="task-list-group" style="display:none;">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                        <label style="margin: 0;">Task Lists <span style="font-size: 12px; font-weight: 400; color: var(--gray-500);">(select one or more)</span></label>
+                        <span style="font-size: 12px; color: var(--blue); cursor: pointer;" onclick="toggleAllTaskLists()">Select All / None</span>
+                    </div>
+                    <div id="task-list-checkboxes" style="max-height: 160px; overflow-y: auto; border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px; background: #fff;">
+                    </div>
                 </div>
                 <div class="form-group">
                     <label for="sched-custom-note">Custom Note (optional)</label>
@@ -198,49 +220,126 @@
             return h + ':' + m + ampm;
         }
 
-        // Load common tasks for the dropdown
+        // Load common tasks as checkboxes
         function loadCommonTasks() {
             if (!TOKEN) return;
             fetch('/api/common-tasks?token=' + TOKEN)
                 .then(function(r) { return r.json(); })
                 .then(function(tasks) {
                     commonTasksList = tasks;
-                    var sel = document.getElementById('sched-common-task');
-                    sel.innerHTML = '<option value="">-- None --</option>';
+                    var container = document.getElementById('common-task-checkbox-list');
+                    while (container.firstChild) { container.removeChild(container.firstChild); }
+                    if (!tasks.length) {
+                        var msg = document.createElement('p');
+                        msg.style.cssText = 'font-size:13px; color:var(--gray-400); margin:4px 0;';
+                        msg.textContent = 'No standard tasks defined.';
+                        container.appendChild(msg);
+                        return;
+                    }
                     tasks.forEach(function(t) {
-                        var opt = document.createElement('option');
-                        opt.value = t.id;
-                        opt.textContent = t.name;
-                        sel.appendChild(opt);
+                        var label = document.createElement('label');
+                        label.className = 'emp-cb-label';
+                        var cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.className = 'common-task-cb';
+                        cb.value = String(t.id);
+                        var span = document.createElement('span');
+                        span.textContent = t.name;
+                        label.appendChild(cb);
+                        label.appendChild(span);
+                        container.appendChild(label);
                     });
                 });
         }
 
-        // Load job-specific tasks when job changes
-        function loadJobTasks(jobId) {
-            var group = document.getElementById('job-task-group');
-            var sel = document.getElementById('sched-job-task');
-            sel.innerHTML = '<option value="">-- None --</option>';
+        function toggleAllCommonTasks() {
+            var cbs = document.querySelectorAll('.common-task-cb');
+            var anyUnchecked = Array.from(cbs).some(function(cb) { return !cb.checked; });
+            cbs.forEach(function(cb) { cb.checked = anyUnchecked; });
+        }
+
+        function toggleAllTaskLists() {
+            var cbs = document.querySelectorAll('.task-list-cb');
+            var anyUnchecked = Array.from(cbs).some(function(cb) { return !cb.checked; });
+            cbs.forEach(function(cb) { cb.checked = anyUnchecked; });
+        }
+
+        // Load projects/estimates for a job
+        function loadJobProjects(jobId, selectEstimateId) {
+            var group = document.getElementById('project-group');
+            var sel = document.getElementById('sched-project');
+            while (sel.firstChild) { sel.removeChild(sel.firstChild); }
+            var blank = document.createElement('option');
+            blank.value = '';
+            blank.textContent = '— None —';
+            sel.appendChild(blank);
+            // Clear task lists whenever job changes
+            clearTaskLists();
             if (!jobId) { group.style.display = 'none'; return; }
-            fetch('/api/job-tasks?job_id=' + jobId)
+            fetch('/scheduler/api/job-estimates?job_id=' + encodeURIComponent(jobId) + '&token=' + encodeURIComponent(TOKEN))
                 .then(function(r) { return r.json(); })
-                .then(function(tasks) {
-                    if (tasks.length > 0) {
-                        tasks.forEach(function(t) {
+                .then(function(estimates) {
+                    if (estimates.length > 0) {
+                        estimates.forEach(function(e) {
                             var opt = document.createElement('option');
-                            opt.value = t.id;
-                            opt.textContent = t.name;
+                            opt.value = e.id;
+                            opt.textContent = e.name;
                             sel.appendChild(opt);
                         });
                         group.style.display = '';
+                        if (selectEstimateId) {
+                            sel.value = String(selectEstimateId);
+                            loadEstimateTaskLists(selectEstimateId);
+                        }
                     } else {
                         group.style.display = 'none';
                     }
                 });
         }
 
+        // Load task list checkboxes for a project/estimate
+        function loadEstimateTaskLists(estimateId, preselectedIds) {
+            var group = document.getElementById('task-list-group');
+            var container = document.getElementById('task-list-checkboxes');
+            while (container.firstChild) { container.removeChild(container.firstChild); }
+            if (!estimateId) { group.style.display = 'none'; return; }
+            fetch('/scheduler/api/estimate-templates?estimate_id=' + encodeURIComponent(estimateId) + '&token=' + encodeURIComponent(TOKEN))
+                .then(function(r) { return r.json(); })
+                .then(function(lists) {
+                    if (!lists.length) { group.style.display = 'none'; return; }
+                    lists.forEach(function(t) {
+                        var label = document.createElement('label');
+                        label.className = 'emp-cb-label';
+                        var cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.value = String(t.id);
+                        cb.className = 'task-list-cb';
+                        if (preselectedIds && preselectedIds.indexOf(String(t.id)) !== -1) {
+                            cb.checked = true;
+                        }
+                        var span = document.createElement('span');
+                        span.textContent = t.name;
+                        label.appendChild(cb);
+                        label.appendChild(span);
+                        container.appendChild(label);
+                    });
+                    group.style.display = '';
+                });
+        }
+
+        function clearTaskLists() {
+            var group = document.getElementById('task-list-group');
+            var container = document.getElementById('task-list-checkboxes');
+            while (container.firstChild) { container.removeChild(container.firstChild); }
+            group.style.display = 'none';
+        }
+
         document.getElementById('sched-job').addEventListener('change', function() {
-            loadJobTasks(this.value);
+            loadJobProjects(this.value);
+        });
+
+        document.getElementById('sched-project').addEventListener('change', function() {
+            loadEstimateTaskLists(this.value);
         });
 
         function getSundayOfWeek(d) {
@@ -384,19 +483,22 @@
             document.getElementById('sched-end').value = defEnd;
             resetDayCheckboxes();
             document.getElementById('repeat-group').style.display = '';
-            document.getElementById('sched-common-task').value = '';
-            document.getElementById('sched-job-task').value = '';
+            document.querySelectorAll('.common-task-cb').forEach(function(cb) { cb.checked = false; });
             document.getElementById('sched-custom-note').value = '';
-            document.getElementById('job-task-group').style.display = 'none';
+            document.getElementById('project-group').style.display = 'none';
+            document.getElementById('sched-project').value = '';
+            clearTaskLists();
             onShiftChange();
             if (window._markClean) window._markClean();
         }
 
-        document.getElementById('add-schedule-btn').onclick = function() {
+        function openAddScheduleModal() {
             editingId = null;
             document.getElementById('repeat-group').style.display = '';
             openModal('Add Schedule');
-        };
+        }
+        document.getElementById('add-schedule-btn').onclick = openAddScheduleModal;
+        document.getElementById('add-schedule-btn-top').onclick = openAddScheduleModal;
 
         function editScheduleEntry(s) {
             editingId = s.id;
@@ -411,14 +513,27 @@
             document.getElementById('sched-end').value = s.end_time || '17:00';
 
             // Set 3-tier task fields
-            document.getElementById('sched-common-task').value = s.common_task_id || '';
             document.getElementById('sched-custom-note').value = s.custom_note || '';
-            // Load job tasks then set selection
+            // Pre-check common tasks
+            document.querySelectorAll('.common-task-cb').forEach(function(cb) { cb.checked = false; });
+            fetch('/scheduler/api/schedules/' + s.id + '/common-task-links')
+                .then(function(r) { return r.json(); })
+                .then(function(ids) {
+                    document.querySelectorAll('.common-task-cb').forEach(function(cb) {
+                        cb.checked = ids.indexOf(cb.value) !== -1;
+                    });
+                });
+            // Load project dropdown then task lists
             if (s.job_id) {
-                loadJobTasks(s.job_id);
-                setTimeout(function() {
-                    document.getElementById('sched-job-task').value = s.job_task_id || '';
-                }, 300);
+                loadJobProjects(s.job_id, s.estimate_id || null);
+                // Fetch pre-selected task list IDs and load checkboxes
+                if (s.estimate_id) {
+                    fetch('/scheduler/api/schedules/' + s.id + '/task-links')
+                        .then(function(r) { return r.json(); })
+                        .then(function(ids) {
+                            loadEstimateTaskLists(s.estimate_id, ids);
+                        });
+                }
             }
 
             document.getElementById('repeat-group').style.display = 'none';
@@ -475,15 +590,24 @@
             if (!jobVal) { alert('Please select a job.'); return; }
             if (!dateVal) { alert('Please select a date.'); return; }
 
+            var projectVal = document.getElementById('sched-project').value;
+            var taskIds = Array.from(
+                document.querySelectorAll('#task-list-checkboxes input.task-list-cb:checked')
+            ).map(function(cb) { return cb.value; });
+            var commonTaskIds = Array.from(
+                document.querySelectorAll('.common-task-cb:checked')
+            ).map(function(cb) { return cb.value; });
+
             var baseData = {
                 job_id: parseInt(jobVal),
+                estimate_id: projectVal ? parseInt(projectVal) : null,
+                task_template_ids: taskIds,
+                common_task_ids: commonTaskIds,
                 token: TOKEN,
                 date: dateVal,
                 shift_type: document.getElementById('sched-shift').value,
                 start_time: document.getElementById('sched-start').value,
                 end_time: document.getElementById('sched-end').value,
-                common_task_id: document.getElementById('sched-common-task').value || null,
-                job_task_id: document.getElementById('sched-job-task').value || null,
                 custom_note: document.getElementById('sched-custom-note').value
             };
 
