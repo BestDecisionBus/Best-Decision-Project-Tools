@@ -94,6 +94,133 @@ def timekeeper_help():
 
 
 # ---------------------------------------------------------------------------
+# Employee Tasks Checklist
+# ---------------------------------------------------------------------------
+
+@timekeeper_bp.route("/tasks")
+def employee_tasks():
+    _app = _helpers()
+    token_str = request.args.get("token", "") or session.get("employee_token", "")
+    token_data = database.get_token(token_str) if token_str else None
+    if not token_data or not token_data["is_active"]:
+        abort(404)
+
+    employee = _app._require_employee_session(token_str)
+    if not employee:
+        return redirect(url_for("company_home", token_str=token_str))
+
+    if not employee.get("tasks_access"):
+        abort(403)
+
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # Jobs from today's schedule
+    schedules = database.get_schedules_for_employee_date(employee["id"], token_str, today)
+    # Also check active time entry
+    active_entry = database.get_active_time_entry_for_employee(employee["id"], token_str)
+
+    # Build deduplicated job_id list (active entry first)
+    job_ids = []
+    seen = set()
+    if active_entry and active_entry.get("job_id"):
+        jid = active_entry["job_id"]
+        if jid not in seen:
+            job_ids.append(jid)
+            seen.add(jid)
+    for s in schedules:
+        if s.get("job_id") and s["job_id"] not in seen:
+            job_ids.append(s["job_id"])
+            seen.add(s["job_id"])
+
+    # Get the estimate_id for each job (use most recent completed estimate)
+    jobs_tasks = []
+    for job_id in job_ids:
+        job = database.get_job(job_id)
+        if not job or job["token"] != token_str:
+            continue
+        # Look up estimate_id from schedule if available
+        est_id = None
+        for s in schedules:
+            if s.get("job_id") == job_id and s.get("estimate_id"):
+                est_id = s["estimate_id"]
+                break
+        tasks = database.get_merged_tasks_for_job(token_str, job_id, est_id, today)
+        jobs_tasks.append({"job": job, "tasks": tasks, "estimate_id": est_id})
+
+    return render_template(
+        "employee/tasks.html",
+        token=token_data,
+        employee=employee,
+        today=today,
+        jobs_tasks=jobs_tasks,
+    )
+
+
+@timekeeper_bp.route("/api/tasks/check", methods=["POST"])
+def api_tasks_check():
+    _app = _helpers()
+    data = request.get_json(silent=True) or {}
+    token_str = data.get("token", "")
+
+    if not token_str:
+        return jsonify({"error": "Missing token"}), 400
+
+    token_data = database.get_token(token_str)
+    if not token_data or not token_data["is_active"]:
+        return jsonify({"error": "Invalid token"}), 403
+
+    employee = _app._require_employee_session(token_str)
+    if not employee:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    job_id = data.get("job_id")
+    task_source = data.get("task_source")
+    task_ref_id = data.get("task_ref_id")
+    task_description = data.get("task_description", "")
+    checked = data.get("checked", True)
+    shift_date = data.get("shift_date", datetime.now().strftime("%Y-%m-%d"))
+    estimate_id = data.get("estimate_id") or None
+
+    if not all([job_id, task_source, task_ref_id is not None]):
+        return jsonify({"error": "Missing required fields"}), 400
+
+    # Validate task_source (security: Gap 3)
+    if task_source not in ("job_task", "estimate_task", "template_item"):
+        return jsonify({"error": "invalid source"}), 400
+
+    # Validate job ownership (security: Gap 2)
+    job = database.get_job(int(job_id))
+    if not job or job["token"] != token_str:
+        return jsonify({"error": "invalid job"}), 403
+
+    if checked:
+        database.log_task_completion(
+            token_str=token_str,
+            job_id=int(job_id),
+            estimate_id=int(estimate_id) if estimate_id else None,
+            schedule_id=None,
+            task_source=task_source,
+            task_ref_id=int(task_ref_id),
+            task_description=task_description,
+            employee_id=employee["id"],
+            employee_name=employee["name"],
+            shift_date=shift_date,
+        )
+    else:
+        database.remove_task_completion(
+            token_str=token_str,
+            job_id=int(job_id),
+            task_source=task_source,
+            task_ref_id=int(task_ref_id),
+            task_description=task_description,
+            employee_id=employee["id"],
+            shift_date=shift_date,
+        )
+
+    return jsonify({"success": True})
+
+
+# ---------------------------------------------------------------------------
 # API - Clock In
 # ---------------------------------------------------------------------------
 

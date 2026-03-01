@@ -161,12 +161,19 @@ def api_create_schedule():
 
     employee_id = data.get("employee_id")
     job_id = data.get("job_id")
+    estimate_id = data.get("estimate_id") or None
     token_str = data.get("token", "")
     date = data.get("date", "")
     shift_type = data.get("shift_type", "custom")
     start_time = data.get("start_time", "")
     end_time = data.get("end_time", "")
     notes = data.get("notes", "")
+
+    # Derive job_id from estimate if not provided
+    if estimate_id and not job_id:
+        est = database.get_estimate(int(estimate_id))
+        if est and est.get("job_id"):
+            job_id = est["job_id"]
 
     # 3-tier task fields
     common_task_id = data.get("common_task_id") or None
@@ -208,6 +215,7 @@ def api_create_schedule():
             common_task_id=int(common_task_id) if common_task_id else None,
             job_task_id=int(job_task_id) if job_task_id else None,
             custom_note=custom_note,
+            estimate_id=int(estimate_id) if estimate_id else None,
         )
     except Exception as e:
         return jsonify({"error": f"Database error: {e}"}), 500
@@ -231,6 +239,12 @@ def api_update_schedule(schedule_id):
 
     employee_id = data.get("employee_id", existing["employee_id"])
     job_id = data.get("job_id", existing["job_id"])
+    estimate_id = data.get("estimate_id", existing.get("estimate_id")) or None
+    # Derive job_id from estimate if changed and job_id not explicitly given
+    if estimate_id and "estimate_id" in data and "job_id" not in data:
+        est = database.get_estimate(int(estimate_id))
+        if est and est.get("job_id"):
+            job_id = est["job_id"]
     date = data.get("date", existing["date"])
     shift_type = data.get("shift_type", existing["shift_type"])
     start_time = data.get("start_time", existing["start_time"])
@@ -268,6 +282,7 @@ def api_update_schedule(schedule_id):
         common_task_id=int(common_task_id) if common_task_id else None,
         job_task_id=int(job_task_id) if job_task_id else None,
         custom_note=custom_note,
+        estimate_id=int(estimate_id) if estimate_id else None,
     )
 
     updated = database.get_schedule(schedule_id)

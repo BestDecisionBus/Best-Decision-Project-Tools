@@ -661,7 +661,7 @@ def admin_estimate_update(estimate_id):
 
     updates = {}
     for field in ("transcription", "notes", "title", "customer_company_name", "customer_name", "customer_phone", "customer_email",
-                   "estimate_number", "date_accepted", "expected_completion", "customer_message"):
+                   "estimate_number", "date_accepted", "expected_completion", "customer_message", "project_name"):
         if field in data:
             val = data[field]
             updates[field] = val.strip() if isinstance(val, str) else val

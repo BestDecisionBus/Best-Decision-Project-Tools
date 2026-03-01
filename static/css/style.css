@@ -2109,4 +2109,18 @@ table.resizable th .resize-handle.active {
 .ss-option:last-child { border-bottom: none; }
 .ss-option:active { background: #eff6ff; }
 .ss-option.hidden { display: none; }
+
+/* Task checklist */
+.task-checklist { list-style: none; padding: 0; margin: 0; }
+.task-checklist li {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 0; border-bottom: 1px solid var(--gray-100);
+    font-size: 15px; line-height: 1.4;
+}
+.task-checklist li:last-child { border-bottom: none; }
+.task-checklist input[type="checkbox"] {
+    width: 22px; height: 22px; min-width: 22px; cursor: pointer;
+    accent-color: var(--green);
+}
+.task-done { text-decoration: line-through; color: var(--gray-400); }
 .ss-no-results { padding: 12px 14px; color: var(--gray-400); font-size: 14px; font-style: italic; }

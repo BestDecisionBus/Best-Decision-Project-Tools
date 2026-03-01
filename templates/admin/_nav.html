@@ -9,7 +9,7 @@
 {% set g_employees = ('employee' in ep or 'schedule' in ep or 'time_entr' in ep or 'export' in ep or 'manual' in ep) %}
 {% set g_receipts = ('receipt' in ep) %}
 {% set g_finance = ('finance' in ep) %}
-{% set g_lists = ('categor' in ep or 'common_task' in ep or 'message_snippet' in ep or 'product' in ep or 'shift_type' in ep) %}
+{% set g_lists = ('categor' in ep or 'common_task' in ep or 'message_snippet' in ep or 'product' in ep or 'shift_type' in ep or 'task_template' in ep or 'task_completion' in ep) %}
 {% set g_admin = ('audit' in ep or 'token' in ep or 'admin.admin_user' in ep) %}
 {% set g_guide = ('guide' in ep) %}
 
@@ -63,6 +63,8 @@
     <a href="{{ turl('admin.admin_message_snippets') }}" {% if 'message_snippet' in ep %}class="active"{% endif %}>Message Snippets</a>
     <a href="{{ turl('admin.admin_products_services') }}" {% if 'product' in ep %}class="active"{% endif %}>Products &amp; Services</a>
     <a href="{{ turl('admin.admin_shift_types') }}" {% if 'shift_type' in ep %}class="active"{% endif %}>Shift Types</a>
+    <a href="{{ turl('task_templates.admin_task_templates') }}" {% if 'task_template' in ep %}class="active"{% endif %}>Task Templates</a>
+    <a href="{{ turl('task_templates.admin_task_completions') }}" {% if 'task_completion' in ep %}class="active"{% endif %}>Task History</a>
 </nav>
 {% elif g_admin %}
 <nav class="admin-subnav">

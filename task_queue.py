@@ -10,6 +10,7 @@ import fcntl
 import logging
 import threading
 import time
+from datetime import date
 from pathlib import Path
 
 import config
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 _worker_thread = None
 _lock_path = config.INSTANCE_DIR / "gpu_worker.lock"
+_last_purge_file = config.INSTANCE_DIR / "task_purge_last_run.txt"
 
 POLL_INTERVAL = 2
 
@@ -41,8 +43,30 @@ def _worker():
             time.sleep(POLL_INTERVAL)
 
 
+def _run_daily_task_purge():
+    """Purge old task completions once per calendar day using a timestamp file."""
+    today_str = date.today().isoformat()
+    try:
+        if _last_purge_file.exists():
+            last_run = _last_purge_file.read_text().strip()
+            if last_run == today_str:
+                return
+        tokens = database.get_all_tokens()
+        total = 0
+        for t in tokens:
+            retention = database.get_token_retention_days(t["token"])
+            deleted = database.purge_old_task_completions(t["token"], retention)
+            total += deleted
+        if total:
+            logger.info(f"Daily task purge: removed {total} old completions")
+        _last_purge_file.write_text(today_str)
+    except Exception as e:
+        logger.error(f"Daily task purge failed: {e}")
+
+
 def _poll_and_process():
     """Check for one pending submission or estimate and process it."""
+    _run_daily_task_purge()
     row = database.claim_next_pending()
     if row is None:
         _poll_and_process_estimate()

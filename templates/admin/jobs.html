@@ -95,6 +95,7 @@
                         <th>Customer</th>
                         <th>Address</th>
                         <th>Lat/Lng</th>
+                        <th>Reset</th>
                         <th>Status</th>
                         <th>Est. Status</th>
                         <th>Actions</th>
@@ -144,6 +145,14 @@
                             </div>
                         </td>
                         <td>
+                            <span id="reset-display-{{ job.id }}">
+                                {% if job.reset_per_visit %}<span class="badge" style="background:#dbeafe; color:#1d4ed8; font-size:11px;">Reset</span>{% else %}<span style="color:var(--gray-400);">—</span>{% endif %}
+                            </span>
+                            <label id="reset-edit-{{ job.id }}" style="display:none; font-size:13px; white-space:nowrap;">
+                                <input type="checkbox" id="reset-input-{{ job.id }}" {% if job.reset_per_visit %}checked{% endif %}> Reset tasks
+                            </label>
+                        </td>
+                        <td>
                             {% if job.is_active %}
                             <span class="badge badge-active">Active</span>
                             {% else %}
@@ -171,6 +180,8 @@
                             <button type="button" class="btn btn-green btn-sm" id="jobsave-btn-{{ job.id }}"
                                     style="display: none;"
                                     onclick="saveJob({{ job.id }})">Save</button>
+                            <a href="{{ url_for('time_admin.admin_job_templates', job_id=job.id) }}"
+                               class="btn btn-blue btn-sm">Templates</a>
                             <form method="POST" action="{{ url_for('time_admin.admin_job_toggle', job_id=job.id) }}" style="display: inline;">
                                 {% if job.is_active %}
                                 <button type="submit" class="btn btn-red btn-sm">Deactivate</button>
@@ -274,6 +285,8 @@
         var addrInput = document.getElementById('addr-input-' + id);
         var latlngDisplay = document.getElementById('latlng-display-' + id);
         var latlngEdit = document.getElementById('latlng-edit-' + id);
+        var resetDisplay = document.getElementById('reset-display-' + id);
+        var resetEdit = document.getElementById('reset-edit-' + id);
         var editBtn = document.getElementById('jobedit-btn-' + id);
         var saveBtn = document.getElementById('jobsave-btn-' + id);
         var editing = nameInput.style.display === 'none';
@@ -285,6 +298,8 @@
         addrInput.style.display = editing ? '' : 'none';
         latlngDisplay.style.display = editing ? 'none' : '';
         latlngEdit.style.display = editing ? '' : 'none';
+        if (resetDisplay) resetDisplay.style.display = editing ? 'none' : '';
+        if (resetEdit) resetEdit.style.display = editing ? '' : 'none';
         editBtn.style.display = editing ? 'none' : '';
         saveBtn.style.display = editing ? '' : 'none';
     }
@@ -295,10 +310,12 @@
         var lat = document.getElementById('lat-input-' + id).value;
         var lng = document.getElementById('lng-input-' + id).value;
         var custSel = document.getElementById('custid-input-' + id);
+        var resetInput = document.getElementById('reset-input-' + id);
         var payload = {job_name: job_name, job_address: job_address};
         if (lat) payload.latitude = parseFloat(lat);
         if (lng) payload.longitude = parseFloat(lng);
         if (custSel) payload.customer_id = custSel.value ? parseInt(custSel.value) : null;
+        if (resetInput) payload.reset_per_visit = resetInput.checked ? 1 : 0;
         fetch('/admin/jobs/' + id + '/update', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},

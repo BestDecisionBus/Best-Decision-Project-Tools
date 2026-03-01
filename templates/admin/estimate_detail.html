@@ -36,6 +36,15 @@
                     </form>
                 </div>
             </div>
+            <div style="margin-bottom: 16px;">
+                <label class="est-label">Project Name <span style="font-weight: 400; color: var(--gray-400);">(optional display name)</span></label>
+                <input type="text" id="edit-project-name" value="{{ estimate.project_name or '' }}" class="est-input"
+                       placeholder="e.g. Remodel Lower Level Interior"
+                       style="max-width: 480px;">
+                <p style="font-size: 12px; color: var(--gray-500); margin-top: 4px; margin-bottom: 0;">
+                    If blank, displays as {% if is_project %}Proj{% else %}Est{% endif %} #{{ estimate.estimate_number or estimate.id }} only.
+                </p>
+            </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
                 <div>
                     <label class="est-label">Job</label>
@@ -701,6 +710,7 @@
             customer_name: document.getElementById('edit-customer-name').value,
             customer_phone: phone,
             customer_email: email,
+            project_name: document.getElementById('edit-project-name').value.trim(),
             estimate_number: document.getElementById('edit-estimate-number').value.trim(),
             date_accepted: document.getElementById('edit-date-accepted').value,
             expected_completion: document.getElementById('edit-expected-completion').value,

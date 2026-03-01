@@ -1,7 +1,7 @@
 import sqlite3
 import secrets
 import string
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -384,8 +384,97 @@ def init_db():
     _add_column_if_missing(conn, "estimates", "completed_at", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "categories", "account_code", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "products_services", "taxable", "INTEGER DEFAULT 0")
-    _add_column_if_missing(conn, "jobs",      "customer_id", "INTEGER DEFAULT NULL")
-    _add_column_if_missing(conn, "estimates", "customer_id", "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "jobs",      "customer_id",        "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "estimates", "customer_id",        "INTEGER DEFAULT NULL")
+    # Phase 1 — Current Job Tasks feature
+    _add_column_if_missing(conn, "estimates", "project_name",       "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "jobs",      "reset_per_visit",    "INTEGER DEFAULT 0")
+    _add_column_if_missing(conn, "jobs",      "sort_order",         "INTEGER DEFAULT 0")
+    _add_column_if_missing(conn, "tokens",    "task_retention_days","INTEGER DEFAULT 90")
+    _add_column_if_missing(conn, "schedules", "estimate_id",        "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "employees", "tasks_access",       "INTEGER DEFAULT 1")
+    conn.commit()
+
+    # Phase 1 — New tables for Current Job Tasks feature
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS task_templates (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            token      TEXT NOT NULL,
+            name       TEXT NOT NULL,
+            is_active  INTEGER DEFAULT 1,
+            sort_order INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (token) REFERENCES tokens(token)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_templates_token ON task_templates(token)"
+    )
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS task_template_items (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            template_id INTEGER NOT NULL,
+            token       TEXT NOT NULL,
+            description TEXT NOT NULL,
+            sort_order  INTEGER DEFAULT 0,
+            is_active   INTEGER DEFAULT 1,
+            created_at  TEXT NOT NULL,
+            FOREIGN KEY (template_id) REFERENCES task_templates(id),
+            FOREIGN KEY (token) REFERENCES tokens(token)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_template_items_template ON task_template_items(template_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_template_items_token ON task_template_items(token)"
+    )
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS task_completions (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            token            TEXT NOT NULL,
+            job_id           INTEGER NOT NULL,
+            estimate_id      INTEGER,
+            schedule_id      INTEGER,
+            task_source      TEXT NOT NULL,
+            task_ref_id      INTEGER,
+            task_description TEXT NOT NULL,
+            employee_id      INTEGER NOT NULL,
+            employee_name    TEXT NOT NULL,
+            shift_date       TEXT NOT NULL,
+            completed_at     TEXT NOT NULL,
+            is_reset         INTEGER DEFAULT 0,
+            FOREIGN KEY (token) REFERENCES tokens(token)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_completions_token ON task_completions(token)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_completions_job ON task_completions(job_id, shift_date)"
+    )
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS job_task_template_links (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id      INTEGER NOT NULL,
+            template_id INTEGER NOT NULL,
+            token       TEXT NOT NULL,
+            applied_at  TEXT NOT NULL,
+            FOREIGN KEY (job_id)      REFERENCES jobs(id),
+            FOREIGN KEY (template_id) REFERENCES task_templates(id),
+            FOREIGN KEY (token)       REFERENCES tokens(token),
+            UNIQUE(job_id, template_id)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_job_template_links_job ON job_task_template_links(job_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_job_template_links_token ON job_task_template_links(token)"
+    )
     conn.commit()
 
     # Migrate legacy category_1_id / category_2_id into junction table
@@ -811,18 +900,19 @@ def get_employee(employee_id):
 
 def create_employee(name, employee_id_str, token_str, username=None, password=None,
                      hourly_wage=None, receipt_access=0, timekeeper_access=1,
-                     job_photos_access=1, schedule_access=1, estimate_access=0):
+                     job_photos_access=1, schedule_access=1, estimate_access=0,
+                     tasks_access=1):
     conn = get_db()
     now = datetime.now().isoformat()
     pw_hash = generate_password_hash(password) if password else None
     conn.execute(
         """INSERT INTO employees (name, employee_id, token, username, password_hash,
            hourly_wage, receipt_access, timekeeper_access, job_photos_access,
-           schedule_access, estimate_access, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           schedule_access, estimate_access, tasks_access, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (name, employee_id_str, token_str, username or None, pw_hash, hourly_wage,
          receipt_access, timekeeper_access, job_photos_access, schedule_access,
-         estimate_access, now),
+         estimate_access, tasks_access, now),
     )
     conn.commit()
     conn.close()
@@ -834,7 +924,7 @@ _SENTINEL = object()
 def update_employee(emp_id, name, employee_id_str, hourly_wage=_SENTINEL,
                     receipt_access=_SENTINEL, timekeeper_access=_SENTINEL,
                     job_photos_access=_SENTINEL, schedule_access=_SENTINEL,
-                    estimate_access=_SENTINEL):
+                    estimate_access=_SENTINEL, tasks_access=_SENTINEL):
     conn = get_db()
     fields = ["name = ?", "employee_id = ?"]
     params = [name, employee_id_str]
@@ -856,6 +946,9 @@ def update_employee(emp_id, name, employee_id_str, hourly_wage=_SENTINEL,
     if estimate_access is not _SENTINEL:
         fields.append("estimate_access = ?")
         params.append(estimate_access)
+    if tasks_access is not _SENTINEL:
+        fields.append("tasks_access = ?")
+        params.append(tasks_access)
     params.append(emp_id)
     conn.execute(f"UPDATE employees SET {', '.join(fields)} WHERE id = ?", params)
     conn.commit()
@@ -1010,12 +1103,19 @@ def create_job(job_name, job_address, latitude, longitude, token_str, customer_i
     return cur.lastrowid
 
 
-def update_job(job_id, job_name, job_address, latitude, longitude, customer_id=None):
+def update_job(job_id, job_name, job_address, latitude, longitude, customer_id=None,
+               reset_per_visit=None):
     conn = get_db()
-    conn.execute(
-        "UPDATE jobs SET job_name = ?, job_address = ?, latitude = ?, longitude = ?, customer_id = ? WHERE id = ?",
-        (job_name, job_address, latitude, longitude, customer_id, job_id),
-    )
+    if reset_per_visit is not None:
+        conn.execute(
+            "UPDATE jobs SET job_name = ?, job_address = ?, latitude = ?, longitude = ?, customer_id = ?, reset_per_visit = ? WHERE id = ?",
+            (job_name, job_address, latitude, longitude, customer_id, reset_per_visit, job_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE jobs SET job_name = ?, job_address = ?, latitude = ?, longitude = ?, customer_id = ? WHERE id = ?",
+            (job_name, job_address, latitude, longitude, customer_id, job_id),
+        )
     conn.commit()
     conn.close()
 
@@ -2667,16 +2767,16 @@ def update_submission_job(submission_id, job_id):
 
 def create_schedule(employee_id, job_id, token_str, date, start_time, end_time,
                     shift_type, notes, created_by, common_task_id=None,
-                    job_task_id=None, custom_note=""):
+                    job_task_id=None, custom_note="", estimate_id=None):
     conn = get_db()
     now = datetime.now().isoformat()
     cur = conn.execute(
         """INSERT INTO schedules
            (employee_id, job_id, token, date, start_time, end_time, shift_type, notes,
-            common_task_id, job_task_id, custom_note, created_by, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            common_task_id, job_task_id, custom_note, estimate_id, created_by, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (employee_id, job_id, token_str, date, start_time, end_time, shift_type, notes,
-         common_task_id, job_task_id, custom_note, created_by, now, now),
+         common_task_id, job_task_id, custom_note, estimate_id, created_by, now, now),
     )
     schedule_id = cur.lastrowid
     conn.commit()
@@ -2686,17 +2786,17 @@ def create_schedule(employee_id, job_id, token_str, date, start_time, end_time,
 
 def update_schedule(schedule_id, employee_id, job_id, date, start_time, end_time,
                     shift_type, notes, common_task_id=None, job_task_id=None,
-                    custom_note=""):
+                    custom_note="", estimate_id=None):
     conn = get_db()
     now = datetime.now().isoformat()
     conn.execute(
         """UPDATE schedules
            SET employee_id = ?, job_id = ?, date = ?, start_time = ?, end_time = ?,
                shift_type = ?, notes = ?, common_task_id = ?, job_task_id = ?,
-               custom_note = ?, updated_at = ?
+               custom_note = ?, estimate_id = ?, updated_at = ?
            WHERE id = ?""",
         (employee_id, job_id, date, start_time, end_time, shift_type, notes,
-         common_task_id, job_task_id, custom_note, now, schedule_id),
+         common_task_id, job_task_id, custom_note, estimate_id, now, schedule_id),
     )
     conn.commit()
     conn.close()
@@ -3033,7 +3133,8 @@ def update_estimate(estimate_id, **kwargs):
                 "customer_company_name", "customer_name", "customer_phone", "customer_email",
                 "estimate_number", "date_accepted", "expected_completion",
                 "sales_tax_rate", "customer_message", "completion_pct", "job_id",
-                "client_budget", "append_audio_file", "completed_at", "customer_id"}
+                "client_budget", "append_audio_file", "completed_at", "customer_id",
+                "project_name"}
     sets = []
     params = []
     for k, v in kwargs.items():
@@ -3600,4 +3701,482 @@ def get_jobs_with_customer(token_str, active_only=False):
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
-    return row["mx"] if row else 0
+
+
+# ===========================================================================
+# TASK TEMPLATES
+# ===========================================================================
+
+def get_task_templates(token_str: str, active_only: bool = False) -> list:
+    conn = get_db()
+    q = "SELECT * FROM task_templates WHERE token = ?"
+    params = [token_str]
+    if active_only:
+        q += " AND is_active = 1"
+    q += " ORDER BY sort_order ASC, name ASC"
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_task_template(template_id: int, token_str: str = None) -> dict:
+    conn = get_db()
+    q = "SELECT * FROM task_templates WHERE id = ?"
+    params = [template_id]
+    if token_str:
+        q += " AND token = ?"
+        params.append(token_str)
+    row = conn.execute(q, params).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def create_task_template(name: str, token_str: str, sort_order: int = 0) -> int:
+    conn = get_db()
+    now = datetime.now().isoformat()
+    cur = conn.execute(
+        "INSERT INTO task_templates (token, name, is_active, sort_order, created_at) VALUES (?, ?, 1, ?, ?)",
+        (token_str, name.strip(), sort_order, now),
+    )
+    conn.commit()
+    conn.close()
+    return cur.lastrowid
+
+
+def update_task_template(template_id: int, name: str) -> None:
+    conn = get_db()
+    conn.execute(
+        "UPDATE task_templates SET name = ? WHERE id = ?",
+        (name.strip(), template_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def toggle_task_template(template_id: int) -> None:
+    conn = get_db()
+    conn.execute(
+        "UPDATE task_templates SET is_active = 1 - is_active WHERE id = ?",
+        (template_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_task_template_sort(template_id: int, sort_order: int) -> None:
+    conn = get_db()
+    conn.execute(
+        "UPDATE task_templates SET sort_order = ? WHERE id = ?",
+        (sort_order, template_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_task_template(template_id: int) -> bool:
+    """Delete only if no active items exist under this template."""
+    conn = get_db()
+    count = conn.execute(
+        "SELECT COUNT(*) FROM task_template_items WHERE template_id = ? AND is_active = 1",
+        (template_id,),
+    ).fetchone()[0]
+    if count > 0:
+        conn.close()
+        return False
+    conn.execute("DELETE FROM task_template_items WHERE template_id = ?", (template_id,))
+    conn.execute("DELETE FROM task_templates WHERE id = ?", (template_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+
+# ===========================================================================
+# TASK TEMPLATE ITEMS
+# ===========================================================================
+
+def get_template_items(template_id: int, active_only: bool = False) -> list:
+    conn = get_db()
+    q = "SELECT * FROM task_template_items WHERE template_id = ?"
+    params = [template_id]
+    if active_only:
+        q += " AND is_active = 1"
+    q += " ORDER BY sort_order ASC, id ASC"
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def create_template_item(template_id: int, description: str, token_str: str, sort_order: int = 0) -> int:
+    conn = get_db()
+    now = datetime.now().isoformat()
+    cur = conn.execute(
+        """INSERT INTO task_template_items
+           (template_id, token, description, sort_order, is_active, created_at)
+           VALUES (?, ?, ?, ?, 1, ?)""",
+        (template_id, token_str, description.strip(), sort_order, now),
+    )
+    conn.commit()
+    conn.close()
+    return cur.lastrowid
+
+
+def update_template_item(item_id: int, description: str) -> None:
+    conn = get_db()
+    conn.execute(
+        "UPDATE task_template_items SET description = ? WHERE id = ?",
+        (description.strip(), item_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def toggle_template_item(item_id: int) -> None:
+    conn = get_db()
+    conn.execute(
+        "UPDATE task_template_items SET is_active = 1 - is_active WHERE id = ?",
+        (item_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_template_item_sort(item_id: int, sort_order: int) -> None:
+    conn = get_db()
+    conn.execute(
+        "UPDATE task_template_items SET sort_order = ? WHERE id = ?",
+        (sort_order, item_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_template_item(item_id: int) -> None:
+    conn = get_db()
+    conn.execute("DELETE FROM task_template_items WHERE id = ?", (item_id,))
+    conn.commit()
+    conn.close()
+
+
+# ===========================================================================
+# TASK COMPLETIONS
+# ===========================================================================
+
+def log_task_completion(token_str: str, job_id: int, estimate_id, schedule_id,
+                         task_source: str, task_ref_id, task_description: str,
+                         employee_id: int, employee_name: str, shift_date: str) -> int:
+    conn = get_db()
+    now = datetime.now().isoformat()
+    cur = conn.execute(
+        """INSERT INTO task_completions
+           (token, job_id, estimate_id, schedule_id, task_source, task_ref_id,
+            task_description, employee_id, employee_name, shift_date, completed_at, is_reset)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+        (token_str, job_id, estimate_id, schedule_id, task_source, task_ref_id,
+         task_description, employee_id, employee_name, shift_date, now),
+    )
+    conn.commit()
+    conn.close()
+    return cur.lastrowid
+
+
+def remove_task_completion(token_str: str, job_id: int, task_source: str,
+                            task_ref_id, task_description: str,
+                            employee_id: int, shift_date: str) -> None:
+    conn = get_db()
+    if task_ref_id is not None:
+        conn.execute(
+            """DELETE FROM task_completions
+               WHERE token = ? AND job_id = ? AND task_source = ?
+               AND task_ref_id = ? AND employee_id = ? AND shift_date = ? AND is_reset = 0""",
+            (token_str, job_id, task_source, task_ref_id, employee_id, shift_date),
+        )
+    else:
+        conn.execute(
+            """DELETE FROM task_completions
+               WHERE token = ? AND job_id = ? AND task_source = ?
+               AND task_description = ? AND employee_id = ? AND shift_date = ? AND is_reset = 0""",
+            (token_str, job_id, task_source, task_description, employee_id, shift_date),
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_completions_for_job_date(token_str: str, job_id: int, shift_date: str) -> list:
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT * FROM task_completions
+           WHERE token = ? AND job_id = ? AND shift_date = ? AND is_reset = 0
+           ORDER BY completed_at ASC""",
+        (token_str, job_id, shift_date),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_completions_for_admin(token_str: str, job_id: int = None, days_back: int = 30) -> list:
+    conn = get_db()
+    cutoff = (datetime.now() - timedelta(days=days_back)).isoformat()
+    q = "SELECT * FROM task_completions WHERE token = ? AND completed_at >= ?"
+    params = [token_str, cutoff]
+    if job_id:
+        q += " AND job_id = ?"
+        params.append(job_id)
+    q += " ORDER BY completed_at DESC"
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def reset_job_tasks_for_visit(token_str: str, job_id: int, shift_date: str) -> None:
+    conn = get_db()
+    conn.execute(
+        """UPDATE task_completions
+           SET is_reset = 1
+           WHERE token = ? AND job_id = ? AND shift_date < ? AND is_reset = 0""",
+        (token_str, job_id, shift_date),
+    )
+    conn.commit()
+    conn.close()
+
+
+def purge_old_task_completions(token_str: str, retention_days: int) -> int:
+    conn = get_db()
+    cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
+    cur = conn.execute(
+        "DELETE FROM task_completions WHERE token = ? AND completed_at < ?",
+        (token_str, cutoff),
+    )
+    conn.commit()
+    deleted = cur.rowcount
+    conn.close()
+    return deleted
+
+
+# ===========================================================================
+# MERGED TASK LIST FOR EMPLOYEE VIEW
+# ===========================================================================
+
+def get_merged_tasks_for_job(token_str: str, job_id: int, estimate_id, shift_date: str) -> list:
+    """Return a flat merged list of all tasks for an employee's job/project view."""
+    completions = get_completions_for_job_date(token_str, job_id, shift_date)
+    completed_keys = set()
+    completion_map = {}
+    for c in completions:
+        key = (c["task_source"], c["task_ref_id"], c["task_description"])
+        completed_keys.add(key)
+        completion_map[key] = c
+
+    tasks = []
+    conn = get_db()
+
+    # Source 1: job_tasks (column is "name")
+    job_task_rows = conn.execute(
+        "SELECT * FROM job_tasks WHERE token = ? AND job_id = ? AND is_active = 1 ORDER BY sort_order ASC, id ASC",
+        (token_str, job_id),
+    ).fetchall()
+    for row in job_task_rows:
+        key = ("job_task", row["id"], row["name"])
+        completion = completion_map.get(key)
+        tasks.append({
+            "source": "job_task",
+            "ref_id": row["id"],
+            "description": row["name"],
+            "is_complete": key in completed_keys,
+            "completed_by": completion["employee_name"] if completion else None,
+            "completed_at": completion["completed_at"] if completion else None,
+        })
+
+    # Source 2: estimate/project items (no is_active column on estimate_items)
+    if estimate_id:
+        est_rows = conn.execute(
+            """SELECT * FROM estimate_items
+               WHERE token = ? AND estimate_id = ?
+               ORDER BY sort_order ASC, id ASC""",
+            (token_str, estimate_id),
+        ).fetchall()
+        for row in est_rows:
+            key = ("estimate_task", row["id"], row["description"])
+            completion = completion_map.get(key)
+            tasks.append({
+                "source": "estimate_task",
+                "ref_id": row["id"],
+                "description": row["description"],
+                "is_complete": key in completed_keys,
+                "completed_by": completion["employee_name"] if completion else None,
+                "completed_at": completion["completed_at"] if completion else None,
+            })
+
+    # Source 3: task_template_items applied to this job
+    template_rows = conn.execute(
+        """SELECT tti.*
+           FROM task_template_items tti
+           JOIN job_task_template_links jttl ON jttl.template_id = tti.template_id
+           WHERE jttl.job_id = ? AND jttl.token = ? AND tti.is_active = 1
+           ORDER BY tti.sort_order ASC, tti.id ASC""",
+        (job_id, token_str),
+    ).fetchall()
+    for row in template_rows:
+        key = ("template_item", row["id"], row["description"])
+        completion = completion_map.get(key)
+        tasks.append({
+            "source": "template_item",
+            "ref_id": row["id"],
+            "description": row["description"],
+            "is_complete": key in completed_keys,
+            "completed_by": completion["employee_name"] if completion else None,
+            "completed_at": completion["completed_at"] if completion else None,
+        })
+
+    conn.close()
+    return tasks
+
+
+# ===========================================================================
+# PROJECT NAME HELPERS
+# ===========================================================================
+
+def get_project_display_name(estimate: dict) -> str:
+    num = estimate.get("estimate_number") or str(estimate.get("id", ""))
+    name = (estimate.get("project_name") or "").strip()
+    if name:
+        return f"{name} \u2014 Proj #{num}"
+    return f"Proj #{num}"
+
+
+def get_jobs_with_projects(token_str: str, active_only: bool = True) -> list:
+    """Return jobs with their linked active projects for schedule dropdowns."""
+    conn = get_db()
+    job_q = "SELECT * FROM jobs WHERE token = ?"
+    params = [token_str]
+    if active_only:
+        job_q += " AND is_active = 1"
+    job_q += " ORDER BY job_name ASC"
+    jobs = [dict(r) for r in conn.execute(job_q, params).fetchall()]
+    for job in jobs:
+        proj_rows = conn.execute(
+            """SELECT * FROM estimates
+               WHERE token = ? AND job_id = ?
+               AND approval_status NOT IN ('declined')
+               ORDER BY project_name ASC, estimate_number ASC""",
+            (token_str, job["id"]),
+        ).fetchall()
+        job["projects"] = [dict(r) for r in proj_rows]
+    conn.close()
+    return jobs
+
+
+def auto_create_default_projects(token_str: str) -> int:
+    """For each active job with zero estimates, create a default project. Returns count created."""
+    conn = get_db()
+    jobs = conn.execute(
+        "SELECT * FROM jobs WHERE token = ? AND is_active = 1", (token_str,)
+    ).fetchall()
+    created = 0
+    now = datetime.now().isoformat()
+    for job in jobs:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM estimates WHERE job_id = ? AND token = ?",
+            (job["id"], token_str),
+        ).fetchone()[0]
+        if count == 0:
+            conn.execute(
+                """INSERT INTO estimates
+                   (token, job_id, project_name, title, status, approval_status, created_at, estimate_number)
+                   VALUES (?, ?, ?, ?, 'complete', 'in_progress', ?, ?)""",
+                (token_str, job["id"], job["job_name"], job["job_name"], now, f"AUTO-{job['id']}"),
+            )
+            created += 1
+    conn.commit()
+    conn.close()
+    return created
+
+
+# ===========================================================================
+# JOB–TEMPLATE LINKS
+# ===========================================================================
+
+def get_templates_for_job(job_id: int, token_str: str) -> list:
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT tt.* FROM task_templates tt
+           JOIN job_task_template_links jttl ON jttl.template_id = tt.id
+           WHERE jttl.job_id = ? AND jttl.token = ?
+           ORDER BY tt.name ASC""",
+        (job_id, token_str),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def apply_template_to_job(job_id: int, template_id: int, token_str: str) -> None:
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        """INSERT OR IGNORE INTO job_task_template_links
+           (job_id, template_id, token, applied_at) VALUES (?, ?, ?, ?)""",
+        (job_id, template_id, token_str, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_template_from_job(job_id: int, template_id: int, token_str: str) -> None:
+    conn = get_db()
+    conn.execute(
+        "DELETE FROM job_task_template_links WHERE job_id = ? AND template_id = ? AND token = ?",
+        (job_id, template_id, token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ===========================================================================
+# TOKEN RETENTION SETTINGS
+# ===========================================================================
+
+def get_token_retention_days(token_str: str) -> int:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT task_retention_days FROM tokens WHERE token = ?", (token_str,)
+    ).fetchone()
+    conn.close()
+    return row["task_retention_days"] if row else 90
+
+
+def update_token_settings(token_str: str, task_retention_days: int) -> None:
+    conn = get_db()
+    conn.execute(
+        "UPDATE tokens SET task_retention_days = ? WHERE token = ?",
+        (task_retention_days, token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ===========================================================================
+# EMPLOYEE TASK HELPERS
+# ===========================================================================
+
+def get_schedules_for_employee_date(employee_id: int, token_str: str, date_str: str) -> list:
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT s.*, j.job_name
+           FROM schedules s
+           LEFT JOIN jobs j ON s.job_id = j.id
+           WHERE s.token = ? AND s.employee_id = ? AND s.date = ?""",
+        (token_str, employee_id, date_str),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_active_time_entry_for_employee(employee_id: int, token_str: str) -> dict:
+    conn = get_db()
+    row = conn.execute(
+        """SELECT * FROM time_entries
+           WHERE token = ? AND employee_id = ? AND status = 'active'
+           ORDER BY clock_in_time DESC LIMIT 1""",
+        (token_str, employee_id),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None

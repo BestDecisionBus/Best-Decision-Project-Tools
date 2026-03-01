@@ -228,12 +228,14 @@ def admin_employee_create():
         job_photos_access = 1 if request.form.get("job_photos_access") else 0
         schedule_access = 1 if request.form.get("schedule_access") else 0
         estimate_access = 1 if request.form.get("estimate_access") else 0
+        tasks_access = 1 if request.form.get("tasks_access") else 0
         database.create_employee(name, employee_id_str, token_str, username, password,
                                  hourly_wage=hourly_wage, receipt_access=receipt_access,
                                  timekeeper_access=timekeeper_access,
                                  job_photos_access=job_photos_access,
                                  schedule_access=schedule_access,
-                                 estimate_access=estimate_access)
+                                 estimate_access=estimate_access,
+                                 tasks_access=tasks_access)
         flash(f"Employee {name} added.", "success")
     return redirect(url_for("time_admin.admin_employees", token=token_str))
 
@@ -247,7 +249,7 @@ def admin_employee_update(emp_id):
         _app._verify_token_access(emp["token"])
     kwargs = {}
     toggle_fields = ("receipt_access", "timekeeper_access", "job_photos_access",
-                      "schedule_access", "estimate_access")
+                      "schedule_access", "estimate_access", "tasks_access")
     if request.is_json:
         data = request.get_json()
         name = data.get("name", "").strip()
@@ -359,7 +361,11 @@ def admin_job_create():
     latitude = float(lat) if lat else None
     longitude = float(lng) if lng else None
     customer_id = request.form.get("customer_id", type=int)
-    database.create_job(job_name, job_address, latitude, longitude, token_str, customer_id=customer_id)
+    reset_per_visit = 1 if request.form.get("reset_per_visit") == "1" else 0
+    new_job_id = database.create_job(job_name, job_address, latitude, longitude, token_str, customer_id=customer_id)
+    if new_job_id:
+        database.update_job(new_job_id, job_name, job_address, latitude, longitude,
+                            customer_id=customer_id, reset_per_visit=reset_per_visit)
     flash(f"Job '{job_name}' created.", "success")
     return redirect(url_for("time_admin.admin_jobs", token=token_str))
 
@@ -371,6 +377,7 @@ def admin_job_update(job_id):
     job_check = database.get_job(job_id)
     if job_check:
         _app._verify_token_access(job_check["token"])
+    reset_per_visit = None
     if request.is_json:
         data = request.get_json()
         job_name = data.get("job_name", "").strip()
@@ -378,15 +385,20 @@ def admin_job_update(job_id):
         lat = data.get("latitude")
         lng = data.get("longitude")
         customer_id = data.get("customer_id") if data.get("customer_id") else None
+        if "reset_per_visit" in data:
+            reset_per_visit = int(data["reset_per_visit"])
     else:
         job_name = request.form.get("job_name", "").strip()
         job_address = request.form.get("job_address", "").strip()
         lat = request.form.get("latitude", "").strip()
         lng = request.form.get("longitude", "").strip()
         customer_id = request.form.get("customer_id", type=int)
+        if "reset_per_visit" in request.form:
+            reset_per_visit = 1 if request.form.get("reset_per_visit") == "1" else 0
     latitude = float(lat) if lat else None
     longitude = float(lng) if lng else None
-    database.update_job(job_id, job_name, job_address, latitude, longitude, customer_id=customer_id)
+    database.update_job(job_id, job_name, job_address, latitude, longitude,
+                        customer_id=customer_id, reset_per_visit=reset_per_visit)
     if request.is_json:
         return jsonify({"success": True})
     flash("Job updated.", "success")
@@ -428,6 +440,57 @@ def admin_job_unarchive(job_id):
     database.unarchive_job(job_id)
     flash("Job unarchived.", "success")
     return redirect(url_for("time_admin.admin_jobs", token=job["token"] if job else ""))
+
+
+@time_admin_bp.route("/admin/jobs/<int:job_id>/templates")
+@login_required
+def admin_job_templates(job_id):
+    _app = _helpers()
+    job = database.get_job(job_id)
+    if not job:
+        abort(404)
+    _app._verify_token_access(job["token"])
+    linked = database.get_templates_for_job(job_id, job["token"])
+    all_templates = database.get_task_templates(job["token"], active_only=True)
+    linked_ids = {t["id"] for t in linked}
+    available = [t for t in all_templates if t["id"] not in linked_ids]
+    tokens = _app._get_tokens_for_user()
+    token_str, selected_token = _app._get_selected_token(tokens)
+    return render_template(
+        "admin/job_templates.html",
+        job=job,
+        linked=linked,
+        available=available,
+        selected_token=selected_token,
+    )
+
+
+@time_admin_bp.route("/admin/jobs/<int:job_id>/templates/apply", methods=["POST"])
+@login_required
+def admin_job_apply_template(job_id):
+    _app = _helpers()
+    job = database.get_job(job_id)
+    if not job:
+        abort(404)
+    _app._verify_token_access(job["token"])
+    template_id = request.form.get("template_id", type=int)
+    if template_id:
+        database.apply_template_to_job(job_id, template_id, job["token"])
+        flash("Template applied.", "success")
+    return redirect(url_for("time_admin.admin_job_templates", job_id=job_id))
+
+
+@time_admin_bp.route("/admin/jobs/<int:job_id>/templates/<int:template_id>/remove", methods=["POST"])
+@login_required
+def admin_job_remove_template(job_id, template_id):
+    _app = _helpers()
+    job = database.get_job(job_id)
+    if not job:
+        abort(404)
+    _app._verify_token_access(job["token"])
+    database.remove_template_from_job(job_id, template_id, job["token"])
+    flash("Template removed.", "success")
+    return redirect(url_for("time_admin.admin_job_templates", job_id=job_id))
 
 
 # ---------------------------------------------------------------------------

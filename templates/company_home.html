@@ -80,6 +80,12 @@
                 </a>
             </div>
             {% endif %}
+            {% if employee.tasks_access %}
+            <a href="/tasks?token={{ token.token }}" class="home-tool-btn">
+                <span class="tool-icon">&#9745;</span>
+                <span class="tool-label">Task Checklist</span>
+            </a>
+            {% endif %}
         </div>
 
         <div class="home-tools" style="grid-template-columns: 1fr; margin-top: 12px;">

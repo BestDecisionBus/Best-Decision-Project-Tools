@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task History — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Task History</h2>
+        <p style="color: var(--gray-500); font-size: 14px; margin-bottom: 16px;">
+            Employee task completions logged via the Task Checklist.
+        </p>
+
+        {% if current_user.is_bdb or tokens|length > 1 %}
+        <div class="form-group" style="max-width: 300px; margin-bottom: 16px;">
+            <label for="token-select">Company</label>
+            <select id="token-select" onchange="applyFilter()">
+                {% if current_user.is_bdb %}<option value="">— Select company —</option>{% endif %}
+                {% for t in tokens %}
+                <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% else %}
+            {% if selected_token %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        {% if selected_token %}
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
+            <div class="form-group" style="min-width: 180px;">
+                <label for="job-filter">Filter by Job</label>
+                <select id="job-filter" onchange="applyFilter()">
+                    <option value="">All Jobs</option>
+                    {% for j in jobs %}
+                    <option value="{{ j.id }}" {% if job_id == j.id %}selected{% endif %}>{{ j.job_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" style="min-width: 100px;">
+                <label for="days-filter">Days Back</label>
+                <select id="days-filter" onchange="applyFilter()">
+                    <option value="7" {% if days_back == 7 %}selected{% endif %}>7 days</option>
+                    <option value="14" {% if days_back == 14 %}selected{% endif %}>14 days</option>
+                    <option value="30" {% if days_back == 30 %}selected{% endif %}>30 days</option>
+                    <option value="90" {% if days_back == 90 %}selected{% endif %}>90 days</option>
+                </select>
+            </div>
+        </div>
+
+        {% if completions %}
+        <div class="table-wrap">
+            <table class="resizable sortable">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Job</th>
+                        <th>Employee</th>
+                        <th>Task</th>
+                        <th>Source</th>
+                        <th>Completed At</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in completions %}
+                    <tr>
+                        <td>{{ c.shift_date }}</td>
+                        <td style="font-size: 13px;">{{ c.job_id }}</td>
+                        <td style="font-size: 13px;">{{ c.employee_name }}</td>
+                        <td>{{ c.task_description }}</td>
+                        <td>
+                            {% if c.task_source == 'job_task' %}
+                            <span class="badge" style="background:#dbeafe; color:#1d4ed8; font-size:11px;">Job Task</span>
+                            {% elif c.task_source == 'estimate_task' %}
+                            <span class="badge" style="background:#dcfce7; color:#15803d; font-size:11px;">Estimate</span>
+                            {% else %}
+                            <span class="badge" style="background:#f3e8ff; color:#7e22ce; font-size:11px;">Template</span>
+                            {% endif %}
+                        </td>
+                        <td style="font-size: 12px;">{{ c.completed_at[:16] if c.completed_at else '' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500);">No task completions found for the selected filters.</p>
+        {% endif %}
+        {% else %}
+        <p style="color: var(--gray-500);">Select a company to view task history.</p>
+        {% endif %}
+
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script>
+    function applyFilter() {
+        var tokenSel = document.getElementById('token-select');
+        var jobSel = document.getElementById('job-filter');
+        var daysSel = document.getElementById('days-filter');
+        var token = tokenSel ? tokenSel.value : '{{ selected_token.token if selected_token else "" }}';
+        var jobId = jobSel ? jobSel.value : '';
+        var days = daysSel ? daysSel.value : '30';
+        var url = '/admin/task-completions?token=' + token;
+        if (jobId) url += '&job_id=' + jobId;
+        if (days) url += '&days_back=' + days;
+        window.location.href = url;
+    }
+    </script>
+</body>
+</html>

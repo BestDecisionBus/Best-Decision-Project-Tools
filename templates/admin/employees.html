@@ -84,7 +84,7 @@
                         <input type="text" id="password" name="password" placeholder="Set login password" autocomplete="off">
                     </div>
                 </div>
-                <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px;">
+                <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 12px;">
                     <label style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 8px 4px; border: 1px solid var(--gray-200); border-radius: 6px; background: #fff;">
                         <input type="checkbox" name="timekeeper_access" value="1" checked> Timekeeper
                     </label>
@@ -99,6 +99,9 @@
                     </label>
                     <label style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 8px 4px; border: 1px solid var(--gray-200); border-radius: 6px; background: #fff;">
                         <input type="checkbox" name="estimate_access" value="1"> Estimates
+                    </label>
+                    <label style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 8px 4px; border: 1px solid var(--gray-200); border-radius: 6px; background: #fff;">
+                        <input type="checkbox" name="tasks_access" value="1" checked> Tasks
                     </label>
                 </div>
                 <div style="margin-top: 12px;">
@@ -121,6 +124,7 @@
                         <th>Sched</th>
                         <th>Rcpts</th>
                         <th>Est</th>
+                        <th>Tasks</th>
                         <th>Username</th>
                         <th>Status</th>
                         <th>Created</th>
@@ -170,6 +174,11 @@
                             <input type="checkbox" id="estimate-input-{{ emp.id }}"
                                    {% if emp.estimate_access %}checked{% endif %}
                                    onchange="toggleAccess({{ emp.id }}, 'estimate_access', this.checked)">
+                        </td>
+                        <td style="text-align: center;">
+                            <input type="checkbox" id="tasks-input-{{ emp.id }}"
+                                   {% if emp.tasks_access %}checked{% endif %}
+                                   onchange="toggleAccess({{ emp.id }}, 'tasks_access', this.checked)">
                         </td>
                         <td>
                             {% if emp.username %}

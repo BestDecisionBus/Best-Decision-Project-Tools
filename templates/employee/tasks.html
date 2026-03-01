@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Checklist — {{ token.company_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/c/{{ token.token }}/manifest.json">
+    <meta name="theme-color" content="#ffffff">
+</head>
+<body>
+    <div class="home-container">
+        <div class="home-header">
+            {% if token.logo_file %}
+            <div class="header-row">
+                <img src="/static/logos/{{ token.logo_file }}" alt="{{ token.company_name }}" class="company-logo">
+                <h1>{{ token.company_name }}</h1>
+            </div>
+            {% else %}
+            <h1>{{ token.company_name }}</h1>
+            {% endif %}
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: #fff; border: 1px solid var(--gray-200); border-radius: 8px; margin-bottom: 16px;">
+            <span style="font-weight: 600; color: var(--gray-800);">{{ employee.name }}</span>
+            <a href="/c/{{ token.token }}" style="font-size: 13px; color: var(--blue);">&larr; Home</a>
+        </div>
+
+        <h2 style="font-size: 18px; font-weight: 700; margin-bottom: 4px;">Task Checklist</h2>
+        <p style="font-size: 13px; color: var(--gray-500); margin-bottom: 20px;">{{ today }}</p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        {% if jobs_tasks %}
+        {% for entry in jobs_tasks %}
+        <div class="meta-card" style="margin-bottom: 20px;">
+            <h3 style="margin-top: 0; font-size: 16px;">{{ entry.job.job_name }}</h3>
+            {% if entry.tasks %}
+            <ul class="task-checklist" id="tasklist-{{ entry.job.id }}">
+                {% for task in entry.tasks %}
+                <li id="task-item-{{ entry.job.id }}-{{ task.ref_id }}-{{ task.source }}">
+                    <input type="checkbox"
+                           {% if task.is_complete %}checked{% endif %}
+                           onchange="toggleTask(this, {{ entry.job.id }}, '{{ task.source }}', {{ task.ref_id }}, {{ entry.estimate_id or 'null' }}, '{{ task.description | replace("'", "\\'") }}')">
+                    <span class="{% if task.is_complete %}task-done{% endif %}">{{ task.description }}</span>
+                    {% if task.completed_by %}
+                    <span style="font-size: 11px; color: var(--gray-400); margin-left: auto;">&#10003; {{ task.completed_by }}</span>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p style="color: var(--gray-400); font-size: 14px; margin: 0;">No tasks configured for this job.</p>
+            {% endif %}
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="meta-card" style="text-align: center; padding: 32px 20px;">
+            <p style="color: var(--gray-500); font-size: 15px; margin: 0;">
+                No jobs scheduled for today. Clock in or check your schedule.
+            </p>
+        </div>
+        {% endif %}
+
+    </div>
+    {% include '_footer.html' %}
+    <script>
+    const TOKEN = "{{ token.token }}";
+    const TODAY = "{{ today }}";
+
+    function toggleTask(checkbox, jobId, taskSource, taskRefId, estimateId, taskDescription) {
+        var checked = checkbox.checked;
+        var li = checkbox.closest('li');
+        var span = li.querySelector('span');
+
+        // Optimistic UI update
+        if (checked) {
+            span.classList.add('task-done');
+        } else {
+            span.classList.remove('task-done');
+        }
+
+        fetch('/api/tasks/check', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                token: TOKEN,
+                job_id: jobId,
+                task_source: taskSource,
+                task_ref_id: taskRefId,
+                task_description: taskDescription,
+                estimate_id: estimateId,
+                checked: checked,
+                shift_date: TODAY,
+            })
+        }).then(function(resp) {
+            if (!resp.ok) {
+                // Revert on failure
+                checkbox.checked = !checked;
+                if (!checked) {
+                    span.classList.add('task-done');
+                } else {
+                    span.classList.remove('task-done');
+                }
+                alert('Could not save. Please try again.');
+            }
+        }).catch(function() {
+            checkbox.checked = !checked;
+            if (!checked) {
+                span.classList.add('task-done');
+            } else {
+                span.classList.remove('task-done');
+            }
+            alert('Network error. Please try again.');
+        });
+    }
+    </script>
+</body>
+</html>

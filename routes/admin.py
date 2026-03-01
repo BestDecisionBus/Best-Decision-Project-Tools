@@ -313,6 +313,11 @@ def admin_token_update(token_id):
         _save_logo(logo, str(config.LOGOS_DIR / logo_file))
 
     database.update_token(token_id, company_name, logo_file)
+    task_retention_days = request.form.get("task_retention_days", type=int)
+    if task_retention_days and task_retention_days > 0:
+        t_info = database.get_token_by_id(token_id)
+        if t_info:
+            database.update_token_settings(t_info["token"], task_retention_days)
     flash("Token updated.", "success")
     return redirect(url_for("admin.admin_tokens"))
 
