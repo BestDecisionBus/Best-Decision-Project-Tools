@@ -624,6 +624,7 @@ from routes.scheduling import scheduling_bp
 from routes.job_photos import job_photos_bp
 from routes.estimates import estimates_bp
 from routes.finance import finance_bp
+from routes.customers import customers_bp
 
 app.register_blueprint(admin_bp)
 app.register_blueprint(timekeeper_bp)
@@ -634,6 +635,7 @@ app.register_blueprint(scheduling_bp)
 app.register_blueprint(job_photos_bp)
 app.register_blueprint(estimates_bp)
 app.register_blueprint(finance_bp)
+app.register_blueprint(customers_bp)
 
 
 # ---------------------------------------------------------------------------

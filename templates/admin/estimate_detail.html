@@ -53,8 +53,26 @@
                     <div id="display-job-address" class="est-input" style="background: var(--gray-50); min-height: 38px; display: flex; align-items: center;">{{ job.job_address if job else '' }}</div>
                 </div>
                 <div>
-                    <label class="est-label">Customer Name</label>
+                    <label class="est-label">Link to Customer Record</label>
+                    <select id="edit-customer-id" class="est-input" onchange="onCustomerSelect(this)">
+                        <option value="">— Select or leave unlinked —</option>
+                        <option value="-1">+ Create new customer from fields</option>
+                        {% for c in customers %}
+                        <option value="{{ c.id }}" {% if estimate.customer_id == c.id %}selected{% endif %}>
+                            {{ c.company_name }}{% if c.customer_name and c.customer_name != c.company_name %} ({{ c.customer_name }}){% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <p style="font-size: 12px; color: var(--gray-500); margin-top: 4px; margin-bottom: 0;">Linking a customer will auto-fill the fields below if they are empty.</p>
+                    <p id="customer-create-hint" style="display: none; font-size: 12px; color: var(--green, #16a34a); margin-top: 4px; margin-bottom: 0;">A new customer record will be created from the name, phone &amp; email fields on save.</p>
+                </div>
+                <div>
+                    <label class="est-label">Contact Name</label>
                     <input type="text" id="edit-customer-name" value="{{ estimate.customer_name or '' }}" class="est-input">
+                </div>
+                <div>
+                    <label class="est-label">Company / Client Name</label>
+                    <input type="text" id="edit-customer-company-name" value="{{ estimate.customer_company_name or '' }}" class="est-input" placeholder="ABC Construction">
                 </div>
                 <div>
                     <label class="est-label">Customer Phone</label>
@@ -527,17 +545,6 @@
         addrEl.textContent = opt.getAttribute('data-address') || '';
     }
 
-    function formatPhone(input) {
-        var digits = input.value.replace(/\D/g, '').slice(0, 10);
-        if (digits.length >= 7) {
-            input.value = '(' + digits.slice(0,3) + ') ' + digits.slice(3,6) + '-' + digits.slice(6);
-        } else if (digits.length >= 4) {
-            input.value = '(' + digits.slice(0,3) + ') ' + digits.slice(3);
-        } else if (digits.length > 0) {
-            input.value = '(' + digits;
-        }
-    }
-
     // Safe math expression evaluator (allows +, -, *, /, (), digits, decimals)
     function evalMathExpr(raw) {
         var s = String(raw).trim();
@@ -689,6 +696,8 @@
             actual_materials_cost: parseFloat(document.getElementById('edit-actual-materials').value) || 0,
             actual_collected: parseFloat(document.getElementById('edit-actual-collected').value) || 0,
             est_labor_hours: parseFloat(document.getElementById('edit-est-labor-hours').value) || 0,
+            customer_id: (function() { var s = document.getElementById('edit-customer-id'); return s && s.value ? parseInt(s.value) : null; })(),
+            customer_company_name: document.getElementById('edit-customer-company-name').value,
             customer_name: document.getElementById('edit-customer-name').value,
             customer_phone: phone,
             customer_email: email,
@@ -707,6 +716,18 @@
         .then(function(data) {
             var status = document.getElementById('save-status');
             if (data.ok) {
+                if (data.new_customer_id) {
+                    var sel = document.getElementById('edit-customer-id');
+                    var sentinelOpt = sel.querySelector('option[value="-1"]');
+                    if (sentinelOpt) sentinelOpt.remove();
+                    var newOpt = document.createElement('option');
+                    newOpt.value = data.new_customer_id;
+                    newOpt.textContent = data.new_company_name || 'New Customer';
+                    newOpt.selected = true;
+                    sel.appendChild(newOpt);
+                    var hint = document.getElementById('customer-create-hint');
+                    if (hint) hint.style.display = 'none';
+                }
                 status.style.color = 'var(--green)';
                 status.textContent = 'Saved!';
                 if (window._markClean) window._markClean();
@@ -1182,5 +1203,53 @@
     </script>
     {% include '_footer.html' %}
     <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script>
+    async function onCustomerSelect(sel) {
+        var customerId = sel.value;
+        var hint = document.getElementById('customer-create-hint');
+
+        if (!customerId) {
+            if (hint) hint.style.display = 'none';
+            return;
+        }
+
+        if (customerId === '-1') {
+            // Check if a customer with the same name already exists in the dropdown
+            var nameField = document.getElementById('edit-customer-name');
+            var currentName = nameField ? nameField.value.trim().toLowerCase() : '';
+            if (currentName) {
+                var opts = sel.options;
+                for (var i = 0; i < opts.length; i++) {
+                    if (opts[i].value && opts[i].value !== '-1' &&
+                        opts[i].textContent.trim().toLowerCase().startsWith(currentName)) {
+                        if (!confirm('A customer named "' + nameField.value.trim() + '" may already exist.\nCreate a new duplicate customer record anyway?')) {
+                            sel.value = '';
+                            if (hint) hint.style.display = 'none';
+                            return;
+                        }
+                        break;
+                    }
+                }
+            }
+            if (hint) hint.style.display = '';
+            return;
+        }
+
+        // Existing customer selected — hide hint and auto-fill empty fields
+        if (hint) hint.style.display = 'none';
+        var tokenStr = '{{ selected_token.token if selected_token else "" }}';
+        var resp = await fetch('/admin/customers/' + customerId + '/json?token=' + encodeURIComponent(tokenStr));
+        if (!resp.ok) return;
+        var c = await resp.json();
+        var companyField = document.getElementById('edit-customer-company-name');
+        var nameField  = document.getElementById('edit-customer-name');
+        var phoneField = document.getElementById('edit-customer-phone');
+        var emailField = document.getElementById('edit-customer-email');
+        if (companyField && !companyField.value.trim()) companyField.value = c.company_name || '';
+        if (nameField  && !nameField.value.trim())  nameField.value  = c.customer_name || c.company_name || '';
+        if (phoneField && !phoneField.value.trim()) phoneField.value = c.phone || '';
+        if (emailField && !emailField.value.trim()) emailField.value = c.email || '';
+    }
+    </script>
 </body>
 </html>

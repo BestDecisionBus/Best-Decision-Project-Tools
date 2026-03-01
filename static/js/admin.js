@@ -489,6 +489,24 @@
     });
 })();
 
+// Phone number formatting — (xxx) xxx-xxxx
+function formatPhone(input) {
+    var digits = input.value.replace(/\D/g, '').slice(0, 10);
+    if (digits.length >= 7) {
+        input.value = '(' + digits.slice(0,3) + ') ' + digits.slice(3,6) + '-' + digits.slice(6);
+    } else if (digits.length >= 4) {
+        input.value = '(' + digits.slice(0,3) + ') ' + digits.slice(3);
+    } else if (digits.length > 0) {
+        input.value = '(' + digits;
+    }
+}
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('input[type="tel"]').forEach(function(el) {
+        if (el.value.trim()) formatPhone(el);
+        el.addEventListener('input', function() { formatPhone(el); });
+    });
+});
+
 // Inline sort order quick-save
 function saveSortOrder(input) {
     var endpoint = input.dataset.endpoint;

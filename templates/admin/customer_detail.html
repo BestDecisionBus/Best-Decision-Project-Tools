@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ customer.company_name }} — Customers — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;">
+            <a href="{{ url_for('customers.admin_customers', token=customer.token) }}" class="btn btn-sm" style="background: var(--gray-200); color: var(--gray-700);">← Customers</a>
+            <h2 style="margin: 0;">{{ customer.company_name }}</h2>
+            <span class="badge {% if customer.is_active %}badge-active{% else %}badge-inactive{% endif %}">
+                {{ 'Active' if customer.is_active else 'Inactive' }}
+            </span>
+        </div>
+
+        <!-- Customer Info / Edit Card -->
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Customer Info</h3>
+            <form method="POST" action="{{ url_for('customers.admin_customer_edit', customer_id=customer.id) }}">
+                <input type="hidden" name="token" value="{{ customer.token }}">
+                <div class="form-row">
+                    <div class="form-group" style="flex: 2;">
+                        <label for="company_name">Company / Client Name <span style="color: var(--red, #dc2626);">*</span></label>
+                        <input type="text" id="company_name" name="company_name" value="{{ customer.company_name }}" required>
+                    </div>
+                    <div class="form-group" style="flex: 2;">
+                        <label for="customer_name">Contact Name</label>
+                        <input type="text" id="customer_name" name="customer_name" value="{{ customer.customer_name }}">
+                    </div>
+                </div>
+                <div class="form-row" style="margin-top: 12px;">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="phone">Phone</label>
+                        <input type="tel" id="phone" name="phone" value="{{ customer.phone or '' }}" placeholder="(555) 555-5555">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="email">Email</label>
+                        <input type="email" id="email" name="email" value="{{ customer.email or '' }}">
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="notes">Notes</label>
+                    <textarea id="notes" name="notes" rows="3" style="width: 100%; resize: vertical; background: #fefce8; border: 1px solid var(--gray-300); border-radius: 6px; padding: 8px;">{{ customer.notes or '' }}</textarea>
+                </div>
+                <div style="margin-top: 12px;">
+                    <button type="submit" class="btn btn-green">Save Changes</button>
+                </div>
+            </form>
+            <p style="font-size: 12px; color: var(--gray-400); margin-top: 12px; margin-bottom: 0;">
+                Customer since {{ customer.created_at[:10] if customer.created_at else '—' }}
+            </p>
+        </div>
+
+        <!-- Jobs -->
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Jobs</h3>
+
+            <form method="POST" action="{{ url_for('customers.admin_customer_job_create', customer_id=customer.id) }}"
+                  style="display: flex; gap: 8px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap;">
+                <input type="hidden" name="token" value="{{ customer.token }}">
+                <div class="form-group" style="flex: 2; min-width: 180px;">
+                    <label for="new-job-name">Job Name <span style="color: var(--red, #dc2626);">*</span></label>
+                    <input type="text" id="new-job-name" name="job_name" placeholder="e.g. Main St Renovation" required>
+                </div>
+                <div class="form-group" style="flex: 3; min-width: 220px;">
+                    <label for="new-job-address">Address <span style="font-size: 11px; color: var(--gray-400);">(optional)</span></label>
+                    <input type="text" id="new-job-address" name="job_address" placeholder="123 Main St, Anytown">
+                </div>
+                <div style="align-self: flex-end;">
+                    <button type="submit" class="btn btn-green">Add Job</button>
+                </div>
+            </form>
+
+            {% if jobs %}
+            <div class="table-wrap" style="margin-bottom: 16px;">
+                <table class="resizable">
+                    <thead>
+                        <tr>
+                            <th>Job Name</th>
+                            <th>Address</th>
+                            <th>Status</th>
+                            <th>Estimates</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for j in jobs %}
+                        {% set esummary = job_estimate_summaries.get(j.id, {"count": 0, "statuses": []}) %}
+                        <tr>
+                            <td>
+                                <a href="{{ url_for('estimates.admin_estimates', token=customer.token, job_id=j.id, back_customer=customer.id) }}"
+                                   style="font-weight: 500;">{{ j.job_name }}</a>
+                            </td>
+                            <td>{{ j.job_address or '—' }}</td>
+                            <td>
+                                {% if j.is_active %}
+                                <span class="badge badge-active">Active</span>
+                                {% else %}
+                                <span class="badge badge-inactive">Archived</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if esummary.count == 0 %}
+                                <span style="color: var(--gray-400); font-size: 13px;">—</span>
+                                {% else %}
+                                <a href="{{ url_for('estimates.admin_estimates', token=customer.token, job_id=j.id, back_customer=customer.id) }}"
+                                   style="font-size: 13px;">{{ esummary.count }} estimate{{ 's' if esummary.count != 1 else '' }}</a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p style="color: var(--gray-500); margin-bottom: 12px;">No jobs yet. Add one above.</p>
+            {% endif %}
+
+            {% if linkable_jobs %}
+            <details style="margin-top: 8px;">
+                <summary style="cursor: pointer; font-size: 13px; color: var(--gray-600); font-weight: 500;">Link an existing job</summary>
+                <form method="POST" action="{{ url_for('customers.admin_link_job_to_customer') }}"
+                      style="display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; flex-wrap: wrap;">
+                    <input type="hidden" name="token" value="{{ customer.token }}">
+                    <input type="hidden" name="customer_id" value="{{ customer.id }}">
+                    <div class="form-group" style="flex: 2;">
+                        <label for="link-job-id">Job</label>
+                        <select id="link-job-id" name="job_id">
+                            <option value="">— Select a job —</option>
+                            {% for j in linkable_jobs %}
+                            <option value="{{ j.id }}">{{ j.job_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-blue btn-sm">Link Job</button>
+                </form>
+            </details>
+            {% endif %}
+        </div>
+
+        <!-- Danger Zone -->
+        <div class="meta-card" style="border: 1px solid var(--red, #dc2626); margin-bottom: 24px;">
+            <h3 style="margin-top: 0; color: var(--red, #dc2626);">Danger Zone</h3>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+                <form method="POST" action="{{ url_for('customers.admin_customer_toggle', customer_id=customer.id) }}" style="display: inline;">
+                    <input type="hidden" name="token" value="{{ customer.token }}">
+                    {% if customer.is_active %}
+                    <button type="submit" class="btn btn-orange">Deactivate Customer</button>
+                    {% else %}
+                    <button type="submit" class="btn btn-green">Activate Customer</button>
+                    {% endif %}
+                </form>
+                <form method="POST" action="{{ url_for('customers.admin_customer_delete', customer_id=customer.id) }}"
+                      style="display: inline;"
+                      onsubmit="return confirm('Delete this customer? This cannot be undone.')">
+                    <input type="hidden" name="token" value="{{ customer.token }}">
+                    <button type="submit" class="btn btn-red">Delete Customer</button>
+                </form>
+                <span style="font-size: 12px; color: var(--gray-400);">Delete is blocked if jobs or estimates are linked.</span>
+            </div>
+        </div>
+
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Customers — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Customers</h2>
+
+        {% if current_user.is_bdb or tokens|length > 1 %}
+            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+                <label for="token-select">Company</label>
+                <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                    {% if current_user.is_bdb %}<option value="">All Companies</option>{% endif %}
+                    {% for t in tokens %}
+                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        {% else %}
+            {% if selected_token %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        {% if selected_token %}
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Add Customer</h3>
+            <form method="POST" action="{{ url_for('customers.admin_customer_create') }}">
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+                <div class="form-row">
+                    <div class="form-group" style="flex: 2;">
+                        <label for="company_name">Company / Client Name <span style="color: var(--red, #dc2626);">*</span></label>
+                        <input type="text" id="company_name" name="company_name" placeholder="Smith Roofing LLC" required>
+                    </div>
+                    <div class="form-group" style="flex: 2;">
+                        <label for="customer_name">Contact Name</label>
+                        <input type="text" id="customer_name" name="customer_name" placeholder="Jim Smith">
+                    </div>
+                </div>
+                <div class="form-row" style="margin-top: 12px;">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="phone">Phone</label>
+                        <input type="tel" id="phone" name="phone" placeholder="(555) 555-5555">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="email">Email</label>
+                        <input type="email" id="email" name="email" placeholder="name@example.com">
+                    </div>
+                    <div class="form-group" style="flex: 2;">
+                        <label for="notes">Notes</label>
+                        <textarea id="notes" name="notes" rows="1" style="resize: vertical;"></textarea>
+                    </div>
+                </div>
+                <div style="margin-top: 12px;">
+                    <button type="submit" class="btn btn-green">Add Customer</button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+
+        {% if customers %}
+        <div class="table-wrap">
+            <table class="resizable sortable">
+                <thead>
+                    <tr>
+                        <th>Company / Client Name</th>
+                        <th>Contact Name</th>
+                        <th>Phone</th>
+                        <th>Email</th>
+                        <th>Sort Order</th>
+                        <th>Status</th>
+                        <th data-no-sort>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in customers %}
+                    <tr>
+                        <td>
+                            <a href="{{ url_for('customers.admin_customer_detail', customer_id=c.id) }}" style="font-weight: 500;">{{ c.company_name }}</a>
+                        </td>
+                        <td>{{ c.customer_name or '—' }}</td>
+                        <td>{{ c.phone or '—' }}</td>
+                        <td>{{ c.email or '—' }}</td>
+                        <td>
+                            <input type="number" value="{{ c.sort_order }}"
+                                   class="sort-input" onchange="saveSortOrder(this)"
+                                   data-endpoint="/admin/customers/{{ c.id }}/sort">
+                        </td>
+                        <td>
+                            {% if c.is_active %}
+                            <span class="badge badge-active">Active</span>
+                            {% else %}
+                            <span class="badge badge-inactive">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td style="display: flex; gap: 6px; flex-wrap: wrap;">
+                            <a href="{{ url_for('customers.admin_customer_detail', customer_id=c.id) }}" class="btn btn-blue btn-sm">View</a>
+                            <form method="POST" action="{{ url_for('customers.admin_customer_toggle', customer_id=c.id) }}" style="display: inline;">
+                                <input type="hidden" name="token" value="{{ c.token }}">
+                                {% if c.is_active %}
+                                <button type="submit" class="btn btn-red btn-sm">Deactivate</button>
+                                {% else %}
+                                <button type="submit" class="btn btn-green btn-sm">Activate</button>
+                                {% endif %}
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% elif selected_token %}
+        <p style="color: var(--gray-500);">No customers yet. Use the form above to add your first customer.</p>
+        {% else %}
+        <p style="color: var(--gray-500);">Select a company above to view customers.</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>

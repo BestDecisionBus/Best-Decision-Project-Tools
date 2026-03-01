@@ -333,10 +333,11 @@ def admin_jobs():
     _app = _helpers()
     tokens = _app._get_tokens_for_user()
     token_str, selected_token = _app._get_selected_token(tokens)
-    jobs = database.get_jobs_by_token(token_str) if token_str else []
+    jobs = database.get_jobs_with_customer(token_str) if token_str else []
+    customers = database.get_customers_by_token(token_str, active_only=True) if token_str else []
     return render_template(
         "admin/jobs.html",
-        tokens=tokens, selected_token=selected_token, jobs=jobs,
+        tokens=tokens, selected_token=selected_token, jobs=jobs, customers=customers,
     )
 
 
@@ -357,7 +358,8 @@ def admin_job_create():
 
     latitude = float(lat) if lat else None
     longitude = float(lng) if lng else None
-    database.create_job(job_name, job_address, latitude, longitude, token_str)
+    customer_id = request.form.get("customer_id", type=int)
+    database.create_job(job_name, job_address, latitude, longitude, token_str, customer_id=customer_id)
     flash(f"Job '{job_name}' created.", "success")
     return redirect(url_for("time_admin.admin_jobs", token=token_str))
 
@@ -375,14 +377,16 @@ def admin_job_update(job_id):
         job_address = data.get("job_address", "").strip()
         lat = data.get("latitude")
         lng = data.get("longitude")
+        customer_id = data.get("customer_id") if data.get("customer_id") else None
     else:
         job_name = request.form.get("job_name", "").strip()
         job_address = request.form.get("job_address", "").strip()
         lat = request.form.get("latitude", "").strip()
         lng = request.form.get("longitude", "").strip()
+        customer_id = request.form.get("customer_id", type=int)
     latitude = float(lat) if lat else None
     longitude = float(lng) if lng else None
-    database.update_job(job_id, job_name, job_address, latitude, longitude)
+    database.update_job(job_id, job_name, job_address, latitude, longitude, customer_id=customer_id)
     if request.is_json:
         return jsonify({"success": True})
     flash("Job updated.", "success")

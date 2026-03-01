@@ -316,6 +316,21 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_sub_cats_submission ON submission_categories(submission_id);
         CREATE INDEX IF NOT EXISTS idx_sub_cats_category ON submission_categories(category_id);
+
+        CREATE TABLE IF NOT EXISTS customers (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            token         TEXT NOT NULL,
+            company_name  TEXT NOT NULL,
+            customer_name TEXT NOT NULL DEFAULT '',
+            phone         TEXT DEFAULT '',
+            email         TEXT DEFAULT '',
+            notes         TEXT DEFAULT '',
+            is_active     INTEGER DEFAULT 1,
+            sort_order    INTEGER DEFAULT 0,
+            created_at    TEXT NOT NULL,
+            FOREIGN KEY (token) REFERENCES tokens(token)
+        );
+        CREATE INDEX IF NOT EXISTS idx_customers_token ON customers(token);
     """)
     conn.commit()
 
@@ -346,6 +361,7 @@ def init_db():
     _add_column_if_missing(conn, "estimates", "actual_collected", "REAL DEFAULT 0")
     _add_column_if_missing(conn, "estimates", "est_labor_hours", "REAL DEFAULT 0")
     _add_column_if_missing(conn, "estimates", "actual_labor_hours", "REAL DEFAULT 0")
+    _add_column_if_missing(conn, "estimates", "customer_company_name", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "estimates", "customer_name", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "estimates", "customer_phone", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "estimates", "customer_email", "TEXT DEFAULT ''")
@@ -368,6 +384,8 @@ def init_db():
     _add_column_if_missing(conn, "estimates", "completed_at", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "categories", "account_code", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "products_services", "taxable", "INTEGER DEFAULT 0")
+    _add_column_if_missing(conn, "jobs",      "customer_id", "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "estimates", "customer_id", "INTEGER DEFAULT NULL")
     conn.commit()
 
     # Migrate legacy category_1_id / category_2_id into junction table
@@ -980,22 +998,23 @@ def get_job(job_id):
     return dict(row) if row else None
 
 
-def create_job(job_name, job_address, latitude, longitude, token_str):
+def create_job(job_name, job_address, latitude, longitude, token_str, customer_id=None):
     conn = get_db()
     now = datetime.now().isoformat()
-    conn.execute(
-        "INSERT INTO jobs (job_name, job_address, latitude, longitude, token, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (job_name, job_address, latitude, longitude, token_str, now),
+    cur = conn.execute(
+        "INSERT INTO jobs (job_name, job_address, latitude, longitude, token, customer_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (job_name, job_address, latitude, longitude, token_str, customer_id, now),
     )
     conn.commit()
     conn.close()
+    return cur.lastrowid
 
 
-def update_job(job_id, job_name, job_address, latitude, longitude):
+def update_job(job_id, job_name, job_address, latitude, longitude, customer_id=None):
     conn = get_db()
     conn.execute(
-        "UPDATE jobs SET job_name = ?, job_address = ?, latitude = ?, longitude = ? WHERE id = ?",
-        (job_name, job_address, latitude, longitude, job_id),
+        "UPDATE jobs SET job_name = ?, job_address = ?, latitude = ?, longitude = ?, customer_id = ? WHERE id = ?",
+        (job_name, job_address, latitude, longitude, customer_id, job_id),
     )
     conn.commit()
     conn.close()
@@ -2914,13 +2933,35 @@ def get_estimates_by_job(job_id):
     return [dict(r) for r in rows]
 
 
-def get_estimates_by_token(token_str, search=None, limit=50, offset=0):
+def get_estimate_counts_by_customer(customer_id, token_str):
+    """Return {job_id: {"count": N, "statuses": [...]}} for all jobs under a customer."""
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT e.job_id, e.approval_status
+           FROM estimates e
+           INNER JOIN jobs j ON e.job_id = j.id
+           WHERE j.customer_id = ? AND j.token = ?""",
+        (customer_id, token_str),
+    ).fetchall()
+    conn.close()
+    summary = {}
+    for row in rows:
+        entry = summary.setdefault(row["job_id"], {"count": 0, "statuses": []})
+        entry["count"] += 1
+        entry["statuses"].append(row["approval_status"])
+    return summary
+
+
+def get_estimates_by_token(token_str, search=None, job_id=None, limit=50, offset=0):
     conn = get_db()
     query = """SELECT e.*, j.job_name
                FROM estimates e
                LEFT JOIN jobs j ON e.job_id = j.id
                WHERE e.token = ?"""
     params = [token_str]
+    if job_id:
+        query += " AND e.job_id = ?"
+        params.append(job_id)
     if search:
         query += " AND (e.transcription LIKE ? OR e.title LIKE ? OR j.job_name LIKE ?)"
         like = f"%{search}%"
@@ -2989,10 +3030,10 @@ def update_estimate(estimate_id, **kwargs):
     allowed = {"title", "transcription", "notes", "status", "approval_status", "estimate_value",
                 "est_materials_cost", "est_labor_cost", "actual_materials_cost", "actual_labor_cost",
                 "actual_collected", "est_labor_hours", "actual_labor_hours",
-                "customer_name", "customer_phone", "customer_email",
+                "customer_company_name", "customer_name", "customer_phone", "customer_email",
                 "estimate_number", "date_accepted", "expected_completion",
                 "sales_tax_rate", "customer_message", "completion_pct", "job_id",
-                "client_budget", "append_audio_file", "completed_at"}
+                "client_budget", "append_audio_file", "completed_at", "customer_id"}
     sets = []
     params = []
     for k, v in kwargs.items():
@@ -3380,4 +3421,183 @@ def get_max_sort_order_products_services(token_str):
         "SELECT COALESCE(MAX(sort_order), 0) AS mx FROM products_services WHERE token = ?", (token_str,)
     ).fetchone()
     conn.close()
+    return row["mx"] if row else 0
+
+
+# ---------------------------------------------------------------------------
+# Customers
+# ---------------------------------------------------------------------------
+
+def _normalize_customer_company(company_name, customer_name):
+    """Return company_name (required). Falls back to customer_name only as a safety net."""
+    company = company_name.strip() if company_name else ""
+    return company if company else (customer_name.strip() if customer_name else "")
+
+
+def get_customers_by_token(token_str, active_only=False):
+    conn = get_db()
+    query = "SELECT * FROM customers WHERE token = ?"
+    params = [token_str]
+    if active_only:
+        query += " AND is_active = 1"
+    query += " ORDER BY sort_order ASC, company_name ASC"
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_customer(customer_id, token_str=None):
+    conn = get_db()
+    query = "SELECT * FROM customers WHERE id = ?"
+    params = [customer_id]
+    if token_str:
+        query += " AND token = ?"
+        params.append(token_str)
+    row = conn.execute(query, params).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def create_customer(company_name, customer_name, phone, email, notes, token_str, sort_order=0):
+    company_name = _normalize_customer_company(company_name, customer_name)
+    conn = get_db()
+    now = datetime.now().isoformat()
+    cur = conn.execute(
+        """INSERT INTO customers
+           (token, company_name, customer_name, phone, email, notes, is_active, sort_order, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+        (token_str, company_name, customer_name.strip(),
+         (phone or "").strip(), (email or "").strip(), (notes or "").strip(), sort_order, now),
+    )
+    conn.commit()
+    conn.close()
+    return cur.lastrowid
+
+
+def update_customer(customer_id, company_name, customer_name, phone, email, notes, token_str):
+    company_name = _normalize_customer_company(company_name, customer_name)
+    conn = get_db()
+    conn.execute(
+        """UPDATE customers
+           SET company_name = ?, customer_name = ?, phone = ?, email = ?, notes = ?
+           WHERE id = ? AND token = ?""",
+        (company_name, customer_name.strip(),
+         (phone or "").strip(), (email or "").strip(), (notes or "").strip(),
+         customer_id, token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+def toggle_customer(customer_id, token_str):
+    conn = get_db()
+    conn.execute(
+        "UPDATE customers SET is_active = 1 - is_active WHERE id = ? AND token = ?",
+        (customer_id, token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_customer_sort_order(customer_id, sort_order, token_str):
+    conn = get_db()
+    conn.execute(
+        "UPDATE customers SET sort_order = ? WHERE id = ? AND token = ?",
+        (sort_order, customer_id, token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_customer(customer_id, token_str):
+    """Delete only if no jobs or estimates are linked to this customer (scoped to token)."""
+    conn = get_db()
+    job_count = conn.execute(
+        "SELECT COUNT(*) FROM jobs WHERE customer_id = ? AND token = ?",
+        (customer_id, token_str),
+    ).fetchone()[0]
+    est_count = conn.execute(
+        "SELECT COUNT(*) FROM estimates WHERE customer_id = ? AND token = ?",
+        (customer_id, token_str),
+    ).fetchone()[0]
+    if job_count > 0 or est_count > 0:
+        conn.close()
+        return False
+    conn.execute(
+        "DELETE FROM customers WHERE id = ? AND token = ?",
+        (customer_id, token_str),
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_jobs_by_customer(customer_id, token_str):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM jobs WHERE customer_id = ? AND token = ? ORDER BY job_name ASC",
+        (customer_id, token_str),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_estimates_by_customer(customer_id, token_str):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM estimates WHERE customer_id = ? AND token = ? ORDER BY created_at DESC",
+        (customer_id, token_str),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def link_job_to_customer(job_id, customer_id, token_str):
+    conn = get_db()
+    conn.execute(
+        "UPDATE jobs SET customer_id = ? WHERE id = ? AND token = ?",
+        (customer_id, job_id, token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+def link_estimate_to_customer(estimate_id, customer_id, token_str):
+    conn = get_db()
+    conn.execute(
+        "UPDATE estimates SET customer_id = ? WHERE id = ? AND token = ?",
+        (customer_id, estimate_id, token_str),
+    )
+    # Auto-link the parent job to the same customer
+    row = conn.execute(
+        "SELECT job_id FROM estimates WHERE id = ? AND token = ?",
+        (estimate_id, token_str)
+    ).fetchone()
+    if row and row["job_id"]:
+        conn.execute(
+            "UPDATE jobs SET customer_id = ? WHERE id = ? AND token = ?",
+            (customer_id, row["job_id"], token_str),
+        )
+    conn.commit()
+    conn.close()
+
+
+def get_jobs_with_customer(token_str, active_only=False):
+    """Return jobs with customer company_name joined in."""
+    conn = get_db()
+    query = """
+        SELECT j.*,
+               c.company_name AS customer_company_name,
+               c.customer_name AS customer_contact_name
+        FROM jobs j
+        LEFT JOIN customers c ON j.customer_id = c.id
+        WHERE j.token = ?
+    """
+    params = [token_str]
+    if active_only:
+        query += " AND j.is_active = 1"
+    query += " ORDER BY j.job_name ASC"
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
     return row["mx"] if row else 0

@@ -156,12 +156,14 @@ def api_estimate_upload():
     )
 
     # Save customer info if provided
+    customer_company_name = request.form.get("customer_company_name", "").strip()
     customer_name = request.form.get("customer_name", "").strip()
     customer_phone = request.form.get("customer_phone", "").strip()
     customer_email = request.form.get("customer_email", "").strip()
-    if customer_name or customer_phone or customer_email:
+    if customer_company_name or customer_name or customer_phone or customer_email:
         database.update_estimate(
             estimate["id"],
+            customer_company_name=customer_company_name,
             customer_name=customer_name,
             customer_phone=customer_phone,
             customer_email=customer_email,
@@ -339,7 +341,7 @@ def api_estimate_update(estimate_id):
         return jsonify({"error": "Not found"}), 404
 
     updates = {}
-    for field in ("transcription", "notes", "title", "customer_name", "customer_phone", "customer_email"):
+    for field in ("transcription", "notes", "title", "customer_company_name", "customer_name", "customer_phone", "customer_email"):
         if field in request.form:
             updates[field] = request.form[field].strip()
     for num_field in ("sales_tax_rate", "est_materials_cost", "est_labor_cost"):
@@ -514,9 +516,16 @@ def admin_estimates():
         token_str = selected_token["token"]
 
     estimates = []
+    filter_job = None
+    back_customer_id = request.args.get("back_customer", type=int)
+    job_id_filter = request.args.get("job_id", type=int)
     if token_str:
         search = request.args.get("search", "")
-        estimates = database.get_estimates_by_token(token_str, search=search or None)
+        estimates = database.get_estimates_by_token(
+            token_str, search=search or None, job_id=job_id_filter or None
+        )
+        if job_id_filter:
+            filter_job = database.get_job(job_id_filter)
 
     return render_template(
         "admin/estimates.html",
@@ -524,6 +533,8 @@ def admin_estimates():
         selected_token=selected_token,
         estimates=estimates,
         search=request.args.get("search", ""),
+        filter_job=filter_job,
+        back_customer_id=back_customer_id,
     )
 
 
@@ -543,9 +554,11 @@ def admin_estimate_create():
         return redirect(url_for("estimates.admin_estimates"))
     h._verify_token_access(token_str)
 
-    # Use the first active job as a default; the user can reassign on the detail page
-    jobs = database.get_jobs_by_token(token_str, active_only=True)
-    job_id = jobs[0]["id"] if jobs else None
+    # Prefer explicit job_id from form (set when creating in job/customer context)
+    job_id = request.form.get("job_id", type=int)
+    if not job_id:
+        jobs = database.get_jobs_by_token(token_str, active_only=True)
+        job_id = jobs[0]["id"] if jobs else None
 
     est = database.create_estimate(
         job_id=job_id,
@@ -555,6 +568,9 @@ def admin_estimate_create():
         status="complete",
         created_by=getattr(h.current_user, "id", None),
     )
+    customer_id = request.form.get("customer_id", type=int)
+    if customer_id:
+        database.link_estimate_to_customer(est["id"], customer_id, token_str)
     return redirect(f"/admin/estimates/{est['id']}?token={token_str}")
 
 
@@ -585,6 +601,7 @@ def admin_estimate_detail(estimate_id):
     all_jobs = database.get_jobs_by_token(est["token"])
 
     _margin_target, _markup_required = _compute_finance_targets(est["token"], token_data)
+    customers = database.get_customers_by_token(est["token"], active_only=True)
 
     return render_template(
         "admin/estimate_detail.html",
@@ -601,6 +618,7 @@ def admin_estimate_detail(estimate_id):
         all_jobs=all_jobs,
         margin_target=_margin_target,
         markup_required=_markup_required,
+        customers=customers,
     )
 
 
@@ -642,7 +660,7 @@ def admin_estimate_update(estimate_id):
         data = request.form
 
     updates = {}
-    for field in ("transcription", "notes", "title", "customer_name", "customer_phone", "customer_email",
+    for field in ("transcription", "notes", "title", "customer_company_name", "customer_name", "customer_phone", "customer_email",
                    "estimate_number", "date_accepted", "expected_completion", "customer_message"):
         if field in data:
             val = data[field]
@@ -668,8 +686,39 @@ def admin_estimate_update(estimate_id):
         if database.is_estimate_number_taken(est["token"], updates["estimate_number"], exclude_id=estimate_id):
             return jsonify({"error": "That number is already in use by another estimate/project."}), 400
 
+    # Handle customer_id BEFORE calling update_estimate so it is included in the DB write
+    new_customer_id_response = None
+    if "customer_id" in data:
+        raw_cid = data["customer_id"]
+        try:
+            cid_int = int(raw_cid) if raw_cid else None
+            if cid_int == -1:
+                # Create new customer from the estimate's contact fields
+                cname = (updates.get("customer_name") or "").strip()
+                if cname:
+                    new_cid = database.create_customer(
+                        company_name=(updates.get("customer_company_name") or "").strip(),
+                        customer_name=cname,
+                        phone=(updates.get("customer_phone") or "").strip(),
+                        email=(updates.get("customer_email") or "").strip(),
+                        notes="",
+                        token_str=est["token"],
+                    )
+                    updates["customer_id"] = new_cid
+                    new_customer_id_response = new_cid
+                # else: no name provided — ignore the -1 sentinel
+            else:
+                updates["customer_id"] = cid_int
+        except (ValueError, TypeError):
+            pass
+
     if updates:
         database.update_estimate(estimate_id, **updates)
+
+    # Auto-link parent job when customer is assigned
+    final_customer_id = updates.get("customer_id")
+    if final_customer_id and est.get("job_id"):
+        database.link_job_to_customer(est["job_id"], final_customer_id, est["token"])
 
     # Handle job reassignment
     job_id_str = data.get("job_id")
@@ -682,7 +731,12 @@ def admin_estimate_update(estimate_id):
             pass
 
     if request.is_json:
-        return jsonify({"ok": True})
+        resp = {"ok": True}
+        if new_customer_id_response:
+            resp["new_customer_id"] = new_customer_id_response
+            c = database.get_customer(new_customer_id_response)
+            resp["new_company_name"] = c["company_name"] if c else ""
+        return jsonify(resp)
     return redirect(f"/admin/estimates/{estimate_id}?token={est['token']}")
 
 

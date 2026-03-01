@@ -13,7 +13,20 @@
     <div class="admin-layout">
         {% include 'admin/_nav.html' %}
 
-        <h2>Estimates / Projects</h2>
+        {% if back_customer_id %}
+        <div style="margin-bottom: 12px;">
+            <a href="{{ url_for('customers.admin_customer_detail', customer_id=back_customer_id) }}" class="btn btn-sm" style="background: var(--gray-200); color: var(--gray-700);">← Back to Customer</a>
+        </div>
+        {% endif %}
+
+        <h2>Estimates / Projects{% if filter_job %} — {{ filter_job.job_name }}{% endif %}</h2>
+
+        {% if filter_job %}
+        <p style="font-size: 13px; color: var(--gray-500); margin-bottom: 16px; margin-top: -8px;">
+            Showing estimates for job: <strong>{{ filter_job.job_name }}</strong>{% if filter_job.job_address %} &mdash; {{ filter_job.job_address }}{% endif %}.
+            <a href="{{ url_for('estimates.admin_estimates', token=selected_token.token if selected_token else '') }}" style="margin-left: 8px;">View all</a>
+        </p>
+        {% endif %}
 
         {% if current_user.is_bdb or tokens|length > 1 %}
             <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
@@ -39,6 +52,12 @@
             </form>
             <form method="POST" action="/admin/estimates/create">
                 <input type="hidden" name="token" value="{{ selected_token.token }}">
+                {% if filter_job %}
+                <input type="hidden" name="job_id" value="{{ filter_job.id }}">
+                {% endif %}
+                {% if back_customer_id %}
+                <input type="hidden" name="back_customer_id" value="{{ back_customer_id }}">
+                {% endif %}
                 <button type="submit" class="btn btn-green">+ New Estimate</button>
             </form>
         </div>

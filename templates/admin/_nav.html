@@ -4,6 +4,7 @@
 
 {# ---- Group detection ---- #}
 {% set g_dashboard = (ep == 'admin.admin_dashboard') %}
+{% set g_customers = ('customer' in ep) %}
 {% set g_jobs = ('job' in ep or 'photo' in ep or 'estimate' in ep) and not g_dashboard %}
 {% set g_employees = ('employee' in ep or 'schedule' in ep or 'time_entr' in ep or 'export' in ep or 'manual' in ep) %}
 {% set g_receipts = ('receipt' in ep) %}
@@ -22,6 +23,7 @@
     {% if not _sched_only %}
     <a href="{{ turl('admin.admin_dashboard') }}" {% if g_dashboard %}class="active"{% endif %}>Dashboard</a>
     <a href="{{ turl('finance.finance_dashboard') }}" {% if g_finance %}class="active"{% endif %}>Finance</a>
+    <a href="{{ turl('customers.admin_customers') }}" {% if g_customers %}class="active"{% endif %}>Customers</a>
     <a href="{{ turl('estimates.admin_estimates') }}" {% if g_jobs %}class="active"{% endif %}>Jobs</a>
     <a href="{{ turl('scheduling.admin_schedules') }}" {% if g_employees %}class="active"{% endif %}>Employees</a>
     <a href="{{ turl('receipt_admin.receipt_dashboard') }}" {% if g_receipts %}class="active"{% endif %}>Receipts</a>
