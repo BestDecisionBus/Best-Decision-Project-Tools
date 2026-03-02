@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Settings</h2>
+        <p style="color: var(--gray-500); font-size: 14px; margin-bottom: 24px;">
+            Company-wide settings for {{ selected_token.company_name }}.
+        </p>
+
+        <form method="POST" action="{{ url_for('admin.admin_settings', token=selected_token.token) }}">
+            <div class="meta-card" style="max-width: 540px;">
+                <h3 style="margin-top: 0; margin-bottom: 4px; font-size: 16px;">Company Brand Color</h3>
+                <p style="color: var(--gray-500); font-size: 13px; margin-bottom: 20px;">
+                    Sets the accent color used throughout the entire app — admin dashboard and all employee-facing pages.
+                </p>
+
+                {% set current = selected_token.color_scheme or 'blue' %}
+                {% set schemes = [
+                    ('blue',   '#2563eb', 'Blue'),
+                    ('green',  '#16a34a', 'Green'),
+                    ('teal',   '#0d9488', 'Teal'),
+                    ('purple', '#7c3aed', 'Purple'),
+                    ('orange', '#ea580c', 'Orange'),
+                    ('red',    '#dc2626', 'Red'),
+                ] %}
+
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 24px;">
+                    {% for value, hex, label in schemes %}
+                    <label style="cursor: pointer;">
+                        <input type="radio" name="color_scheme" value="{{ value }}"
+                               {% if current == value %}checked{% endif %}
+                               style="display: none;"
+                               onchange="updateSwatch(this)">
+                        <div class="color-swatch {% if current == value %}swatch-selected{% endif %}"
+                             style="--swatch: {{ hex }};"
+                             onclick="this.previousElementSibling.click()">
+                            <span class="swatch-dot" style="background: {{ hex }};"></span>
+                            <span class="swatch-label">{{ label }}</span>
+                            <span class="swatch-check">&#10003;</span>
+                        </div>
+                    </label>
+                    {% endfor %}
+                </div>
+
+                <button type="submit" class="btn btn-green">Save Settings</button>
+            </div>
+        </form>
+    </div>
+
+    <style>
+    .color-swatch {
+        display: flex; align-items: center; gap: 10px;
+        padding: 10px 12px; border: 2px solid var(--swatch);
+        border-radius: 10px; transition: border-color 0.15s, background 0.15s;
+        user-select: none;
+    }
+    .swatch-selected { border-color: var(--swatch); background: color-mix(in srgb, var(--swatch) 8%, white); }
+    .swatch-dot { width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; }
+    .swatch-label { font-size: 14px; font-weight: 600; color: var(--gray-700); flex: 1; }
+    .swatch-check { font-size: 13px; color: var(--swatch); opacity: 0; }
+    .swatch-selected .swatch-check { opacity: 1; }
+    </style>
+    <script>
+    function updateSwatch(radio) {
+        document.querySelectorAll('.color-swatch').forEach(function(el) {
+            el.classList.remove('swatch-selected');
+        });
+        radio.nextElementSibling.classList.add('swatch-selected');
+    }
+    </script>
+</body>
+</html>

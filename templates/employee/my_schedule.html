@@ -9,7 +9,7 @@
     <link rel="manifest" href="/static/manifest-timekeeper.json">
     <meta name="theme-color" content="#ffffff">
 </head>
-<body>
+<body class="scheme-{{ token.color_scheme or 'blue' }}">
     <div class="timekeeper-container">
         <div class="timekeeper-header">
             {% if token.logo_file %}
@@ -59,6 +59,20 @@
                 <p style="color: var(--gray-500); font-size: 13px; margin-top: 6px; margin-bottom: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; cursor: pointer;"
                    onclick="this.style.webkitLineClamp = this.style.webkitLineClamp === 'unset' ? '3' : 'unset'">{{ s.notes }}</p>
                 {% endif %}
+                {% if s.tasks %}
+                <div style="margin-top: 10px; border-top: 1px solid var(--gray-100); padding-top: 8px;">
+                    <button class="sched-tasks-toggle" onclick="toggleSchedTasks(this)" aria-expanded="false"
+                            style="background:none;border:none;padding:0;cursor:pointer;display:flex;align-items:center;gap:6px;font-family:inherit;width:100%;">
+                        <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--blue);">Tasks ({{ s.tasks|length }})</span>
+                        <span class="sched-tasks-chevron" style="font-size:10px;color:var(--gray-400);transition:transform 0.15s;">&#9654;</span>
+                    </button>
+                    <div class="sched-task-list" style="display:none; margin-top: 6px;">
+                        {% for task in s.tasks %}
+                        <div style="padding: 5px 0; border-bottom: 1px solid var(--gray-100); font-size: 14px; line-height: 1.5; color: var(--gray-700);">{{ task.description }}</div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
@@ -70,5 +84,21 @@
         {% endif %}
     </div>
     {% include '_footer.html' %}
+    <script>
+    function toggleSchedTasks(btn) {
+        var list = btn.nextElementSibling;
+        var chevron = btn.querySelector('.sched-tasks-chevron');
+        var expanded = btn.getAttribute('aria-expanded') === 'true';
+        if (expanded) {
+            list.style.display = 'none';
+            chevron.style.transform = '';
+            btn.setAttribute('aria-expanded', 'false');
+        } else {
+            list.style.display = '';
+            chevron.style.transform = 'rotate(90deg)';
+            btn.setAttribute('aria-expanded', 'true');
+        }
+    }
+    </script>
 </body>
 </html>

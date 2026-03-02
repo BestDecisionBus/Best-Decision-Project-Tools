@@ -9,7 +9,7 @@
     <link rel="manifest" href="/c/{{ token.token }}/manifest.json">
     <meta name="theme-color" content="#ffffff">
 </head>
-<body>
+<body class="scheme-{{ token.color_scheme or 'blue' }}">
     <div class="home-container">
         <div class="home-header">
             {% if token.logo_file %}
@@ -38,28 +38,38 @@
 
         {% if jobs_tasks %}
         {% for entry in jobs_tasks %}
-        <div class="meta-card" style="margin-bottom: 20px;">
-            <h3 style="margin-top: 0; font-size: 16px;">{{ entry.display_name }}</h3>
-            {% if entry.sections %}
-            {% for section in entry.sections %}
-            <p style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--blue); margin: {% if loop.first %}0{% else %}14px{% endif %} 0 6px; padding-left: 2px;">{{ section.name }}</p>
-            <ul class="task-checklist" id="tasklist-{{ entry.schedule.id }}-{{ loop.index }}">
-                {% for task in section.tasks %}
-                <li id="task-item-{{ entry.schedule.id }}-{{ task.ref_id }}-{{ task.source }}">
-                    <input type="checkbox"
-                           {% if task.is_complete %}checked{% endif %}
-                           onchange="toggleTask(this, {{ entry.schedule.job_id }}, '{{ task.source }}', {{ task.ref_id }}, {{ entry.estimate_id or 'null' }}, '{{ task.description | replace("'", "\\'") }}')">
-                    <span class="{% if task.is_complete %}task-done{% endif %}">{{ task.description }}</span>
-                    {% if task.completed_by %}
-                    <span style="font-size: 11px; color: var(--gray-400); margin-left: auto;">&#10003; {{ task.completed_by }}</span>
+        <div class="meta-card task-job-card" style="margin-bottom: 12px; padding: 0; overflow: hidden;">
+            <button class="task-job-toggle" onclick="toggleJobTasks(this)" aria-expanded="true">
+                <span class="task-job-name">{{ entry.display_name }}</span>
+                {% set total = namespace(n=0) %}{% set done = namespace(n=0) %}
+                {% for section in entry.sections %}{% for task in section.tasks %}{% set total.n = total.n + 1 %}{% if task.is_complete %}{% set done.n = done.n + 1 %}{% endif %}{% endfor %}{% endfor %}
+                <span class="task-job-count">{{ done.n }}/{{ total.n }}</span>
+                <span class="task-job-chevron">&#9660;</span>
+            </button>
+            <div class="task-job-body">
+                {% if entry.sections %}
+                <ul class="task-checklist task-checklist-incard">
+                    {% for section in entry.sections %}
+                    {% if section.name and entry.sections|length > 1 %}
+                    <li class="task-section-header">{{ section.name }}</li>
                     {% endif %}
-                </li>
-                {% endfor %}
-            </ul>
-            {% endfor %}
-            {% else %}
-            <p style="color: var(--gray-400); font-size: 14px; margin: 0;">No tasks assigned to this shift.</p>
-            {% endif %}
+                    {% for task in section.tasks %}
+                    <li id="task-item-{{ entry.schedule.id }}-{{ task.ref_id }}-{{ task.source }}">
+                        <input type="checkbox"
+                               {% if task.is_complete %}checked{% endif %}
+                               onchange="toggleTask(this, {{ entry.schedule.job_id }}, '{{ task.source }}', {{ task.ref_id }}, {{ entry.estimate_id or 'null' }}, '{{ task.description | replace("'", "\\'") }}')">
+                        <span class="{% if task.is_complete %}task-done{% endif %}">{{ task.description }}</span>
+                        {% if task.completed_by %}
+                        <span class="task-completed-by">&#10003; {{ task.completed_by }}</span>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p style="color: var(--gray-400); font-size: 14px; margin: 0; padding: 12px 16px;">No tasks assigned to this shift.</p>
+                {% endif %}
+            </div>
         </div>
         {% endfor %}
         {% else %}
@@ -75,6 +85,21 @@
     <script>
     const TOKEN = "{{ token.token }}";
     const TODAY = "{{ today }}";
+
+    function toggleJobTasks(btn) {
+        var body = btn.nextElementSibling;
+        var chevron = btn.querySelector('.task-job-chevron');
+        var expanded = btn.getAttribute('aria-expanded') === 'true';
+        if (expanded) {
+            body.style.display = 'none';
+            chevron.style.transform = 'rotate(-90deg)';
+            btn.setAttribute('aria-expanded', 'false');
+        } else {
+            body.style.display = '';
+            chevron.style.transform = '';
+            btn.setAttribute('aria-expanded', 'true');
+        }
+    }
 
     function toggleTask(checkbox, jobId, taskSource, taskRefId, estimateId, taskDescription) {
         var checked = checkbox.checked;

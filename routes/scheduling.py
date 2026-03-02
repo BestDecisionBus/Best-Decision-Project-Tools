@@ -543,6 +543,8 @@ def employee_schedule():
         return redirect(url_for("company_home", token_str=token_str))
 
     schedules = database.get_employee_upcoming_schedules(employee["id"], days=14)
+    for s in schedules:
+        s["tasks"] = database.get_tasks_for_schedule(token_str, s["id"], s["date"])
 
     return render_template(
         "employee/my_schedule.html",

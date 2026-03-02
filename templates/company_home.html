@@ -9,7 +9,7 @@
     <link rel="manifest" href="/c/{{ token.token }}/manifest.json">
     <meta name="theme-color" content="#ffffff">
 </head>
-<body>
+<body class="scheme-{{ token.color_scheme or 'blue' }}">
     <div class="home-container">
         <div class="home-header">
             {% if token.logo_file %}
@@ -53,8 +53,25 @@
                     <span class="tool-icon">&#128248;</span>
                     <span class="tool-label">Job Photos / Files</span>
                 </a>
-                <a href="/photo-library?token={{ token.token }}" style="display: block; text-align: center; padding: 8px; font-size: 13px; font-weight: 600; color: var(--purple); background: #f3f0ff; border: 2px solid var(--gray-200); border-top: 1px solid var(--gray-200); border-radius: 0 0 12px 12px; text-decoration: none;">
+                <a href="/photo-library?token={{ token.token }}" style="display: block; text-align: center; padding: 8px; font-size: 13px; font-weight: 600; color: var(--purple); background: #f3f0ff; border: 2px solid var(--purple); border-top: 1px solid var(--purple); border-radius: 0 0 12px 12px; text-decoration: none;">
                     View Files
+                </a>
+            </div>
+            {% endif %}
+            {% if employee.tasks_access %}
+            <a href="/tasks?token={{ token.token }}" class="home-tool-btn">
+                <span class="tool-icon">&#9745;</span>
+                <span class="tool-label">Task Checklist</span>
+            </a>
+            {% endif %}
+            {% if employee.estimate_access %}
+            <div style="display: flex; flex-direction: column; gap: 0;">
+                <a href="/estimate?token={{ token.token }}" class="home-tool-btn" style="border-radius: 12px 12px 0 0; border-bottom: none;">
+                    <span class="tool-icon">&#128221;</span>
+                    <span class="tool-label">Job Estimate</span>
+                </a>
+                <a href="/my-estimates?token={{ token.token }}" style="display: block; text-align: center; padding: 8px; font-size: 13px; font-weight: 600; color: var(--purple); background: #f3f0ff; border: 2px solid var(--purple); border-top: 1px solid var(--purple); border-radius: 0 0 12px 12px; text-decoration: none;">
+                    View Estimates
                 </a>
             </div>
             {% endif %}
@@ -64,27 +81,10 @@
                     <span class="tool-icon">&#128247;</span>
                     <span class="tool-label">Receipt Capture</span>
                 </a>
-                <a href="/receipt-library?token={{ token.token }}" style="display: block; text-align: center; padding: 8px; font-size: 13px; font-weight: 600; color: var(--purple); background: #f3f0ff; border: 2px solid var(--gray-200); border-top: 1px solid var(--gray-200); border-radius: 0 0 12px 12px; text-decoration: none;">
+                <a href="/receipt-library?token={{ token.token }}" style="display: block; text-align: center; padding: 8px; font-size: 13px; font-weight: 600; color: var(--purple); background: #f3f0ff; border: 2px solid var(--purple); border-top: 1px solid var(--purple); border-radius: 0 0 12px 12px; text-decoration: none;">
                     View Receipts
                 </a>
             </div>
-            {% endif %}
-            {% if employee.estimate_access %}
-            <div style="display: flex; flex-direction: column; gap: 0;">
-                <a href="/estimate?token={{ token.token }}" class="home-tool-btn" style="border-radius: 12px 12px 0 0; border-bottom: none;">
-                    <span class="tool-icon">&#128221;</span>
-                    <span class="tool-label">Job Estimate</span>
-                </a>
-                <a href="/my-estimates?token={{ token.token }}" style="display: block; text-align: center; padding: 8px; font-size: 13px; font-weight: 600; color: var(--purple); background: #f3f0ff; border: 2px solid var(--gray-200); border-top: 1px solid var(--gray-200); border-radius: 0 0 12px 12px; text-decoration: none;">
-                    View Estimates
-                </a>
-            </div>
-            {% endif %}
-            {% if employee.tasks_access %}
-            <a href="/tasks?token={{ token.token }}" class="home-tool-btn">
-                <span class="tool-icon">&#9745;</span>
-                <span class="tool-label">Task Checklist</span>
-            </a>
             {% endif %}
         </div>
 

@@ -172,8 +172,11 @@ def admin_dashboard():
 def admin_users():
     if not current_user.is_bdb or not current_user.is_admin:
         abort(403)
+    h = _helpers()
+    tokens = h._get_tokens_for_user()
+    token_str, selected_token = h._get_selected_token(tokens)
     users = database.get_bdb_users()
-    return render_template("admin/users.html", users=users)
+    return render_template("admin/users.html", users=users, tokens=tokens, selected_token=selected_token)
 
 
 @admin_bp.route("/admin/users/create", methods=["POST"])
@@ -233,10 +236,13 @@ def admin_user_delete(user_id):
 def admin_tokens():
     if not current_user.is_bdb:
         abort(403)
-    tokens = database.get_all_tokens()
+    h = _helpers()
+    user_tokens = h._get_tokens_for_user()
+    token_str, selected_token = h._get_selected_token(user_tokens)
+    all_tokens = database.get_all_tokens()
     token_users = {}
     user_extra_tokens = {}
-    for t in tokens:
+    for t in all_tokens:
         users_for_token = database.get_all_users_for_token(t["token"])
         token_users[t["id"]] = users_for_token
         for u in users_for_token:
@@ -244,10 +250,11 @@ def admin_tokens():
                 user_extra_tokens[u["id"]] = database.get_extra_tokens_for_user(u["id"])
     return render_template(
         "admin/tokens.html",
-        tokens=tokens,
+        tokens=user_tokens,
+        selected_token=selected_token,
         token_users=token_users,
         user_extra_tokens=user_extra_tokens,
-        all_tokens=tokens,
+        all_tokens=all_tokens,
     )
 
 
@@ -400,6 +407,33 @@ def admin_update_labor_burden():
         return jsonify({"success": False, "error": "Invalid percentage."}), 400
     database.update_token_burden(token_str, pct)
     return jsonify({"success": True, "labor_burden_pct": pct})
+
+
+# ---------------------------------------------------------------------------
+# Company Settings (color scheme, etc.)
+# ---------------------------------------------------------------------------
+
+@admin_bp.route("/admin/settings", methods=["GET", "POST"])
+@login_required
+def admin_settings():
+    h = _helpers()
+    tokens = h._get_tokens_for_user()
+    token_str, selected_token = h._get_selected_token(tokens)
+    if not token_str:
+        abort(404)
+    h._verify_token_access(token_str)
+
+    if request.method == "POST":
+        color_scheme = request.form.get("color_scheme", "blue").strip()
+        database.update_token_color_scheme(token_str, color_scheme)
+        flash("Settings saved.", "success")
+        return redirect(url_for("admin.admin_settings", token=token_str))
+
+    return render_template(
+        "admin/settings.html",
+        tokens=tokens,
+        selected_token=selected_token,
+    )
 
 
 # ---------------------------------------------------------------------------

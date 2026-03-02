@@ -391,6 +391,7 @@ def init_db():
     _add_column_if_missing(conn, "jobs",      "reset_per_visit",    "INTEGER DEFAULT 0")
     _add_column_if_missing(conn, "jobs",      "sort_order",         "INTEGER DEFAULT 0")
     _add_column_if_missing(conn, "tokens",    "task_retention_days","INTEGER DEFAULT 90")
+    _add_column_if_missing(conn, "tokens",    "color_scheme",       "TEXT DEFAULT 'blue'")
     _add_column_if_missing(conn, "schedules", "estimate_id",        "INTEGER DEFAULT NULL")
     _add_column_if_missing(conn, "employees", "tasks_access",       "INTEGER DEFAULT 1")
     conn.commit()
@@ -640,16 +641,6 @@ def create_company_user(username, password, role, token_str):
     )
     conn.commit()
     conn.close()
-
-
-def get_users_by_token(token_str):
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT id, username, role, token FROM users WHERE token = ? ORDER BY username ASC",
-        (token_str,),
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
 
 
 def update_company_user_password(user_id, new_password):
@@ -1979,45 +1970,6 @@ def get_expense_totals(token_str):
 
 
 # ---------------------------------------------------------------------------
-# Dashboard — BDB Receipt Stats
-# ---------------------------------------------------------------------------
-
-def get_bdb_receipt_stats():
-    conn = get_db()
-    stats = {}
-    stats["total_unprocessed"] = conn.execute(
-        "SELECT COUNT(*) FROM submissions WHERE processed = 0"
-    ).fetchone()[0]
-    stats["processing"] = conn.execute(
-        "SELECT COUNT(*) FROM submissions WHERE status IN ('processing', 'transcribing')"
-    ).fetchone()[0]
-    sunday_str = _current_week_start_sunday()
-    stats["complete_this_week"] = conn.execute(
-        "SELECT COUNT(*) FROM submissions WHERE status = 'complete' AND timestamp >= ?",
-        (sunday_str,),
-    ).fetchone()[0]
-    stats["errors"] = conn.execute(
-        "SELECT COUNT(*) FROM submissions WHERE status = 'error'"
-    ).fetchone()[0]
-    conn.close()
-    return stats
-
-
-def get_recent_unprocessed_receipts(limit=20):
-    conn = get_db()
-    rows = conn.execute(
-        """SELECT s.*, t.company_name
-           FROM submissions s
-           JOIN tokens t ON s.token = t.token
-           WHERE s.processed = 0
-           ORDER BY s.timestamp DESC LIMIT ?""",
-        (limit,),
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-# ---------------------------------------------------------------------------
 # Dashboard — Company Operations
 # ---------------------------------------------------------------------------
 
@@ -2067,28 +2019,6 @@ def get_todays_schedules(token_str):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
-
-
-def get_schedules_today_count(token_str):
-    conn = get_db()
-    today = datetime.now().strftime("%Y-%m-%d")
-    count = conn.execute(
-        "SELECT COUNT(*) FROM schedules WHERE token = ? AND date = ?",
-        (token_str, today),
-    ).fetchone()[0]
-    conn.close()
-    return count
-
-
-def get_photos_this_week_count(token_str):
-    conn = get_db()
-    sunday_str = _current_week_start_sunday()
-    count = conn.execute(
-        "SELECT COUNT(*) FROM job_photos WHERE token = ? AND created_at >= ?",
-        (token_str, sunday_str),
-    ).fetchone()[0]
-    conn.close()
-    return count
 
 
 def _get_week_start_sunday(date_str):
@@ -2405,83 +2335,6 @@ def get_job_financials(token_str, active_only=None):
         })
         results.append(row)
     return results
-
-
-def get_job_hours_and_costs(token_str, date_from=None):
-    """Job hours & labour costs with OT — all-time when date_from is None."""
-    conn = get_db()
-    token_row = conn.execute(
-        "SELECT labor_burden_pct FROM tokens WHERE token = ?", (token_str,)
-    ).fetchone()
-    burden_pct = token_row["labor_burden_pct"] if token_row else 0
-
-    # Fetch individual entries for OT calculation
-    sql = """SELECT te.employee_id, te.total_hours, te.clock_in_time,
-                    e.hourly_wage, j.id as job_id, j.job_name
-             FROM time_entries te
-             JOIN jobs j ON te.job_id = j.id
-             JOIN employees e ON te.employee_id = e.id
-             WHERE te.token = ? AND te.total_hours IS NOT NULL"""
-    params = [token_str]
-    if date_from is not None:
-        sql += " AND te.clock_in_time >= ?"
-        params.append(date_from)
-    rows = conn.execute(sql, params).fetchall()
-
-    # Also fetch ALL entries for the same employees to get correct weekly totals
-    # (an employee's OT depends on total hours across all jobs that week)
-    target_entries = [dict(r) for r in rows]
-    emp_ids = list({e["employee_id"] for e in target_entries})
-    all_entries = []
-    if emp_ids:
-        ph = ",".join("?" * len(emp_ids))
-        all_entries = [dict(r) for r in conn.execute(
-            f"""SELECT te.employee_id, te.total_hours, te.clock_in_time, e.hourly_wage
-                FROM time_entries te
-                JOIN employees e ON te.employee_id = e.id
-                WHERE te.token = ? AND te.employee_id IN ({ph})
-                AND te.total_hours IS NOT NULL""",
-            [token_str] + emp_ids,
-        ).fetchall()]
-    conn.close()
-
-    eff_rates = _compute_effective_rates(all_entries)
-
-    from collections import defaultdict
-    job_agg = defaultdict(lambda: {"hours": 0.0, "base": 0.0, "job_name": ""})
-    for e in target_entries:
-        hrs = float(e["total_hours"] or 0)
-        if hrs <= 0:
-            continue
-        jid = e["job_id"]
-        job_agg[jid]["job_name"] = e["job_name"]
-        job_agg[jid]["hours"] += hrs
-        week = _get_week_start_sunday(e["clock_in_time"])
-        rate_info = eff_rates.get((e["employee_id"], week))
-        if rate_info and rate_info["effective_rate"]:
-            job_agg[jid]["base"] += hrs * rate_info["effective_rate"]
-
-    jobs = []
-    total_hours = 0.0
-    total_cost = 0.0
-    for jid, jd in sorted(job_agg.items(), key=lambda x: x[1]["hours"], reverse=True):
-        hours = round(jd["hours"], 2)
-        base = round(jd["base"], 2)
-        burden = round(base * (burden_pct / 100), 2)
-        cost = round(base + burden, 2)
-        total_hours += hours
-        total_cost += cost
-        jobs.append({
-            "job_name": jd["job_name"],
-            "hours": hours,
-            "total_cost": cost,
-        })
-
-    return {
-        "jobs": jobs,
-        "total_hours": round(total_hours, 2),
-        "total_cost": round(total_cost, 2),
-    }
 
 
 def get_job_labor_total(job_id, token_str):
@@ -3689,16 +3542,6 @@ def get_jobs_by_customer(customer_id, token_str):
     return [dict(r) for r in rows]
 
 
-def get_estimates_by_customer(customer_id, token_str):
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM estimates WHERE customer_id = ? AND token = ? ORDER BY created_at DESC",
-        (customer_id, token_str),
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
 def link_job_to_customer(job_id, customer_id, token_str):
     conn = get_db()
     conn.execute(
@@ -3973,18 +3816,6 @@ def get_completions_for_admin(token_str: str, job_id: int = None, days_back: int
     return [dict(r) for r in rows]
 
 
-def reset_job_tasks_for_visit(token_str: str, job_id: int, shift_date: str) -> None:
-    conn = get_db()
-    conn.execute(
-        """UPDATE task_completions
-           SET is_reset = 1
-           WHERE token = ? AND job_id = ? AND shift_date < ? AND is_reset = 0""",
-        (token_str, job_id, shift_date),
-    )
-    conn.commit()
-    conn.close()
-
-
 def purge_old_task_completions(token_str: str, retention_days: int) -> int:
     conn = get_db()
     cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
@@ -3996,85 +3827,6 @@ def purge_old_task_completions(token_str: str, retention_days: int) -> int:
     deleted = cur.rowcount
     conn.close()
     return deleted
-
-
-# ===========================================================================
-# MERGED TASK LIST FOR EMPLOYEE VIEW
-# ===========================================================================
-
-def get_merged_tasks_for_job(token_str: str, job_id: int, estimate_id, shift_date: str) -> list:
-    """Return a flat merged list of all tasks for an employee's job/project view."""
-    completions = get_completions_for_job_date(token_str, job_id, shift_date)
-    completed_keys = set()
-    completion_map = {}
-    for c in completions:
-        key = (c["task_source"], c["task_ref_id"], c["task_description"])
-        completed_keys.add(key)
-        completion_map[key] = c
-
-    tasks = []
-    conn = get_db()
-
-    # Source 1: job_tasks (column is "name")
-    job_task_rows = conn.execute(
-        "SELECT * FROM job_tasks WHERE token = ? AND job_id = ? AND is_active = 1 ORDER BY sort_order ASC, id ASC",
-        (token_str, job_id),
-    ).fetchall()
-    for row in job_task_rows:
-        key = ("job_task", row["id"], row["name"])
-        completion = completion_map.get(key)
-        tasks.append({
-            "source": "job_task",
-            "ref_id": row["id"],
-            "description": row["name"],
-            "is_complete": key in completed_keys,
-            "completed_by": completion["employee_name"] if completion else None,
-            "completed_at": completion["completed_at"] if completion else None,
-        })
-
-    # Source 2: estimate/project items (no is_active column on estimate_items)
-    if estimate_id:
-        est_rows = conn.execute(
-            """SELECT * FROM estimate_items
-               WHERE token = ? AND estimate_id = ?
-               ORDER BY sort_order ASC, id ASC""",
-            (token_str, estimate_id),
-        ).fetchall()
-        for row in est_rows:
-            key = ("estimate_task", row["id"], row["description"])
-            completion = completion_map.get(key)
-            tasks.append({
-                "source": "estimate_task",
-                "ref_id": row["id"],
-                "description": row["description"],
-                "is_complete": key in completed_keys,
-                "completed_by": completion["employee_name"] if completion else None,
-                "completed_at": completion["completed_at"] if completion else None,
-            })
-
-    # Source 3: task_template_items applied to this job
-    template_rows = conn.execute(
-        """SELECT tti.*
-           FROM task_template_items tti
-           JOIN job_task_template_links jttl ON jttl.template_id = tti.template_id
-           WHERE jttl.job_id = ? AND jttl.token = ? AND tti.is_active = 1
-           ORDER BY tti.sort_order ASC, tti.id ASC""",
-        (job_id, token_str),
-    ).fetchall()
-    for row in template_rows:
-        key = ("template_item", row["id"], row["description"])
-        completion = completion_map.get(key)
-        tasks.append({
-            "source": "template_item",
-            "ref_id": row["id"],
-            "description": row["description"],
-            "is_complete": key in completed_keys,
-            "completed_by": completion["employee_name"] if completion else None,
-            "completed_at": completion["completed_at"] if completion else None,
-        })
-
-    conn.close()
-    return tasks
 
 
 # ===========================================================================
@@ -4192,54 +3944,6 @@ def get_project_display_name(estimate: dict) -> str:
     return f"Proj #{num}"
 
 
-def get_jobs_with_projects(token_str: str, active_only: bool = True) -> list:
-    """Return jobs with their linked active projects for schedule dropdowns."""
-    conn = get_db()
-    job_q = "SELECT * FROM jobs WHERE token = ?"
-    params = [token_str]
-    if active_only:
-        job_q += " AND is_active = 1"
-    job_q += " ORDER BY job_name ASC"
-    jobs = [dict(r) for r in conn.execute(job_q, params).fetchall()]
-    for job in jobs:
-        proj_rows = conn.execute(
-            """SELECT * FROM estimates
-               WHERE token = ? AND job_id = ?
-               AND approval_status NOT IN ('declined')
-               ORDER BY project_name ASC, estimate_number ASC""",
-            (token_str, job["id"]),
-        ).fetchall()
-        job["projects"] = [dict(r) for r in proj_rows]
-    conn.close()
-    return jobs
-
-
-def auto_create_default_projects(token_str: str) -> int:
-    """For each active job with zero estimates, create a default project. Returns count created."""
-    conn = get_db()
-    jobs = conn.execute(
-        "SELECT * FROM jobs WHERE token = ? AND is_active = 1", (token_str,)
-    ).fetchall()
-    created = 0
-    now = datetime.now().isoformat()
-    for job in jobs:
-        count = conn.execute(
-            "SELECT COUNT(*) FROM estimates WHERE job_id = ? AND token = ?",
-            (job["id"], token_str),
-        ).fetchone()[0]
-        if count == 0:
-            conn.execute(
-                """INSERT INTO estimates
-                   (token, job_id, project_name, title, status, approval_status, created_at, estimate_number)
-                   VALUES (?, ?, ?, ?, 'complete', 'in_progress', ?, ?)""",
-                (token_str, job["id"], job["job_name"], job["job_name"], now, f"AUTO-{job['id']}"),
-            )
-            created += 1
-    conn.commit()
-    conn.close()
-    return created
-
-
 # ===========================================================================
 # JOB–TEMPLATE LINKS
 # ===========================================================================
@@ -4321,20 +4025,6 @@ def remove_template_from_estimate(estimate_id: int, template_id: int, token_str:
 # ===========================================================================
 # SCHEDULE–TASK LINKS (which task lists an employee sees on a specific shift)
 # ===========================================================================
-
-def get_task_links_for_schedule(schedule_id: int) -> list:
-    """Return list of template dicts assigned to a schedule entry."""
-    conn = get_db()
-    rows = conn.execute(
-        """SELECT tt.* FROM task_templates tt
-           JOIN schedule_task_links stl ON stl.template_id = tt.id
-           WHERE stl.schedule_id = ?
-           ORDER BY tt.name ASC""",
-        (schedule_id,),
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
 
 def get_task_link_ids_for_schedule(schedule_id: int) -> list:
     """Return list of template IDs assigned to a schedule entry."""
@@ -4454,6 +4144,20 @@ def update_token_settings(token_str: str, task_retention_days: int) -> None:
     conn.execute(
         "UPDATE tokens SET task_retention_days = ? WHERE token = ?",
         (task_retention_days, token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+_VALID_COLOR_SCHEMES = {"blue", "green", "orange", "purple", "red", "teal"}
+
+def update_token_color_scheme(token_str: str, color_scheme: str) -> None:
+    if color_scheme not in _VALID_COLOR_SCHEMES:
+        color_scheme = "blue"
+    conn = get_db()
+    conn.execute(
+        "UPDATE tokens SET color_scheme = ? WHERE token = ?",
+        (color_scheme, token_str),
     )
     conn.commit()
     conn.close()

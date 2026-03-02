@@ -10,7 +10,7 @@
 {% set g_receipts = ('receipt' in ep) %}
 {% set g_finance = ('finance' in ep) %}
 {% set g_lists = ('categor' in ep or 'common_task' in ep or 'message_snippet' in ep or 'product' in ep or 'shift_type' in ep or 'task_template' in ep or 'task_completion' in ep) %}
-{% set g_admin = ('audit' in ep or 'token' in ep or 'admin.admin_user' in ep) %}
+{% set g_admin = ('audit' in ep or 'token' in ep or 'admin.admin_user' in ep or 'setting' in ep) %}
 {% set g_guide = ('guide' in ep) %}
 
 {# ---- URL helper ---- #}
@@ -75,11 +75,20 @@
     <a href="{{ url_for('admin.admin_users') }}" {% if 'admin.admin_user' in ep %}class="active"{% endif %}>Users</a>
     {% endif %}
     {% endif %}
+    <a href="{{ turl('admin.admin_settings') }}" {% if 'setting' in ep %}class="active"{% endif %}>Settings</a>
 </nav>
 {% endif %}
 
+{# ---- Apply company color scheme to admin body ---- #}
+{# selected_token may be a dict (most blueprints) or a string (scheduling.py uses reversed unpacking);
+   fall back to token_data when selected_token is not a mapping. #}
+{% set _st = selected_token if (selected_token is defined and selected_token is mapping) else (token_data if (token_data is defined and token_data is mapping) else none) %}
+{% if _st and _st.color_scheme %}
+<script>document.body.classList.add('scheme-{{ _st.color_scheme }}');</script>
+{% endif %}
+
 {# ---- Company logo (floated right, appears beside page title) ---- #}
-{% if selected_token is defined and selected_token and selected_token is mapping and selected_token.logo_file %}
-<img src="/static/logos/{{ selected_token.logo_file }}" alt="{{ selected_token.company_name }}"
+{% if _st and _st.logo_file %}
+<img src="/static/logos/{{ _st.logo_file }}" alt="{{ _st.company_name }}"
      class="admin-company-logo">
 {% endif %}

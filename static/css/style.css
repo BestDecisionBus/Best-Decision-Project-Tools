@@ -6,6 +6,7 @@
 :root {
     --blue: #2563eb;
     --blue-dark: #1d4ed8;
+    --blue-tint: #eff6ff;
     --green: #16a34a;
     --green-dark: #15803d;
     --red: #dc2626;
@@ -24,6 +25,13 @@
     --gray-900: #111827;
     --radius: 12px;
 }
+
+/* ---- Color scheme overrides (applied via body class on employee-facing pages) ---- */
+body.scheme-green  { --blue: #16a34a; --blue-dark: #15803d; --blue-tint: #f0fdf4; }
+body.scheme-orange { --blue: #ea580c; --blue-dark: #c2410c; --blue-tint: #fff7ed; }
+body.scheme-purple { --blue: #7c3aed; --blue-dark: #6d28d9; --blue-tint: #f5f3ff; }
+body.scheme-red    { --blue: #dc2626; --blue-dark: #b91c1c; --blue-tint: #fef2f2; }
+body.scheme-teal   { --blue: #0d9488; --blue-dark: #0f766e; --blue-tint: #f0fdfa; }
 
 /* ---- Reset ---- */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -120,36 +128,36 @@ h2 { font-size: 22px; margin-bottom: 16px; }
     align-items: flex-end;
     gap: 3px;
     padding: 0;
-    border-bottom: 2px solid var(--gray-300);
+    border-bottom: 1px solid var(--blue);
     margin-bottom: 24px;
     flex-wrap: wrap;
 }
 .admin-nav a {
-    padding: 8px 14px;
+    padding: 10px 18px;
     border-radius: 8px 8px 0 0;
     font-size: 14px;
     font-weight: 600;
-    color: var(--gray-600);
+    color: var(--blue);
     text-decoration: none;
     white-space: nowrap;
-    background: var(--gray-100);
-    border: 1px solid var(--gray-200);
+    background: var(--blue-tint);
+    border: 1px solid var(--blue);
     border-bottom: none;
-    box-shadow: 0 -1px 3px rgba(0,0,0,0.04);
-    transition: background 0.2s, color 0.2s;
-    margin-bottom: -2px;
+    box-shadow: 0 -2px 6px rgba(0,0,0,0.06);
+    transition: background 0.15s, color 0.15s;
+    margin-bottom: -1px;
 }
 .admin-nav a:hover {
-    background: var(--gray-200);
-    color: var(--gray-800);
+    background: var(--blue);
+    color: #fff;
     text-decoration: none;
 }
 .admin-nav a.active {
     background: var(--blue);
     color: #fff;
     border-color: var(--blue);
-    border-bottom: 2px solid var(--blue);
-    box-shadow: 0 -2px 4px rgba(37,99,235,0.15);
+    border-bottom: 1px solid var(--blue);
+    box-shadow: 0 -3px 8px rgba(0,0,0,0.12);
 }
 .admin-nav .spacer { flex: 1; }
 .admin-nav .user-info {
@@ -172,7 +180,7 @@ h2 { font-size: 22px; margin-bottom: 16px; }
     gap: 6px;
     padding: 10px 0;
     margin-bottom: 24px;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--blue);
 }
 .admin-subnav a {
     padding: 5px 14px;
@@ -216,7 +224,7 @@ h2 { font-size: 22px; margin-bottom: 16px; }
 }
 .stat-card {
     background: #fff;
-    border: 1px solid var(--gray-200);
+    border: 1px solid var(--blue);
     border-radius: var(--radius);
     padding: 20px;
     text-align: center;
@@ -296,7 +304,7 @@ h2 { font-size: 22px; margin-bottom: 16px; }
 .company-card {
     display: block;
     background: #fff;
-    border: 1px solid var(--gray-200);
+    border: 1px solid var(--blue);
     border-radius: var(--radius);
     padding: 20px;
     text-decoration: none;
@@ -367,20 +375,21 @@ table {
     font-size: 13px;
 }
 thead th {
-    background: var(--gray-100);
+    background: var(--gray-50);
     padding: 10px 12px;
     text-align: left;
     font-weight: 600;
     color: var(--gray-700);
     white-space: nowrap;
-    border-bottom: 2px solid var(--gray-200);
+    border-bottom: 2px solid var(--blue);
 }
 tbody td {
     padding: 8px 12px;
     border-bottom: 1px solid var(--gray-100);
     white-space: nowrap;
 }
-tbody tr:hover { background: var(--gray-50); }
+tbody tr:nth-child(even) { background: var(--blue-tint); }
+tbody tr:hover { background: var(--gray-100); }
 tbody tr.row-flagged { background: #fef3c7; }
 tbody tr.row-flagged:hover { background: #fde68a; }
 
@@ -394,7 +403,7 @@ td.td-wrap, th.th-wrap {
 
 .meta-card {
     background: #fff;
-    border: 1px solid var(--gray-200);
+    border: 1px solid var(--blue);
     border-radius: var(--radius);
     padding: 16px 24px;
     margin-bottom: 16px;
@@ -424,9 +433,10 @@ td.td-wrap, th.th-wrap {
 .meta-card .form-group input {
     width: 100%;
     padding: 6px 10px;
-    border: 1px solid var(--gray-300);
+    border: 1px solid var(--blue);
     border-radius: 6px;
     font-size: 14px;
+    background: var(--gray-50);
 }
 
 /* ---- Forms ---- */
@@ -446,9 +456,9 @@ td.td-wrap, th.th-wrap {
 .form-group textarea {
     padding: 8px 12px;
     font-size: 14px;
-    border: 1px solid var(--gray-300);
+    border: 1px solid var(--blue);
     border-radius: 6px;
-    background: #fff;
+    background: var(--gray-50);
     color: var(--gray-800);
     width: 100%;
 }
@@ -475,8 +485,8 @@ td.td-wrap, th.th-wrap {
     align-items: flex-end;
     margin-bottom: 20px;
     padding: 16px;
-    background: #fff;
-    border: 1px solid var(--gray-200);
+    background: var(--gray-50);
+    border: 1px solid var(--blue);
     border-radius: var(--radius);
 }
 .filter-bar .form-group { min-width: 140px; flex: 1; }
@@ -493,9 +503,10 @@ td.td-wrap, th.th-wrap {
 .token-selector select {
     padding: 8px 12px;
     font-size: 14px;
-    border: 1px solid var(--gray-300);
+    border: 1px solid var(--blue);
     border-radius: 6px;
     min-width: 200px;
+    background: var(--gray-50);
 }
 
 /* Token URL display */
@@ -1172,7 +1183,7 @@ table.resizable th .resize-handle.active {
     gap: 8px;
     padding: 18px 12px;
     background: #fff;
-    border: 2px solid var(--gray-200);
+    border: 2px solid var(--blue);
     border-radius: var(--radius);
     text-decoration: none;
     color: var(--gray-800);
@@ -1587,7 +1598,7 @@ table.resizable th .resize-handle.active {
 .dash-section {
     margin-top: 28px;
     background: #fff;
-    border: 1px solid var(--gray-200);
+    border: 1px solid var(--blue);
     border-radius: var(--radius);
     padding: 20px 24px;
 }
@@ -1959,7 +1970,7 @@ table.resizable th .resize-handle.active {
 /* ── Financials: Card wrapper for each item ──────── */
 .fin-card {
     background: #fff;
-    border: 1px solid var(--gray-200);
+    border: 1px solid var(--blue);
     border-radius: 8px;
     padding: 12px 14px;
     box-shadow: 0 1px 3px rgba(0,0,0,.06);
@@ -2065,9 +2076,9 @@ table.resizable th .resize-handle.active {
     justify-content: space-between;
     align-items: center;
     padding: 10px 12px;
-    border: 1px solid var(--gray-300);
+    border: 1px solid var(--blue);
     border-radius: 6px;
-    background: #fff;
+    background: var(--gray-50);
     cursor: pointer;
     font-size: 16px;
     color: var(--gray-700);
@@ -2084,7 +2095,7 @@ table.resizable th .resize-handle.active {
     top: calc(100% + 4px);
     left: 0; right: 0;
     background: #fff;
-    border: 1px solid var(--gray-300);
+    border: 1px solid var(--blue);
     border-radius: 6px;
     box-shadow: 0 4px 16px rgba(0,0,0,0.12);
     z-index: 200;
@@ -2123,4 +2134,26 @@ table.resizable th .resize-handle.active {
     accent-color: var(--green);
 }
 .task-done { text-decoration: line-through; color: var(--gray-400); }
+
+/* Expandable job task cards */
+.task-job-toggle {
+    width: 100%; display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px; background: none; border: none; cursor: pointer;
+    text-align: left; font-family: inherit;
+}
+.task-job-toggle:hover { background: var(--gray-50); }
+.task-job-name { font-size: 16px; font-weight: 700; color: var(--gray-800); flex: 1; }
+.task-job-count { font-size: 13px; color: var(--gray-500); white-space: nowrap; }
+.task-job-chevron { font-size: 11px; color: var(--gray-400); transition: transform 0.15s; }
+.task-job-body { border-top: 1px solid var(--gray-100); }
+.task-checklist-incard { padding: 0 16px; }
+.task-checklist-incard li:last-child { border-bottom: none; }
+.task-section-header {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.6px; color: var(--blue);
+    padding: 12px 0 4px; border-bottom: none !important;
+    display: block;
+}
+.task-completed-by { font-size: 11px; color: var(--gray-400); margin-left: auto; white-space: nowrap; }
+
 .ss-no-results { padding: 12px 14px; color: var(--gray-400); font-size: 14px; font-style: italic; }
