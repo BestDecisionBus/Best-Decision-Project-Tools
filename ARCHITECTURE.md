@@ -71,15 +71,16 @@ app.register_blueprint(finance_bp)
 
 | Blueprint | File | URL Prefix | Responsibility |
 |---|---|---|---|
-| `admin_bp` | `routes/admin.py` | `/admin` | Tokens, users, employees, jobs, categories, shift types, message snippets, common tasks, guide, dashboard |
-| `timekeeper_bp` | `routes/timekeeper.py` | `/` | Employee clock in/out, timekeeper page, help |
-| `time_admin_bp` | `routes/time_admin.py` | `/admin` | Time entries, manual entry, export, audit log |
+| `admin_bp` | `routes/admin.py` | `/admin` | Tokens, users, employees, jobs, categories, shift types, message snippets, common tasks, guide, dashboard, settings |
+| `timekeeper_bp` | `routes/timekeeper.py` | `/` | Employee clock in/out, timekeeper page, task checklist, help |
+| `time_admin_bp` | `routes/time_admin.py` | `/admin` | Time entries, manual entry, export, audit log, job template management |
 | `receipts_bp` | `routes/receipts.py` | `/` | Employee receipt capture, upload API |
 | `receipt_admin_bp` | `routes/receipt_admin.py` | `/admin` | Receipt browsing, detail, downloads, deletion |
 | `scheduling_bp` | `routes/scheduling.py` | `/` | Schedule CRUD, scheduler dashboard, employee view |
 | `job_photos_bp` | `routes/job_photos.py` | `/` | Photo capture, upload API, admin browsing, downloads |
 | `estimates_bp` | `routes/estimates.py` | `/` | Field estimate capture, estimate/project admin, reports, job tasks, products/services |
 | `finance_bp` | `routes/admin.py` | `/admin` | CFO Dashboard, finance targets |
+| `task_templates_bp` | `routes/task_templates.py` | `/admin` | Task template CRUD, task completion history |
 
 **Lazy import pattern** — all blueprints import `app` lazily to avoid circular imports:
 ```python
@@ -152,11 +153,11 @@ Every tenant-scoped table has a `token TEXT NOT NULL` column referencing `tokens
 
 **Schema migrations:** `_add_column_if_missing(conn, table, column, definition)` is called in `init_db()` on every startup. It is idempotent — safe to run repeatedly. No migration framework is used.
 
-### All 18 tables
+### All 22 tables
 
 | Table | Tenant-scoped | Purpose |
 |---|---|---|
-| `tokens` | No (is the tenant) | Company tenants — URL token, branding, financial targets |
+| `tokens` | No (is the tenant) | Company tenants — URL token, branding, financial targets, color scheme |
 | `users` | Partial (token NULL = BDB) | Admin panel logins |
 | `employees` | Yes | Field workers with access control flags |
 | `jobs` | Yes | Job sites with geocoded coordinates |
@@ -174,6 +175,44 @@ Every tenant-scoped table has a `token TEXT NOT NULL` column referencing `tokens
 | `message_snippets` | Yes | Reusable text blocks for estimate customer messages |
 | `job_tasks` | Yes | Per-job task checklists |
 | `audit_log` | Yes | Field-level change history for time entries |
+| `task_templates` | Yes | Named task templates with retention settings |
+| `task_template_items` | Yes (via template) | Individual task items within a template |
+| `task_completions` | Yes | Per-employee per-shift task completion records — purged after `task_retention_days` |
+| `job_task_template_links` | Yes (via job) | Many-to-many link between jobs and task templates |
+
+### Key `tokens` columns (beyond CREATE TABLE)
+
+Added via `_add_column_if_missing`:
+
+| Column | Type | Purpose |
+|---|---|---|
+| `color_scheme` | TEXT DEFAULT 'blue' | Company brand color: blue, green, teal, purple, orange, red |
+| `task_retention_days` | INTEGER DEFAULT 30 | Days to keep task completion records before purge |
+
+### Key `employees` columns (beyond CREATE TABLE)
+
+Added via `_add_column_if_missing`:
+
+| Column | Type | Purpose |
+|---|---|---|
+| `tasks_access` | INTEGER DEFAULT 1 | Grants access to the Task Checklist employee tool |
+
+### Key `jobs` columns (beyond CREATE TABLE)
+
+Added via `_add_column_if_missing`:
+
+| Column | Type | Purpose |
+|---|---|---|
+| `reset_per_visit` | INTEGER DEFAULT 0 | Whether task completions reset each shift |
+| `sort_order` | INTEGER DEFAULT 0 | Display order in lists |
+
+### Key `schedules` columns (beyond CREATE TABLE)
+
+Added via `_add_column_if_missing`:
+
+| Column | Type | Purpose |
+|---|---|---|
+| `estimate_id` | INTEGER | Links schedule to a specific estimate/project |
 
 ### Key `estimates` columns (beyond CREATE TABLE)
 
@@ -326,6 +365,34 @@ Time entries are flagged (`clock_in_flagged = 1`) when the Haversine distance be
 ```
 
 Document identity: `approval_status in ('pending', 'declined')` → shown as `Est #`; otherwise shown as `Proj #`.
+
+---
+
+## Company Color Scheme System
+
+Each company token has a `color_scheme` column (default: `blue`). Valid values: `blue`, `green`, `teal`, `purple`, `orange`, `red`.
+
+**Employee pages:** `<body class="scheme-{{ token.color_scheme or 'blue' }}">` applied directly in template.
+
+**Admin pages:** `_nav.html` injects a JS snippet that adds the scheme class to `document.body` at runtime:
+```jinja
+{% set _st = selected_token if (selected_token is defined and selected_token is mapping)
+             else (token_data if (token_data is defined and token_data is mapping) else none) %}
+{% if _st and _st.color_scheme %}
+<script>document.body.classList.add('scheme-{{ _st.color_scheme }}');</script>
+{% endif %}
+```
+
+The `_st` dual-source resolver is needed because `scheduling.py` unpacks `_get_selected_token()` in **reversed order** (`selected_token, token_data = helpers._get_selected_token(tokens)`), making `selected_token` a string and `token_data` the dict. All other blueprints use the normal order (`token_str, selected_token`).
+
+CSS custom properties are overridden per scheme:
+```css
+body.scheme-green  { --blue: #16a34a; --blue-dark: #15803d; --blue-tint: #f0fdf4; }
+body.scheme-teal   { --blue: #0d9488; --blue-dark: #0f766e; --blue-tint: #f0fdfa; }
+/* etc. */
+```
+
+The `--blue-tint` variable (lightest tint of the brand color) is used for zebra striping, input backgrounds, and card shading throughout the admin UI.
 
 ---
 

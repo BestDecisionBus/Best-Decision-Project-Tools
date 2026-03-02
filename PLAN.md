@@ -13,6 +13,7 @@ BDB Tools is a fully deployed, production-grade multi-tenant field service opera
 - [x] Six-role auth system (BDB Admin, BDB Viewer, Company Admin, Company Viewer, Scheduler, Employee)
 - [x] Flask-Login for admin users + Flask session for employees
 - [x] Company branding (logo upload, auto-resize, displayed on employee pages)
+- [x] Company Brand Color scheme (6 options, applies uniformly to admin and all employee pages)
 - [x] Security headers, rate limiting, file validation via magic bytes
 - [x] Cloudflare Tunnel integration for HTTPS
 - [x] systemd service for production process management
@@ -48,7 +49,7 @@ BDB Tools is a fully deployed, production-grade multi-tenant field service opera
 - [x] Drag-and-drop weekly schedule builder
 - [x] Customizable shift types per company (name, start/end time)
 - [x] Default shift types seeded on new company creation
-- [x] Employee 14-day schedule view
+- [x] Employee 14-day schedule view with collapsible per-shift task lists
 - [x] Dedicated Scheduler role with limited access
 - [x] Schedule entry with optional job task note
 - [x] Admin read-only schedule view
@@ -96,7 +97,7 @@ BDB Tools is a fully deployed, production-grade multi-tenant field service opera
 - [x] Tokens (company) management with logo upload
 - [x] BDB user management
 - [x] Company admin / viewer user management
-- [x] Employee management with per-employee access control (receipt, estimate)
+- [x] Employee management with per-employee access control (receipt, estimate, tasks)
 - [x] Job management with geocoding
 - [x] Expense categories (with optional GL/account code field)
 - [x] Common tasks (schedule note presets)
@@ -107,6 +108,10 @@ BDB Tools is a fully deployed, production-grade multi-tenant field service opera
 - [x] Inline sort order editing on all 5 list tables (auto-saves on change, no page reload)
 - [x] Column resize handles on all admin list tables
 - [x] Click-to-sort column headers on all admin list tables
+- [x] Company Brand Color scheme selector (6 colors: blue, green, teal, purple, orange, red) — affects both admin and employee sides universally
+- [x] Settings page (Admin → Settings) for brand color and future company-wide settings
+- [x] Task templates — named checklists of tasks assignable to jobs
+- [x] Task completion history with configurable retention (per-company `task_retention_days`)
 
 ---
 

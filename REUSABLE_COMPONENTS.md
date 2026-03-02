@@ -370,6 +370,25 @@ Do not call `transcriber.transcribe()` directly from a request handler — it bl
 
 ---
 
+## Color Scheme Application
+
+Every employee-facing template must include the scheme class on `<body>`:
+
+```html
+<body class="scheme-{{ token.color_scheme or 'blue' }}">
+```
+
+Admin templates do **not** need this — `_nav.html` handles it automatically via JS injection.
+
+The CSS uses `--blue`, `--blue-dark`, and `--blue-tint` CSS custom properties throughout. Scheme overrides in `style.css` remap these:
+```css
+body.scheme-green { --blue: #16a34a; --blue-dark: #15803d; --blue-tint: #f0fdf4; }
+```
+
+**Never hard-code `#2563eb` (the default blue) in new templates.** Always reference `var(--blue)` so the color scheme works correctly.
+
+---
+
 ## Geocoding
 
 Uses Nominatim (OpenStreetMap) via the `/api/geocode` endpoint:

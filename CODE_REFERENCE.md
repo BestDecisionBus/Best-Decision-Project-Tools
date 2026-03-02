@@ -612,6 +612,35 @@ def validate_image(file_obj):
 
 ---
 
+## Color Scheme — Employee Page
+
+All employee-facing pages apply the company's brand color directly in the `<body>` tag:
+
+```html
+<body class="scheme-{{ token.color_scheme or 'blue' }}">
+```
+
+Valid scheme values: `blue` (default), `green`, `teal`, `purple`, `orange`, `red`.
+
+---
+
+## Color Scheme — Admin Page (_nav.html pattern)
+
+Admin pages don't use a body class directly. `_nav.html` injects JS that adds the class at runtime. The `_st` resolver is needed because `scheduling.py` unpacks `_get_selected_token()` in reversed order:
+
+```jinja
+{# Resolves the token dict regardless of which blueprint called us #}
+{% set _st = selected_token if (selected_token is defined and selected_token is mapping)
+             else (token_data if (token_data is defined and token_data is mapping) else none) %}
+{% if _st and _st.color_scheme %}
+<script>document.body.classList.add('scheme-{{ _st.color_scheme }}');</script>
+{% endif %}
+```
+
+If you add a new blueprint that passes `selected_token` as a string instead of a dict (like scheduling.py does), pass the dict separately as `token_data` OR fix the unpacking order to match the standard pattern.
+
+---
+
 ## Backup Cron (Production)
 
 ```bash

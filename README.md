@@ -54,7 +54,7 @@ A multi-tenant web application that gives field service companies five essential
 - Multi-tenant architecture — each company gets a unique URL token
 - Dual authentication: Flask-Login for admins, Flask session for employees
 - Six user roles: BDB Admin, BDB Viewer, Company Admin, Company Viewer, Scheduler, Employee
-- Company branding (logo on all employee-facing pages)
+- Company branding (logo and brand color scheme on all admin and employee-facing pages)
 - Context-aware admin guide (company admins see only their relevant sections)
 - Comprehensive employee help page
 - Security headers, rate limiting, file validation via magic bytes
@@ -231,11 +231,12 @@ All configuration is via environment variables in `.env`:
 | Tool | How to Use |
 |---|---|
 | **Timekeeper** | Select a job > tap CLOCK IN. When done, return and tap CLOCK OUT. GPS is captured automatically if allowed. |
-| **Receipt Capture** | Take a photo or select from library > select job and categories > record a voice memo > submit. Available only if admin has granted receipt access. |
-| **Your Schedule** | View upcoming shifts for the next 14 days. |
+| **Your Schedule** | View upcoming shifts for the next 14 days. Tap a shift to expand and see the task list for that shift. |
 | **Job Photos** | Select a job > take a photo or select multiple from library > add optional captions > submit. |
+| **Task Checklist** | View tasks assigned to your scheduled jobs today. Tap a task to mark it complete. Available only if admin has granted tasks access. |
 | **Estimate** | Select a job > record a voice memo describing the scope > submit for transcription. Available only if admin has granted estimate access. |
 | **My Estimates** | View all estimates you have submitted and their current status. |
+| **Receipt Capture** | Take a photo or select from library > select job and categories > record a voice memo > submit. Available only if admin has granted receipt access. |
 | **Help** | Detailed instructions for all tools, GPS setup, and common scenarios (forgot to clock out, etc.) |
 
 **Supported file formats:**
@@ -589,6 +590,12 @@ sudo systemctl restart bdb-tools
 | POST | `/admin/message-snippets/csv-import` | Admin | Bulk import message snippets from CSV |
 | POST | `/admin/message-snippets/<id>/sort` | Admin | Update sort order (inline) |
 | GET | `/admin/guide` | Admin | Admin guide (context-aware) |
+| GET/POST | `/admin/settings` | Admin | Company brand color scheme and company-wide settings |
+| GET | `/admin/task-templates` | Admin | Task template list and CRUD |
+| GET/POST | `/admin/task-templates/<id>` | Admin | Task template detail and items |
+| POST | `/admin/task-completions` | Admin | Task completion history view |
+| GET | `/tasks` | Session | Employee task checklist |
+| POST | `/api/tasks/check` | Session | Toggle task completion (JSON) |
 
 ---
 
@@ -613,7 +620,7 @@ tokens ─────┬── users
 
 | Table | Purpose | Key Columns |
 |---|---|---|
-| `tokens` | Company tenants | token, company_name, logo_file, labor_burden_pct, income_target_pct, monthly_overhead, cash_on_hand, is_active |
+| `tokens` | Company tenants | token, company_name, logo_file, labor_burden_pct, income_target_pct, monthly_overhead, cash_on_hand, color_scheme, task_retention_days, is_active |
 | `users` | Admin panel users | username, password_hash, role, token (NULL = BDB user) |
 | `employees` | Company workers | name, employee_id, token, username, hourly_wage, receipt_access, estimate_access |
 | `jobs` | Job sites | job_name, job_address, latitude, longitude, token |
@@ -631,6 +638,10 @@ tokens ─────┬── users
 | `message_snippets` | Reusable text blocks | name, token, sort_order |
 | `job_tasks` | Per-job task checklists | job_id, name, source, sort_order, is_active, token |
 | `audit_log` | Change history | time_entry_id, action, field_changed, old_value, new_value, changed_by, reason |
+| `task_templates` | Named task template definitions | token, name, task_retention_days |
+| `task_template_items` | Tasks within a template | template_id, description, sort_order |
+| `task_completions` | Employee task completion records | token, job_id, employee_id, shift_date, task_source, task_ref_id, task_description |
+| `job_task_template_links` | Job ↔ task template associations | job_id, template_id, token |
 
 For full schema details including column types, indexes, and constraints, see [ARCHITECTURE.md](ARCHITECTURE.md#database-schema).
 
