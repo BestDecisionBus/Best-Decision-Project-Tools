@@ -60,6 +60,45 @@ def _check_scheduler_access():
 
 
 # ---------------------------------------------------------------------------
+# Feature gate — only time-entry and export endpoints require feature_timekeeper
+# ---------------------------------------------------------------------------
+
+_TIMEKEEPER_GATED_ENDPOINTS = frozenset({
+    'time_admin.admin_time_entries',
+    'time_admin.admin_time_entry_detail',
+    'time_admin.admin_entry_delete',
+    'time_admin.admin_entry_update_notes',
+    'time_admin.admin_entry_update_status',
+    'time_admin.admin_entry_change_job',
+    'time_admin.admin_entry_manual_times',
+    'time_admin.admin_manual_entry',
+    'time_admin.admin_export',
+    'time_admin.admin_export_download',
+    'time_admin.admin_export_download_pdf',
+    'time_admin.admin_export_payroll_cost',
+    'time_admin.admin_export_combined',
+    'time_admin.admin_export_payroll_cost_pdf',
+    'time_admin.admin_export_combined_pdf',
+})
+
+
+@time_admin_bp.before_request
+def _gate_timekeeper_feature():
+    if request.endpoint not in _TIMEKEEPER_GATED_ENDPOINTS:
+        return
+    if not current_user.is_authenticated:
+        return
+    h = _helpers()
+    tokens = h._get_tokens_for_user()
+    token_str, selected_token = h._get_selected_token(tokens)
+    if not token_str or not selected_token:
+        return
+    if not selected_token.get("feature_timekeeper", 1):
+        flash("Timekeeper & Scheduling is not enabled for this company.", "error")
+        return redirect(url_for("admin.admin_dashboard"))
+
+
+# ---------------------------------------------------------------------------
 # Report helpers (shared by Excel and PDF exports)
 # ---------------------------------------------------------------------------
 

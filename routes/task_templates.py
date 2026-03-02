@@ -26,6 +26,24 @@ def _require_admin():
 
 
 # ---------------------------------------------------------------------------
+# Feature gate — blocks all task-template routes if feature_timekeeper is disabled
+# ---------------------------------------------------------------------------
+
+@task_templates_bp.before_request
+def _gate_timekeeper_feature():
+    if not current_user.is_authenticated:
+        return
+    h = _helpers()
+    tokens = h._get_tokens_for_user()
+    token_str, selected_token = h._get_selected_token(tokens)
+    if not token_str or not selected_token:
+        return
+    if not selected_token.get("feature_timekeeper", 1):
+        flash("Timekeeper & Scheduling is not enabled for this company.", "error")
+        return redirect(url_for("admin.admin_dashboard"))
+
+
+# ---------------------------------------------------------------------------
 # Template list
 # ---------------------------------------------------------------------------
 

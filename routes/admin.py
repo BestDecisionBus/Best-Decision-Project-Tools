@@ -426,6 +426,15 @@ def admin_settings():
     if request.method == "POST":
         color_scheme = request.form.get("color_scheme", "blue").strip()
         database.update_token_color_scheme(token_str, color_scheme)
+        feature_timekeeper = int(bool(request.form.get("feature_timekeeper")))
+        feature_receipts   = int(bool(request.form.get("feature_receipts")))
+        feature_photos     = int(bool(request.form.get("feature_photos")))
+        feature_estimates  = int(bool(request.form.get("feature_estimates")))
+        dashboard_tier     = request.form.get("dashboard_tier", "none").strip()
+        database.update_feature_flags(
+            token_str, feature_timekeeper, feature_receipts,
+            feature_photos, feature_estimates, dashboard_tier
+        )
         flash("Settings saved.", "success")
         return redirect(url_for("admin.admin_settings", token=token_str))
 

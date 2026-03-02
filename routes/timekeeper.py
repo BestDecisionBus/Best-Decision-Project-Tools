@@ -22,6 +22,23 @@ def _helpers():
 
 
 # ---------------------------------------------------------------------------
+# Feature gate — blocks all routes if feature_timekeeper is disabled
+# ---------------------------------------------------------------------------
+
+@timekeeper_bp.before_request
+def _gate_timekeeper_feature():
+    token_str = session.get("employee_token", "") or request.args.get("token", "")
+    if not token_str:
+        return
+    token_data = database.get_token(token_str)
+    if token_data and not token_data.get("feature_timekeeper", 1):
+        if request.is_json or "/api/" in request.path:
+            from flask import jsonify
+            return jsonify({"error": "Feature not enabled"}), 403
+        return redirect(url_for("company_home", token_str=token_str))
+
+
+# ---------------------------------------------------------------------------
 # Employee Login / Logout
 # ---------------------------------------------------------------------------
 

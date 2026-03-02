@@ -35,6 +35,7 @@
         </div>
 
         <div class="home-tools">
+            {% if token.get('feature_timekeeper', 1) %}
             {% if employee.timekeeper_access %}
             <a href="/timekeeper?token={{ token.token }}" class="home-tool-btn">
                 <span class="tool-icon">&#9201;</span>
@@ -47,6 +48,8 @@
                 <span class="tool-label">Your Schedule</span>
             </a>
             {% endif %}
+            {% endif %}
+            {% if token.get('feature_photos', 1) %}
             {% if employee.job_photos_access %}
             <div style="display: flex; flex-direction: column; gap: 0;">
                 <a href="/job-photos?token={{ token.token }}" class="home-tool-btn" style="border-radius: 12px 12px 0 0; border-bottom: none;">
@@ -58,12 +61,16 @@
                 </a>
             </div>
             {% endif %}
+            {% endif %}
+            {% if token.get('feature_timekeeper', 1) %}
             {% if employee.tasks_access %}
             <a href="/tasks?token={{ token.token }}" class="home-tool-btn">
                 <span class="tool-icon">&#9745;</span>
                 <span class="tool-label">Task Checklist</span>
             </a>
             {% endif %}
+            {% endif %}
+            {% if token.get('feature_estimates', 1) %}
             {% if employee.estimate_access %}
             <div style="display: flex; flex-direction: column; gap: 0;">
                 <a href="/estimate?token={{ token.token }}" class="home-tool-btn" style="border-radius: 12px 12px 0 0; border-bottom: none;">
@@ -75,6 +82,8 @@
                 </a>
             </div>
             {% endif %}
+            {% endif %}
+            {% if token.get('feature_receipts', 1) %}
             {% if employee.receipt_access %}
             <div style="display: flex; flex-direction: column; gap: 0;">
                 <a href="/capture?token={{ token.token }}" class="home-tool-btn" style="border-radius: 12px 12px 0 0; border-bottom: none;">
@@ -85,6 +94,7 @@
                     View Receipts
                 </a>
             </div>
+            {% endif %}
             {% endif %}
         </div>
 

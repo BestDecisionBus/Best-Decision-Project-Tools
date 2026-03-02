@@ -24,6 +24,17 @@
             Company-wide settings for {{ selected_token.company_name }}.
         </p>
 
+        {% if current_user.is_bdb or tokens|length > 1 %}
+        <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+            <label for="token-select">Company</label>
+            <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                {% for t in tokens %}
+                <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+
         <form method="POST" action="{{ url_for('admin.admin_settings', token=selected_token.token) }}">
             <div class="meta-card" style="max-width: 540px;">
                 <h3 style="margin-top: 0; margin-bottom: 4px; font-size: 16px;">Company Brand Color</h3>
@@ -58,7 +69,66 @@
                     </label>
                     {% endfor %}
                 </div>
+            </div>
 
+            <div class="meta-card" style="max-width: 540px; margin-top: 24px;">
+                <h3 style="margin-top: 0; margin-bottom: 4px; font-size: 16px;">Features &amp; Modules</h3>
+                <p style="color: var(--gray-500); font-size: 13px; margin-bottom: 20px;">
+                    Enable or disable feature groups for this company. Disabling a feature hides it from employees and admin navigation.
+                </p>
+
+                <div style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 24px;">
+                    <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" name="feature_timekeeper" value="1"
+                               {% if selected_token.get('feature_timekeeper', 1) %}checked{% endif %}
+                               style="margin-top: 3px; width: 16px; height: 16px; flex-shrink: 0;">
+                        <span>
+                            <span style="font-weight: 600; font-size: 14px;">Timekeeper &amp; Scheduling</span><br>
+                            <span style="color: var(--gray-500); font-size: 12px;">Clock in/out, employee schedules, task templates, shift types</span>
+                        </span>
+                    </label>
+                    <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" name="feature_receipts" value="1"
+                               {% if selected_token.get('feature_receipts', 1) %}checked{% endif %}
+                               style="margin-top: 3px; width: 16px; height: 16px; flex-shrink: 0;">
+                        <span>
+                            <span style="font-weight: 600; font-size: 14px;">Receipt Capture</span><br>
+                            <span style="color: var(--gray-500); font-size: 12px;">Employee receipt photo capture, expense categories, admin receipt browsing</span>
+                        </span>
+                    </label>
+                    <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" name="feature_photos" value="1"
+                               {% if selected_token.get('feature_photos', 1) %}checked{% endif %}
+                               style="margin-top: 3px; width: 16px; height: 16px; flex-shrink: 0;">
+                        <span>
+                            <span style="font-weight: 600; font-size: 14px;">Job Photos &amp; Files</span><br>
+                            <span style="color: var(--gray-500); font-size: 12px;">Employee photo capture, file uploads, admin photo library</span>
+                        </span>
+                    </label>
+                    <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                        <input type="checkbox" name="feature_estimates" value="1"
+                               {% if selected_token.get('feature_estimates', 1) %}checked{% endif %}
+                               style="margin-top: 3px; width: 16px; height: 16px; flex-shrink: 0;">
+                        <span>
+                            <span style="font-weight: 600; font-size: 14px;">Estimates &amp; Projects</span><br>
+                            <span style="color: var(--gray-500); font-size: 12px;">Job estimates, project tracking, products &amp; services, message snippets</span>
+                        </span>
+                    </label>
+                </div>
+
+                <div style="margin-bottom: 24px;">
+                    <label style="font-size: 13px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 6px;">CFO Dashboard Tier</label>
+                    <select name="dashboard_tier" style="width: 100%; max-width: 300px;">
+                        <option value="none" {% if selected_token.get('dashboard_tier', 'none') == 'none' %}selected{% endif %}>None (disabled)</option>
+                        <option value="starter" {% if selected_token.get('dashboard_tier') == 'starter' %}selected{% endif %}>Starter</option>
+                        <option value="intermediate" {% if selected_token.get('dashboard_tier') == 'intermediate' %}selected{% endif %}>Intermediate</option>
+                        <option value="full" {% if selected_token.get('dashboard_tier') == 'full' %}selected{% endif %}>Full CFO</option>
+                    </select>
+                    <p style="font-size: 12px; color: var(--gray-400); margin-top: 4px;">Requires Estimates &amp; Projects to be enabled. Turning off Estimates will also disable the dashboard.</p>
+                </div>
+            </div>
+
+            <div style="max-width: 540px; margin-top: 16px;">
                 <button type="submit" class="btn btn-green">Save Settings</button>
             </div>
         </form>

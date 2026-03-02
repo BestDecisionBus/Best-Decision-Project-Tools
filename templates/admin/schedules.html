@@ -124,12 +124,14 @@
                         {% endfor %}
                     </select>
                 </div>
+                {% if token_data and token_data.get('feature_estimates', 1) %}
                 <div class="form-group" id="project-group" style="display:none;">
                     <label for="sched-project">Project / Estimate (optional)</label>
                     <select id="sched-project">
                         <option value="">— None —</option>
                     </select>
                 </div>
+                {% endif %}
                 <div class="form-group">
                     <label for="sched-date">Date</label>
                     <input type="date" id="sched-date">

@@ -1,4 +1,4 @@
-from flask import Blueprint, abort, jsonify, render_template, request
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
 import database
@@ -13,6 +13,20 @@ def _check_scheduler_access():
         return
     if current_user.is_scheduler and not current_user.is_bdb:
         abort(403)
+
+
+@finance_bp.before_request
+def _gate_finance_feature():
+    if not current_user.is_authenticated:
+        return
+    h = _helpers()
+    tokens = h._get_tokens_for_user()
+    token_str, selected_token = h._get_selected_token(tokens)
+    if not token_str or not selected_token:
+        return
+    if selected_token.get("dashboard_tier", "none") == "none":
+        flash("CFO Dashboard is not enabled for this company.", "error")
+        return redirect(url_for("admin.admin_dashboard"))
 
 
 def _helpers():

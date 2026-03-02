@@ -23,6 +23,20 @@ def _check_scheduler_access():
         abort(403)
 
 
+@receipt_admin_bp.before_request
+def _gate_receipts_feature():
+    if not current_user.is_authenticated:
+        return
+    h = _helpers()
+    tokens = h._get_tokens_for_user()
+    token_str, selected_token = h._get_selected_token(tokens)
+    if not token_str or not selected_token:
+        return
+    if not selected_token.get("feature_receipts", 1):
+        flash("Receipt Capture is not enabled for this company.", "error")
+        return redirect(url_for("admin.admin_dashboard"))
+
+
 # ---------------------------------------------------------------------------
 # Lazy import of app-level helpers to avoid circular imports
 # ---------------------------------------------------------------------------

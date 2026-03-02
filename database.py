@@ -392,6 +392,11 @@ def init_db():
     _add_column_if_missing(conn, "jobs",      "sort_order",         "INTEGER DEFAULT 0")
     _add_column_if_missing(conn, "tokens",    "task_retention_days","INTEGER DEFAULT 90")
     _add_column_if_missing(conn, "tokens",    "color_scheme",       "TEXT DEFAULT 'blue'")
+    _add_column_if_missing(conn, "tokens",    "feature_timekeeper", "INTEGER DEFAULT 1")
+    _add_column_if_missing(conn, "tokens",    "feature_receipts",   "INTEGER DEFAULT 1")
+    _add_column_if_missing(conn, "tokens",    "feature_photos",     "INTEGER DEFAULT 1")
+    _add_column_if_missing(conn, "tokens",    "feature_estimates",  "INTEGER DEFAULT 1")
+    _add_column_if_missing(conn, "tokens",    "dashboard_tier",     "TEXT DEFAULT 'none'")
     _add_column_if_missing(conn, "schedules", "estimate_id",        "INTEGER DEFAULT NULL")
     _add_column_if_missing(conn, "employees", "tasks_access",       "INTEGER DEFAULT 1")
     conn.commit()
@@ -4150,6 +4155,42 @@ def update_token_settings(token_str: str, task_retention_days: int) -> None:
 
 
 _VALID_COLOR_SCHEMES = {"blue", "green", "orange", "purple", "red", "teal"}
+_VALID_DASHBOARD_TIERS = {"none", "starter", "intermediate", "full"}
+
+
+def get_feature_flags(token_str: str) -> dict:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT feature_timekeeper, feature_receipts, feature_photos, "
+        "feature_estimates, dashboard_tier FROM tokens WHERE token = ?",
+        (token_str,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return {"feature_timekeeper": 0, "feature_receipts": 0,
+                "feature_photos": 0, "feature_estimates": 0,
+                "dashboard_tier": "none"}
+    return dict(row)
+
+
+def update_feature_flags(token_str: str, feature_timekeeper: int,
+                         feature_receipts: int, feature_photos: int,
+                         feature_estimates: int, dashboard_tier: str) -> None:
+    if dashboard_tier not in _VALID_DASHBOARD_TIERS:
+        dashboard_tier = "none"
+    if not feature_estimates:
+        dashboard_tier = "none"
+    conn = get_db()
+    conn.execute(
+        """UPDATE tokens SET feature_timekeeper = ?, feature_receipts = ?,
+           feature_photos = ?, feature_estimates = ?, dashboard_tier = ?
+           WHERE token = ?""",
+        (feature_timekeeper, feature_receipts, feature_photos,
+         feature_estimates, dashboard_tier, token_str)
+    )
+    conn.commit()
+    conn.close()
+
 
 def update_token_color_scheme(token_str: str, color_scheme: str) -> None:
     if color_scheme not in _VALID_COLOR_SCHEMES:

@@ -50,6 +50,32 @@ def _require_admin(h=None):
 
 
 # ---------------------------------------------------------------------------
+# Feature gate
+# ---------------------------------------------------------------------------
+
+@estimates_bp.before_request
+def _gate_estimates_feature():
+    if not current_user.is_authenticated:
+        # Employee route
+        token_str = request.args.get("token", "") or session.get("employee_token", "")
+        if not token_str:
+            return
+        token_data = database.get_token(token_str)
+        if token_data and not token_data.get("feature_estimates", 1):
+            return redirect(url_for("company_home", token_str=token_str))
+        return
+    # Admin routes
+    h = _helpers()
+    tokens = h._get_tokens_for_user()
+    token_str, selected_token = h._get_selected_token(tokens)
+    if not token_str or not selected_token:
+        return
+    if not selected_token.get("feature_estimates", 1):
+        flash("Estimates is not enabled for this company.", "error")
+        return redirect(url_for("admin.admin_dashboard"))
+
+
+# ---------------------------------------------------------------------------
 # Audio file validation
 # ---------------------------------------------------------------------------
 

@@ -91,6 +91,39 @@ def scheduler_allowed(f):
 
 
 # ---------------------------------------------------------------------------
+# Feature gate — blocks all scheduling routes if feature_timekeeper is disabled
+# ---------------------------------------------------------------------------
+
+@scheduling_bp.before_request
+def _gate_timekeeper_feature():
+    if not current_user.is_authenticated:
+        # Employee-facing schedule route — get token from args or session
+        token_str = request.args.get("token", "") or session.get("employee_token", "")
+        if not token_str:
+            return
+        token_data = database.get_token(token_str)
+        if token_data and not token_data.get("feature_timekeeper", 1):
+            return redirect(url_for("company_home", token_str=token_str))
+        return
+    # Admin / scheduler routes — resolve the token string directly
+    token_str = request.args.get("token", "")
+    if not token_str:
+        h = _helpers()
+        tokens = h._get_tokens_for_user()
+        # _get_selected_token always returns (token_str, token_dict) in the same order;
+        # scheduling.py assigns the result reversed in its route handlers, but here we
+        # call it fresh and use positional indexing to avoid that confusion.
+        unpacked = h._get_selected_token(tokens)
+        token_str = unpacked[0]  # first element is always the token string
+    if not token_str:
+        return
+    token_data = database.get_token(token_str)
+    if token_data and not token_data.get("feature_timekeeper", 1):
+        flash("Timekeeper & Scheduling is not enabled for this company.", "error")
+        return redirect(url_for("admin.admin_dashboard"))
+
+
+# ---------------------------------------------------------------------------
 # Scheduler login
 # ---------------------------------------------------------------------------
 

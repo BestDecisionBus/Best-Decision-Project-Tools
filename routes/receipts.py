@@ -5,6 +5,7 @@ from pathlib import Path
 from flask import (
     Blueprint, jsonify, redirect, render_template, request, session, url_for,
 )
+from flask_login import current_user
 
 import config
 import database
@@ -19,6 +20,20 @@ receipts_bp = Blueprint('receipts', __name__)
 def _helpers():
     import app as _app
     return _app
+
+
+# ---------------------------------------------------------------------------
+# Feature gate
+# ---------------------------------------------------------------------------
+
+@receipts_bp.before_request
+def _gate_receipts_feature():
+    token_str = request.args.get("token", "") or session.get("employee_token", "")
+    if not token_str:
+        return
+    token_data = database.get_token(token_str)
+    if token_data and not token_data.get("feature_receipts", 1):
+        return redirect(url_for("company_home", token_str=token_str))
 
 
 # ---------------------------------------------------------------------------

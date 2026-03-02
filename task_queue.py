@@ -73,6 +73,10 @@ def _poll_and_process():
         _poll_and_process_append()
         return
 
+    _tok = database.get_token(row["token"])
+    if not _tok or not _tok.get("feature_receipts", 1):
+        return
+
     submission_id = row["id"]
     logger.info(f"Processing submission {submission_id} for {row['company_name']}")
 
@@ -143,6 +147,10 @@ def _poll_and_process_estimate():
     """Check for one pending estimate and process it."""
     est = database.claim_next_pending_estimate()
     if est is None:
+        return
+
+    _tok = database.get_token(est["token"])
+    if not _tok or not _tok.get("feature_estimates", 1):
         return
 
     estimate_id = est["id"]

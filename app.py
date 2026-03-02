@@ -352,6 +352,16 @@ def _verify_token_access(token_str):
         abort(403)
 
 
+def _check_feature(token_str, feature_name):
+    """Returns True if a feature is enabled for this company."""
+    token_data = database.get_token(token_str)
+    if not token_data:
+        return False
+    if feature_name == "dashboard":
+        return token_data.get("dashboard_tier", "none") != "none"
+    return bool(token_data.get(feature_name, 0))
+
+
 # ---------------------------------------------------------------------------
 # Login / Logout
 # ---------------------------------------------------------------------------
