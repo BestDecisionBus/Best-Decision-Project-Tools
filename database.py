@@ -401,6 +401,49 @@ def init_db():
     _add_column_if_missing(conn, "employees", "tasks_access",       "INTEGER DEFAULT 1")
     conn.commit()
 
+    # Invoicing
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS invoices (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            token          TEXT NOT NULL,
+            estimate_id    INTEGER,
+            customer_id    INTEGER,
+            job_id         INTEGER,
+            invoice_number TEXT NOT NULL DEFAULT '',
+            status         TEXT NOT NULL DEFAULT 'draft',
+            due_date       TEXT DEFAULT '',
+            amount_due     REAL DEFAULT 0,
+            amount_paid    REAL DEFAULT 0,
+            notes          TEXT DEFAULT '',
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL,
+            FOREIGN KEY (token) REFERENCES tokens(token)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_invoices_token ON invoices(token)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_invoices_estimate ON invoices(estimate_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id)")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS invoice_items (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_id       INTEGER NOT NULL,
+            token            TEXT NOT NULL,
+            estimate_item_id INTEGER,
+            description      TEXT NOT NULL DEFAULT '',
+            quantity         REAL DEFAULT 1,
+            unit_price       REAL DEFAULT 0,
+            original_total   REAL DEFAULT 0,
+            billed_pct       REAL DEFAULT 100,
+            billed_amount    REAL DEFAULT 0,
+            sort_order       INTEGER DEFAULT 0,
+            FOREIGN KEY (invoice_id) REFERENCES invoices(id),
+            FOREIGN KEY (token) REFERENCES tokens(token)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id)")
+    _add_column_if_missing(conn, "invoices", "client_message", "TEXT DEFAULT ''")
+
     # Phase 1 — New tables for Current Job Tasks feature
     conn.execute("""
         CREATE TABLE IF NOT EXISTS task_templates (
@@ -3557,6 +3600,16 @@ def link_job_to_customer(job_id, customer_id, token_str):
     conn.close()
 
 
+def unlink_job_from_customer(job_id, token_str):
+    conn = get_db()
+    conn.execute(
+        "UPDATE jobs SET customer_id = NULL WHERE id = ? AND token = ?",
+        (job_id, token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
 def link_estimate_to_customer(estimate_id, customer_id, token_str):
     conn = get_db()
     conn.execute(
@@ -4219,6 +4272,301 @@ def get_schedules_for_employee_date(employee_id: int, token_str: str, date_str: 
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Invoices
+# ---------------------------------------------------------------------------
+
+def _next_invoice_number(conn, token_str):
+    """Return next invoice number like INV-0001 for this token."""
+    row = conn.execute(
+        "SELECT COUNT(*) as cnt FROM invoices WHERE token = ?", (token_str,)
+    ).fetchone()
+    n = (row["cnt"] if row else 0) + 1
+    return f"INV-{n:04d}"
+
+
+def create_invoice(token_str, estimate_id=None, customer_id=None, job_id=None,
+                   amount_due=0, due_date="", notes=""):
+    conn = get_db()
+    now = datetime.now().isoformat()
+    inv_num = _next_invoice_number(conn, token_str)
+
+    # Copy estimate items if provided so we can compute a real amount_due
+    est_items = []
+    if estimate_id:
+        est_items = conn.execute(
+            "SELECT * FROM estimate_items WHERE estimate_id = ? ORDER BY sort_order ASC, id ASC",
+            (estimate_id,),
+        ).fetchall()
+        if est_items:
+            amount_due = sum(
+                round(float(r["quantity"] or 0) * float(r["unit_price"] or 0), 2)
+                for r in est_items
+            )
+
+    cur = conn.execute(
+        """INSERT INTO invoices
+           (token, estimate_id, customer_id, job_id, invoice_number, status,
+            due_date, amount_due, amount_paid, notes, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, 0, ?, ?, ?)""",
+        (token_str, estimate_id, customer_id, job_id, inv_num,
+         due_date, amount_due, notes, now, now),
+    )
+    inv_id = cur.lastrowid
+
+    # Copy estimate line items into invoice_items at 100% billed
+    for i, r in enumerate(est_items):
+        orig = round(float(r["quantity"] or 0) * float(r["unit_price"] or 0), 2)
+        conn.execute(
+            """INSERT INTO invoice_items
+               (invoice_id, token, estimate_item_id, description, quantity, unit_price,
+                original_total, billed_pct, billed_amount, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 100, ?, ?)""",
+            (inv_id, token_str, r["id"], r["description"],
+             r["quantity"], r["unit_price"], orig, orig, i),
+        )
+
+    conn.commit()
+    row = conn.execute("SELECT * FROM invoices WHERE id = ?", (inv_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_invoice(invoice_id, token_str=None):
+    conn = get_db()
+    if token_str:
+        row = conn.execute(
+            "SELECT * FROM invoices WHERE id = ? AND token = ?", (invoice_id, token_str)
+        ).fetchone()
+    else:
+        row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_invoices_by_token(token_str, status=None):
+    conn = get_db()
+    query = """
+        SELECT i.*, c.company_name, c.customer_name, j.job_name
+        FROM invoices i
+        LEFT JOIN customers c ON i.customer_id = c.id
+        LEFT JOIN jobs j ON i.job_id = j.id
+        WHERE i.token = ?
+    """
+    params = [token_str]
+    if status:
+        query += " AND i.status = ?"
+        params.append(status)
+    query += " ORDER BY i.created_at DESC"
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_invoices_by_customer(customer_id, token_str):
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT i.*, j.job_name
+           FROM invoices i
+           LEFT JOIN jobs j ON i.job_id = j.id
+           WHERE i.customer_id = ? AND i.token = ?
+           ORDER BY i.created_at DESC""",
+        (customer_id, token_str),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_invoice(invoice_id, token_str, **kwargs):
+    conn = get_db()
+    allowed = {"status", "due_date", "amount_due", "amount_paid", "notes", "invoice_number", "client_message"}
+    sets = ["updated_at = ?"]
+    params = [datetime.now().isoformat()]
+    for k, v in kwargs.items():
+        if k in allowed:
+            sets.append(f"{k} = ?")
+            params.append(v)
+    params.extend([invoice_id, token_str])
+    conn.execute(
+        f"UPDATE invoices SET {', '.join(sets)} WHERE id = ? AND token = ?", params
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_invoice(invoice_id, token_str):
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+        conn.execute("DELETE FROM invoices WHERE id = ? AND token = ?", (invoice_id, token_str))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_invoice_stats_by_customer(customer_id, token_str):
+    """Return {total_invoiced, total_paid, total_outstanding, count}."""
+    conn = get_db()
+    row = conn.execute(
+        """SELECT COUNT(*) as cnt,
+                  COALESCE(SUM(amount_due), 0) as total_due,
+                  COALESCE(SUM(amount_paid), 0) as total_paid
+           FROM invoices
+           WHERE customer_id = ? AND token = ? AND status != 'void'""",
+        (customer_id, token_str),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return {"count": 0, "total_invoiced": 0, "total_paid": 0, "total_outstanding": 0}
+    return {
+        "count": row["cnt"],
+        "total_invoiced": row["total_due"],
+        "total_paid": row["total_paid"],
+        "total_outstanding": row["total_due"] - row["total_paid"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Invoice Items
+# ---------------------------------------------------------------------------
+
+def get_invoice_items(invoice_id):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order ASC, id ASC",
+        (invoice_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def create_invoice_item(invoice_id, token_str, description, quantity=1, unit_price=0,
+                        original_total=0, billed_pct=100, billed_amount=None, sort_order=0,
+                        estimate_item_id=None):
+    if billed_amount is None:
+        billed_amount = round(original_total * billed_pct / 100, 2)
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO invoice_items
+           (invoice_id, token, estimate_item_id, description, quantity, unit_price,
+            original_total, billed_pct, billed_amount, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (invoice_id, token_str, estimate_item_id, description, quantity, unit_price,
+         original_total, billed_pct, billed_amount, sort_order),
+    )
+    item_id = cur.lastrowid
+    _recompute_invoice_amount_due(conn, invoice_id, token_str)
+    conn.commit()
+    row = conn.execute("SELECT * FROM invoice_items WHERE id = ?", (item_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_invoice_item(item_id, **kwargs):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM invoice_items WHERE id = ?", (item_id,)).fetchone()
+    if not row:
+        conn.close()
+        return None
+    item = dict(row)
+
+    allowed = {"description", "quantity", "unit_price", "original_total",
+               "billed_pct", "billed_amount", "sort_order"}
+    updates = {k: v for k, v in kwargs.items() if k in allowed}
+
+    # Keep billed_pct and billed_amount in sync
+    orig = float(updates.get("original_total", item["original_total"]) or 0)
+    if "billed_pct" in updates and "billed_amount" not in updates:
+        pct = float(updates["billed_pct"] or 0)
+        updates["billed_amount"] = round(orig * pct / 100, 2) if orig else 0
+    elif "billed_amount" in updates and "billed_pct" not in updates:
+        amt = float(updates["billed_amount"] or 0)
+        updates["billed_pct"] = round(amt / orig * 100, 4) if orig else 0
+
+    sets = [f"{k} = ?" for k in updates]
+    params = list(updates.values()) + [item_id]
+    conn.execute(f"UPDATE invoice_items SET {', '.join(sets)} WHERE id = ?", params)
+    _recompute_invoice_amount_due(conn, item["invoice_id"], item["token"])
+    conn.commit()
+    row = conn.execute("SELECT * FROM invoice_items WHERE id = ?", (item_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_invoice_item(item_id):
+    conn = get_db()
+    row = conn.execute("SELECT invoice_id, token FROM invoice_items WHERE id = ?", (item_id,)).fetchone()
+    if not row:
+        conn.close()
+        return
+    conn.execute("DELETE FROM invoice_items WHERE id = ?", (item_id,))
+    _recompute_invoice_amount_due(conn, row["invoice_id"], row["token"])
+    conn.commit()
+    conn.close()
+
+
+def _recompute_invoice_amount_due(conn, invoice_id, token_str):
+    """Update invoices.amount_due to match sum of invoice_items.billed_amount."""
+    row = conn.execute(
+        "SELECT COALESCE(SUM(billed_amount), 0) as total FROM invoice_items WHERE invoice_id = ?",
+        (invoice_id,),
+    ).fetchone()
+    total = round(float(row["total"]), 2) if row else 0
+    conn.execute(
+        "UPDATE invoices SET amount_due = ?, updated_at = ? WHERE id = ? AND token = ?",
+        (total, datetime.now().isoformat(), invoice_id, token_str),
+    )
+
+
+def sync_estimate_items_to_invoice(invoice_id, estimate_id, token_str):
+    """Add any estimate_items not yet referenced on this invoice. Returns count added."""
+    conn = get_db()
+    already = conn.execute(
+        "SELECT estimate_item_id FROM invoice_items WHERE invoice_id = ? AND estimate_item_id IS NOT NULL",
+        (invoice_id,),
+    ).fetchall()
+    already_ids = {r["estimate_item_id"] for r in already}
+
+    est_items = conn.execute(
+        "SELECT * FROM estimate_items WHERE estimate_id = ? AND token = ? ORDER BY sort_order, id",
+        (estimate_id, token_str),
+    ).fetchall()
+
+    max_row = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) as max_so FROM invoice_items WHERE invoice_id = ?",
+        (invoice_id,),
+    ).fetchone()
+    next_sort = (max_row["max_so"] + 1) if max_row else 0
+
+    added = 0
+    for item in est_items:
+        if item["id"] in already_ids:
+            continue
+        orig = round(float(item["total"] or 0), 2)
+        conn.execute(
+            """INSERT INTO invoice_items
+               (invoice_id, token, estimate_item_id, description,
+                quantity, unit_price, original_total, billed_pct, billed_amount, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (invoice_id, token_str, item["id"], item["description"],
+             item["quantity"] or 1, item["unit_price"] or 0,
+             orig, 100.0, orig, next_sort),
+        )
+        next_sort += 1
+        added += 1
+
+    if added:
+        _recompute_invoice_amount_due(conn, invoice_id, token_str)
+    conn.commit()
+    conn.close()
+    return added
 
 
 def get_active_time_entry_for_employee(employee_id: int, token_str: str) -> dict:

@@ -150,7 +150,7 @@
             </div>
 
             <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                <button type="button" class="btn btn-green" onclick="saveEstimate()" style="font-size: 16px; padding: 10px 24px;">Save Changes</button>
+                <button type="button" class="btn btn-green" onclick="saveAllItems()" style="font-size: 16px; padding: 10px 24px;">Save Changes</button>
                 <button type="button" class="btn" style="background: #7c3aed; color: #fff; font-size: 16px; padding: 10px 24px;" onclick="sendToJobFolder()">Send PDF to Job Folder</button>
                 <span id="save-status" style="font-size: 15px;"></span>
                 <span id="folder-status" style="font-size: 15px;"></span>
@@ -158,10 +158,17 @@
         </div>
 
         {# --- Reports --- #}
-        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+        <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
             <button type="button" class="btn btn-sm btn-blue" onclick="downloadInternalPDF()">Internal Report PDF</button>
             <a href="/admin/estimates/{{ estimate.id }}/report/xlsx" class="btn btn-sm btn-green">Financial Report (Excel)</a>
             <button type="button" class="btn btn-sm btn-orange" onclick="downloadScopePDF()">Scope of Work PDF</button>
+            {% if estimate.approval_status in ('accepted', 'in_progress', 'completed') %}
+            <form method="POST" action="{{ url_for('invoices.admin_invoice_create') }}" style="display: inline;">
+                <input type="hidden" name="token" value="{{ estimate.token }}">
+                <input type="hidden" name="estimate_id" value="{{ estimate.id }}">
+                <button type="submit" class="btn btn-sm" style="background: var(--purple, #7c3aed); color: #fff;" onclick="return confirm('Create an invoice from this estimate?')">Create Invoice</button>
+            </form>
+            {% endif %}
         </div>
 
         {# --- Photos + Upload --- #}
@@ -222,6 +229,7 @@
             </div>
             <table class="admin-table" id="line-items-table" style="margin-bottom: 12px; width: 100%;">
                 <colgroup>
+                    <col style="width: 24px;">
                     <col style="width: 45%;">
                     <col style="width: 80px;">
                     <col style="width: 130px;">
@@ -232,6 +240,7 @@
                 </colgroup>
                 <thead>
                     <tr>
+                        <th style="width: 24px; padding: 4px;" data-no-sort></th>
                         <th>Product / Service</th>
                         <th style="text-align: center;">Qty</th>
                         <th style="text-align: right;">Unit Price</th>
@@ -244,6 +253,7 @@
                 <tbody id="line-items-body">
                     {% for item in items %}
                     <tr data-item-id="{{ item.id }}">
+                        <td class="drag-handle" style="width:24px;text-align:center;cursor:grab;color:var(--gray-400);font-size:18px;user-select:none;">⠿</td>
                         <td>
                             <input type="text" class="est-input li-desc" value="{{ item.description }}" style="width: 100%;" onchange="saveItem(this)">
                             <div style="margin-top: 3px;">
@@ -267,6 +277,7 @@
                     {% endfor %}
                     {% if not items %}
                     <tr data-item-id="">
+                        <td style="width:24px;"></td>
                         <td>
                             <input type="text" class="est-input li-desc" value="" style="width: 100%;" placeholder="Description">
                             <div style="margin-top: 3px;">
@@ -897,6 +908,10 @@
             '<button type="button" class="btn btn-sm" style="background: #7c3aed; color: #fff; padding: 2px 6px; font-size: 11px;" onclick="saveToPS(this)" title="Save to Products &amp; Services">Save</button> ' +
             '<button type="button" class="btn btn-red btn-sm" onclick="deleteItem(this)" style="padding: 2px 6px; font-size: 11px;">X</button></td>';
         tbody.appendChild(tr);
+        var _dh = tr.insertCell(0);
+        _dh.className = 'drag-handle';
+        _dh.style.cssText = 'width:24px;text-align:center;cursor:grab;color:var(--gray-400);font-size:18px;user-select:none;';
+        _dh.textContent = '\u2803';
         calcTotals();
     }
 
@@ -1360,6 +1375,23 @@
         if (phoneField && !phoneField.value.trim()) phoneField.value = c.phone || '';
         if (emailField && !emailField.value.trim()) emailField.value = c.email || '';
     }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+    <script>
+    Sortable.create(document.getElementById('line-items-body'), {
+        handle: '.drag-handle',
+        animation: 150,
+        onEnd: function () {
+            document.querySelectorAll('#line-items-body tr[data-item-id]').forEach(function (row, idx) {
+                var id = row.getAttribute('data-item-id');
+                if (!id) return;
+                fetch('/admin/estimates/items/' + id + '/update', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({sort_order: idx})
+                });
+            });
+        }
+    });
     </script>
 </body>
 </html>

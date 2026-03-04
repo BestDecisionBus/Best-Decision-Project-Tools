@@ -54,8 +54,8 @@ def admin_customer_create():
     phone  = request.form.get("phone", "").strip()
     email  = request.form.get("email", "").strip()
     notes  = request.form.get("notes", "").strip()
-    if not customer_name:
-        flash("Contact name is required.", "error")
+    if not company_name or not customer_name:
+        flash("Company name and contact name are required.", "error")
         return redirect(url_for("customers.admin_customers", token=token_str))
     database.create_customer(company_name, customer_name, phone, email, notes, token_str)
     flash("Customer created.", "success")
@@ -77,15 +77,18 @@ def admin_customer_detail(customer_id):
         abort(404)
     jobs = database.get_jobs_by_customer(customer_id, customer["token"])
     all_jobs = database.get_jobs_by_token(customer["token"], active_only=True)
-    linked_job_ids = {j["id"] for j in jobs}
-    linkable_jobs = [j for j in all_jobs if j["id"] not in linked_job_ids]
+    linkable_jobs = [j for j in all_jobs if j["customer_id"] is None]
     job_estimate_summaries = database.get_estimate_counts_by_customer(customer_id, customer["token"])
+    invoices = database.get_invoices_by_customer(customer_id, customer["token"])
+    invoice_stats = database.get_invoice_stats_by_customer(customer_id, customer["token"])
     return render_template(
         "admin/customer_detail.html",
         customer=customer,
         jobs=jobs,
         linkable_jobs=linkable_jobs,
         job_estimate_summaries=job_estimate_summaries,
+        invoices=invoices,
+        invoice_stats=invoice_stats,
         tokens=tokens,
         selected_token=selected_token,
     )
@@ -206,11 +209,24 @@ def admin_customer_job_create(customer_id):
         abort(404)
     job_name    = request.form.get("job_name", "").strip()
     job_address = request.form.get("job_address", "").strip()
+    latitude    = request.form.get("latitude",  type=float)
+    longitude   = request.form.get("longitude", type=float)
     if not job_name:
         flash("Job name is required.", "error")
         return redirect(url_for("customers.admin_customer_detail", customer_id=customer_id))
-    database.create_job(job_name, job_address, None, None, token_str, customer_id=customer_id)
+    database.create_job(job_name, job_address, latitude, longitude, token_str, customer_id=customer_id)
     flash(f"Job '{job_name}' created.", "success")
+    return redirect(url_for("customers.admin_customer_detail", customer_id=customer_id))
+
+
+@customers_bp.route("/admin/customers/<int:customer_id>/jobs/<int:job_id>/unlink", methods=["POST"])
+@login_required
+def admin_customer_job_unlink(customer_id, job_id):
+    _app = _helpers()
+    token_str = request.form.get("token", "").strip()
+    _app._verify_token_access(token_str)
+    database.unlink_job_from_customer(job_id, token_str)
+    flash("Job unlinked from customer.", "success")
     return redirect(url_for("customers.admin_customer_detail", customer_id=customer_id))
 
 

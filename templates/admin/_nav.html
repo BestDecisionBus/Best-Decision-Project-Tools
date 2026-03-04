@@ -9,7 +9,7 @@
 
 {# ---- Group detection ---- #}
 {% set g_dashboard = (ep == 'admin.admin_dashboard') %}
-{% set g_customers = ('customer' in ep) %}
+{% set g_customers = ('customer' in ep or 'invoice' in ep) %}
 {% set g_jobs = ('job' in ep or 'photo' in ep or 'estimate' in ep) and not g_dashboard %}
 {% set g_employees = ('employee' in ep or 'schedule' in ep or 'time_entr' in ep or 'export' in ep or 'manual' in ep) %}
 {% set g_receipts = ('receipt' in ep) %}
@@ -58,11 +58,17 @@
 </nav>
 
 {# ---- Sub-navigation (second row, shown for groups with multiple items) ---- #}
-{% if g_jobs and not _sched_only %}
+{% if g_customers and not _sched_only %}
+<nav class="admin-subnav">
+    <a href="{{ turl('customers.admin_customers') }}" {% if 'customer' in ep %}class="active"{% endif %}>Customers</a>
+    <a href="{{ turl('invoices.admin_invoices') }}" {% if 'invoice' in ep %}class="active"{% endif %}>Invoices</a>
+</nav>
+{% elif g_jobs and not _sched_only %}
 <nav class="admin-subnav">
     {% if not _st or _st.get('feature_estimates', 1) %}
     <a href="{{ turl('estimates.admin_estimates') }}" {% if 'estimate' in ep %}class="active"{% endif %}>Estimates / Projects</a>
     {% endif %}
+    <a href="{{ turl('invoices.admin_invoices') }}" {% if 'invoice' in ep %}class="active"{% endif %}>Invoices</a>
     {% if not _st or _st.get('feature_photos', 1) %}
     <a href="{{ turl('job_photos.admin_job_photos') }}" {% if 'photo' in ep %}class="active"{% endif %}>Job Photos / Files</a>
     {% endif %}
@@ -85,26 +91,26 @@
 </nav>
 {% elif g_lists and not _sched_only %}
 <nav class="admin-subnav">
-    {% if not _st or _st.get('feature_receipts', 1) %}
-    <a href="{{ turl('admin.admin_categories') }}" {% if 'categor' in ep %}class="active"{% endif %}>Expense Categories</a>
+    {% if not _st or _st.get('feature_timekeeper', 1) %}
+    <a href="{{ turl('admin.admin_shift_types') }}" {% if 'shift_type' in ep %}class="active"{% endif %}>Shift Types</a>
     {% endif %}
     {% if not _st or _st.get('feature_timekeeper', 1) %}
     <a href="{{ turl('admin.admin_common_tasks') }}" {% if 'common_task' in ep %}class="active"{% endif %}>Scheduled Tasks</a>
-    {% endif %}
-    {% if not _st or _st.get('feature_estimates', 1) %}
-    <a href="{{ turl('admin.admin_message_snippets') }}" {% if 'message_snippet' in ep %}class="active"{% endif %}>Message Snippets</a>
-    {% endif %}
-    {% if not _st or _st.get('feature_estimates', 1) %}
-    <a href="{{ turl('admin.admin_products_services') }}" {% if 'product' in ep %}class="active"{% endif %}>Products &amp; Services</a>
-    {% endif %}
-    {% if not _st or _st.get('feature_timekeeper', 1) %}
-    <a href="{{ turl('admin.admin_shift_types') }}" {% if 'shift_type' in ep %}class="active"{% endif %}>Shift Types</a>
     {% endif %}
     {% if not _st or _st.get('feature_timekeeper', 1) %}
     <a href="{{ turl('task_templates.admin_task_templates') }}" {% if 'task_template' in ep %}class="active"{% endif %}>Task Templates</a>
     {% endif %}
     {% if not _st or _st.get('feature_timekeeper', 1) %}
     <a href="{{ turl('task_templates.admin_task_completions') }}" {% if 'task_completion' in ep %}class="active"{% endif %}>Task History</a>
+    {% endif %}
+    {% if not _st or _st.get('feature_receipts', 1) %}
+    <a href="{{ turl('admin.admin_categories') }}" {% if 'categor' in ep %}class="active"{% endif %}>Expense Categories</a>
+    {% endif %}
+    {% if not _st or _st.get('feature_estimates', 1) %}
+    <a href="{{ turl('admin.admin_message_snippets') }}" {% if 'message_snippet' in ep %}class="active"{% endif %}>Message Snippets</a>
+    {% endif %}
+    {% if not _st or _st.get('feature_estimates', 1) %}
+    <a href="{{ turl('admin.admin_products_services') }}" {% if 'product' in ep %}class="active"{% endif %}>Products &amp; Services</a>
     {% endif %}
 </nav>
 {% elif g_admin %}

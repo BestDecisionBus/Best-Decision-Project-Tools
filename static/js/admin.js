@@ -288,6 +288,11 @@
             if (el) el.setAttribute("data-no-guard", "");
         });
 
+        // Exclude auto-saving inputs — sort order fields and processed checkboxes
+        document.querySelectorAll(".sort-input, .processed-checkbox").forEach(function (el) {
+            el.setAttribute("data-no-guard", "");
+        });
+
         function shouldTrack(el) {
             if (el.type === "hidden") return false;
             if (el.hasAttribute("data-no-guard")) return false;

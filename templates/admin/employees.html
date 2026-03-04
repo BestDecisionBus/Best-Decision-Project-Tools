@@ -325,6 +325,7 @@
             body: JSON.stringify(payload)
         }).then(function(resp) {
             if (!resp.ok) { alert('Error updating access.'); window._guardBypass = true; window.location.reload(); }
+            else if (window._markClean) window._markClean();
         });
     }
 

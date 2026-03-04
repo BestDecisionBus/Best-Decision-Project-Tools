@@ -38,8 +38,8 @@
                         <input type="text" id="company_name" name="company_name" value="{{ customer.company_name }}" required>
                     </div>
                     <div class="form-group" style="flex: 2;">
-                        <label for="customer_name">Contact Name</label>
-                        <input type="text" id="customer_name" name="customer_name" value="{{ customer.customer_name }}">
+                        <label for="customer_name">Contact Name <span style="color: var(--red, #dc2626);">*</span></label>
+                        <input type="text" id="customer_name" name="customer_name" value="{{ customer.customer_name }}" required>
                     </div>
                 </div>
                 <div class="form-row" style="margin-top: 12px;">
@@ -70,18 +70,33 @@
             <h3 style="margin-top: 0;">Jobs</h3>
 
             <form method="POST" action="{{ url_for('customers.admin_customer_job_create', customer_id=customer.id) }}"
-                  style="display: flex; gap: 8px; align-items: flex-end; margin-bottom: 20px; flex-wrap: wrap;">
+                  style="margin-bottom: 20px;">
                 <input type="hidden" name="token" value="{{ customer.token }}">
-                <div class="form-group" style="flex: 2; min-width: 180px;">
-                    <label for="new-job-name">Job Name <span style="color: var(--red, #dc2626);">*</span></label>
-                    <input type="text" id="new-job-name" name="job_name" placeholder="e.g. Main St Renovation" required>
+                <div class="form-row">
+                    <div class="form-group" style="flex: 2; min-width: 180px;">
+                        <label for="new-job-name">Job Name <span style="color: var(--red, #dc2626);">*</span></label>
+                        <input type="text" id="new-job-name" name="job_name" placeholder="e.g. Main St Renovation" required>
+                    </div>
+                    <div class="form-group" style="flex: 3; min-width: 220px;">
+                        <label for="new-job-address">Address <span style="font-size: 11px; color: var(--gray-400);">(optional)</span></label>
+                        <input type="text" id="new-job-address" name="job_address" placeholder="123 Main St, Anytown">
+                    </div>
+                    <div style="align-self: flex-end;">
+                        <button type="button" class="btn btn-blue btn-sm" onclick="geocodeNewJob()">Geocode</button>
+                    </div>
                 </div>
-                <div class="form-group" style="flex: 3; min-width: 220px;">
-                    <label for="new-job-address">Address <span style="font-size: 11px; color: var(--gray-400);">(optional)</span></label>
-                    <input type="text" id="new-job-address" name="job_address" placeholder="123 Main St, Anytown">
-                </div>
-                <div style="align-self: flex-end;">
-                    <button type="submit" class="btn btn-green">Add Job</button>
+                <div class="form-row" style="margin-top: 8px;">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="new-job-lat">Latitude</label>
+                        <input type="number" id="new-job-lat" name="latitude" step="any" placeholder="0.000000">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="new-job-lng">Longitude</label>
+                        <input type="number" id="new-job-lng" name="longitude" step="any" placeholder="0.000000">
+                    </div>
+                    <div style="align-self: flex-end;">
+                        <button type="submit" class="btn btn-green">Add Job</button>
+                    </div>
                 </div>
             </form>
 
@@ -94,6 +109,7 @@
                             <th>Address</th>
                             <th>Status</th>
                             <th>Estimates</th>
+                            <th data-no-sort></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -119,6 +135,12 @@
                                 <a href="{{ url_for('estimates.admin_estimates', token=customer.token, job_id=j.id, back_customer=customer.id) }}"
                                    style="font-size: 13px;">{{ esummary.count }} estimate{{ 's' if esummary.count != 1 else '' }}</a>
                                 {% endif %}
+                            </td>
+                            <td>
+                                <form method="POST" action="{{ url_for('customers.admin_customer_job_unlink', customer_id=customer.id, job_id=j.id) }}" style="display: inline;">
+                                    <input type="hidden" name="token" value="{{ customer.token }}">
+                                    <button type="submit" class="btn btn-sm" style="background: var(--gray-200); color: var(--gray-700);">Unlink</button>
+                                </form>
                             </td>
                         </tr>
                         {% endfor %}
@@ -151,6 +173,76 @@
             {% endif %}
         </div>
 
+        <!-- Invoices -->
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h3 style="margin: 0;">Invoices</h3>
+                <a href="{{ url_for('invoices.admin_invoices', token=customer.token) }}" class="btn btn-sm" style="background: var(--gray-200); color: var(--gray-700);">View All</a>
+            </div>
+
+            {% if invoice_stats.count > 0 %}
+            <div style="display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--gray-200);">
+                <div>
+                    <p style="margin: 0; font-size: 12px; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Invoiced</p>
+                    <p style="margin: 4px 0 0; font-size: 18px; font-weight: 600;">${{ '{:,.2f}'.format(invoice_stats.total_invoiced) }}</p>
+                </div>
+                <div>
+                    <p style="margin: 0; font-size: 12px; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Collected</p>
+                    <p style="margin: 4px 0 0; font-size: 18px; font-weight: 600; color: var(--green, #16a34a);">${{ '{:,.2f}'.format(invoice_stats.total_paid) }}</p>
+                </div>
+                <div>
+                    <p style="margin: 0; font-size: 12px; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Outstanding</p>
+                    <p style="margin: 4px 0 0; font-size: 18px; font-weight: 600; {% if invoice_stats.total_outstanding > 0 %}color: var(--red, #dc2626);{% endif %}">${{ '{:,.2f}'.format(invoice_stats.total_outstanding) }}</p>
+                </div>
+            </div>
+
+            <div class="table-wrap">
+                <table class="resizable">
+                    <thead>
+                        <tr>
+                            <th>Invoice #</th>
+                            <th>Date</th>
+                            <th>Due</th>
+                            <th style="text-align: right;">Amount</th>
+                            <th style="text-align: right;">Paid</th>
+                            <th>Status</th>
+                            <th data-no-sort></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for inv in invoices %}
+                        <tr>
+                            <td><a href="{{ url_for('invoices.admin_invoice_detail', invoice_id=inv.id) }}" style="font-weight: 500;">{{ inv.invoice_number }}</a></td>
+                            <td style="white-space: nowrap;">{{ inv.created_at[:10] if inv.created_at else '—' }}</td>
+                            <td style="white-space: nowrap;">{{ inv.due_date or '—' }}</td>
+                            <td style="text-align: right; white-space: nowrap;">${{ '{:,.2f}'.format(inv.amount_due or 0) }}</td>
+                            <td style="text-align: right; white-space: nowrap;">
+                                {% if inv.amount_paid %}${{ '{:,.2f}'.format(inv.amount_paid) }}{% else %}—{% endif %}
+                            </td>
+                            <td>
+                                {% if inv.status == 'paid' %}
+                                <span class="badge badge-active">Paid</span>
+                                {% elif inv.status == 'sent' %}
+                                <span class="badge" style="background: #dbeafe; color: #1d4ed8;">Sent</span>
+                                {% elif inv.status == 'void' %}
+                                <span class="badge" style="background: #f3f4f6; color: #6b7280;">Void</span>
+                                {% else %}
+                                <span class="badge" style="background: #fef3c7; color: #92400e;">Draft</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <a href="{{ url_for('invoices.admin_invoice_detail', invoice_id=inv.id) }}" class="btn btn-blue btn-sm">View</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p style="color: var(--gray-500); margin: 0;">No invoices yet. Create one from an accepted estimate in the Jobs tab.</p>
+            {% endif %}
+        </div>
+
         <!-- Danger Zone -->
         <div class="meta-card" style="border: 1px solid var(--red, #dc2626); margin-bottom: 24px;">
             <h3 style="margin-top: 0; color: var(--red, #dc2626);">Danger Zone</h3>
@@ -176,5 +268,22 @@
     </div>
     {% include '_footer.html' %}
     <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script>
+    function geocodeNewJob() {
+        var address = document.getElementById('new-job-address').value;
+        if (!address) { alert('Enter an address first.'); return; }
+        fetch('{{ url_for("api_geocode") }}?address=' + encodeURIComponent(address))
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                if (data.lat != null && data.lng != null) {
+                    document.getElementById('new-job-lat').value = data.lat;
+                    document.getElementById('new-job-lng').value = data.lng;
+                } else {
+                    alert(data.error || 'Could not geocode that address.');
+                }
+            })
+            .catch(function() { alert('Geocode request failed.'); });
+    }
+    </script>
 </body>
 </html>

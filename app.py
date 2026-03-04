@@ -635,6 +635,7 @@ from routes.estimates import estimates_bp
 from routes.finance import finance_bp
 from routes.customers import customers_bp
 from routes.task_templates import task_templates_bp
+from routes.invoices import invoices_bp
 
 app.register_blueprint(admin_bp)
 app.register_blueprint(timekeeper_bp)
@@ -647,6 +648,7 @@ app.register_blueprint(estimates_bp)
 app.register_blueprint(finance_bp)
 app.register_blueprint(customers_bp)
 app.register_blueprint(task_templates_bp)
+app.register_blueprint(invoices_bp)
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ inv.invoice_number }} — Invoices — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;">
+            <a href="{{ url_for('invoices.admin_invoices', token=inv.token) }}" class="btn btn-sm" style="background: var(--gray-200); color: var(--gray-700);">← Invoices</a>
+            <h2 style="margin: 0;">{{ inv.invoice_number }}</h2>
+            {% if inv.status == 'paid' %}
+            <span class="badge badge-active">Paid</span>
+            {% elif inv.status == 'sent' %}
+            <span class="badge" style="background: #dbeafe; color: #1d4ed8;">Sent</span>
+            {% elif inv.status == 'void' %}
+            <span class="badge" style="background: #f3f4f6; color: #6b7280;">Void</span>
+            {% else %}
+            <span class="badge" style="background: #fef3c7; color: #92400e;">Draft</span>
+            {% endif %}
+            <div style="margin-left: auto; display: flex; gap: 8px;">
+                <a href="{{ url_for('invoices.admin_invoice_pdf', invoice_id=inv.id) }}" class="btn btn-sm" style="background: var(--gray-200); color: var(--gray-700);" target="_blank">Download PDF</a>
+                {% if estimate %}
+                <a href="{{ url_for('estimates.admin_estimate_detail', estimate_id=estimate.id) }}" class="btn btn-sm btn-blue">View Estimate</a>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Invoice Info -->
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Invoice Details</h3>
+            <form method="POST" action="{{ url_for('invoices.admin_invoice_edit', invoice_id=inv.id) }}">
+                <input type="hidden" name="token" value="{{ inv.token }}">
+                <div class="form-row">
+                    <div class="form-group" style="flex: 1;">
+                        <label>Invoice #</label>
+                        <input type="text" value="{{ inv.invoice_number }}" disabled style="background: var(--gray-100); color: var(--gray-500);">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="due_date">Due Date</label>
+                        <input type="date" id="due_date" name="due_date" value="{{ inv.due_date or '' }}">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="amount_due">Amount Due ($)</label>
+                        <input type="number" id="amount_due" name="amount_due" step="0.01" value="{{ '%.2f' % (inv.amount_due or 0) }}">
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label for="notes">Notes</label>
+                    <textarea id="notes" name="notes" rows="3" style="width: 100%; resize: vertical;">{{ inv.notes or '' }}</textarea>
+                </div>
+                {% if snippets %}
+                <div style="margin-top: 20px; border-top: 1px solid var(--gray-200); padding-top: 16px;">
+                    <label for="snippet-select" style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500; color: var(--gray-700);">Message to Client</label>
+                    <select id="snippet-select" onchange="applyInvSnippet()"
+                            style="width: 100%; margin-bottom: 8px; padding: 6px 8px; border: 1px solid var(--blue); border-radius: 6px; background: var(--gray-50); font-size: 13px;">
+                        <option value="">— Select a message snippet or type below —</option>
+                        {% for s in snippets %}
+                        <option value="{{ s.name | e }}">{{ (s.name[:80] + '…') if s.name|length > 80 else s.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <textarea id="inv-client-message" name="client_message" rows="4"
+                              style="width: 100%; resize: vertical; background: #fefce8; border: 1px solid var(--gray-300); border-radius: 6px; padding: 8px; font-size: 13px;"
+                              placeholder="Message that will appear on the invoice…">{{ inv.client_message or '' }}</textarea>
+                </div>
+                {% else %}
+                <div style="margin-top: 20px; border-top: 1px solid var(--gray-200); padding-top: 16px;">
+                    <label for="inv-client-message" style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 500; color: var(--gray-700);">Message to Client</label>
+                    <textarea id="inv-client-message" name="client_message" rows="4"
+                              style="width: 100%; resize: vertical; background: #fefce8; border: 1px solid var(--gray-300); border-radius: 6px; padding: 8px; font-size: 13px;"
+                              placeholder="Message that will appear on the invoice…">{{ inv.client_message or '' }}</textarea>
+                </div>
+                {% endif %}
+                <div style="margin-top: 12px;">
+                    <button type="submit" class="btn btn-green">Save Changes</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Customer & Job -->
+        {% if customer or job %}
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Bill To / Job</h3>
+            <div class="form-row">
+                {% if customer %}
+                <div style="flex: 1;">
+                    <p style="margin: 0 0 4px; font-size: 12px; color: var(--gray-500); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Customer</p>
+                    <p style="margin: 0; font-weight: 500;">
+                        <a href="{{ url_for('customers.admin_customer_detail', customer_id=customer.id) }}">{{ customer.company_name }}</a>
+                    </p>
+                    {% if customer.customer_name %}<p style="margin: 2px 0; font-size: 13px;">{{ customer.customer_name }}</p>{% endif %}
+                    {% if customer.phone %}<p style="margin: 2px 0; font-size: 13px;">{{ customer.phone }}</p>{% endif %}
+                    {% if customer.email %}<p style="margin: 2px 0; font-size: 13px;">{{ customer.email }}</p>{% endif %}
+                </div>
+                {% endif %}
+                {% if job %}
+                <div style="flex: 1;">
+                    <p style="margin: 0 0 4px; font-size: 12px; color: var(--gray-500); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Job Site</p>
+                    <p style="margin: 0; font-weight: 500;">{{ job.job_name }}</p>
+                    {% if job.job_address %}<p style="margin: 2px 0; font-size: 13px; color: var(--gray-600);">{{ job.job_address }}</p>{% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% elif estimate %}
+        <!-- Fallback: show customer info from estimate fields -->
+        {% if estimate.customer_name or estimate.customer_company_name %}
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Bill To</h3>
+            {% if estimate.customer_company_name %}<p style="margin: 2px 0; font-weight: 500;">{{ estimate.customer_company_name }}</p>{% endif %}
+            {% if estimate.customer_name %}<p style="margin: 2px 0; font-size: 13px;">{{ estimate.customer_name }}</p>{% endif %}
+            {% if estimate.customer_phone %}<p style="margin: 2px 0; font-size: 13px;">{{ estimate.customer_phone }}</p>{% endif %}
+            {% if estimate.customer_email %}<p style="margin: 2px 0; font-size: 13px;">{{ estimate.customer_email }}</p>{% endif %}
+        </div>
+        {% endif %}
+        {% endif %}
+
+        <!-- Line Items — editable billing % and $ per line -->
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; flex-wrap: wrap; gap: 8px;">
+                <h3 style="margin: 0;">Line Items</h3>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    {% if estimate and inv.status in ('draft', 'sent') %}
+                    <form method="POST" action="{{ url_for('invoices.admin_invoice_sync_estimate', invoice_id=inv.id) }}" style="display: inline;">
+                        <input type="hidden" name="token" value="{{ inv.token }}">
+                        <button type="submit" class="btn btn-sm btn-blue" title="Pull any new line items added to the estimate since this invoice was created">↓ Pull from estimate</button>
+                    </form>
+                    {% endif %}
+                    <button type="button" class="btn btn-sm btn-green" onclick="invAddItem()">+ Add Line</button>
+                </div>
+            </div>
+            <p style="font-size: 12px; color: var(--gray-400); margin: 0 0 14px;">
+                Set the <strong>%</strong> or <strong>$</strong> to bill per line — use for progress billing.
+                <em>Remaining</em> = what's left unbilled from the estimate.
+            </p>
+
+            <div class="table-responsive" style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px;" id="inv-items-table">
+                    <thead>
+                        <tr style="border-bottom: 2px solid var(--blue);">
+                            <th style="width: 24px; padding: 4px;" data-no-sort></th>
+                            <th style="text-align: left; padding: 6px 8px; min-width: 180px;">Description</th>
+                            <th style="text-align: right; padding: 6px 8px; white-space: nowrap;">Est. Total</th>
+                            <th style="text-align: right; padding: 6px 8px; white-space: nowrap; min-width: 80px;">Bill %</th>
+                            <th style="text-align: right; padding: 6px 8px; white-space: nowrap; min-width: 100px;">Bill $</th>
+                            <th style="text-align: right; padding: 6px 8px; white-space: nowrap; color: var(--gray-500);">Remaining</th>
+                            <th style="padding: 6px 4px; width: 30px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="inv-items-body">
+                        {% for item in invoice_items %}
+                        {% set orig = item.original_total or 0 %}
+                        {% set remaining = orig - (item.billed_amount or 0) %}
+                        <tr data-item-id="{{ item.id }}" style="border-bottom: 1px solid var(--gray-200);">
+                            <td class="drag-handle" style="width:24px;text-align:center;cursor:grab;color:var(--gray-400);font-size:18px;user-select:none;">⠿</td>
+                            <td style="padding: 6px 8px;">
+                                <input type="text" class="inv-desc" value="{{ item.description }}"
+                                       style="width: 100%; border: 1px solid var(--gray-300); border-radius: 4px; padding: 4px 6px; font-size: 13px; background: var(--gray-50);"
+                                       onchange="invSaveItem(this)">
+                            </td>
+                            <td style="padding: 6px 8px; text-align: right; white-space: nowrap; color: var(--gray-500);" class="inv-orig-display">
+                                ${{ '{:,.2f}'.format(orig) }}
+                                <input type="hidden" class="inv-orig" value="{{ '%.2f' % orig }}">
+                            </td>
+                            <td style="padding: 6px 8px; text-align: right;">
+                                <input type="number" class="inv-pct" value="{{ '%.1f' % (item.billed_pct or 0) }}"
+                                       min="0" max="100" step="0.1"
+                                       style="width: 70px; text-align: right; border: 1px solid var(--blue); border-radius: 4px; padding: 4px 6px; font-size: 13px; background: var(--gray-50);"
+                                       oninput="invPctChanged(this)" onchange="invSaveItem(this)">
+                                <span style="font-size: 11px; color: var(--gray-400);">%</span>
+                            </td>
+                            <td style="padding: 6px 8px; text-align: right;">
+                                <span style="font-size: 12px; color: var(--gray-400);">$</span>
+                                <input type="number" class="inv-amt" value="{{ '%.2f' % (item.billed_amount or 0) }}"
+                                       min="0" step="0.01"
+                                       style="width: 90px; text-align: right; border: 1px solid var(--blue); border-radius: 4px; padding: 4px 6px; font-size: 13px; background: var(--gray-50);"
+                                       oninput="invAmtChanged(this)" onchange="invSaveItem(this)">
+                            </td>
+                            <td style="padding: 6px 8px; text-align: right; white-space: nowrap;" class="inv-remaining">
+                                <span style="{% if remaining > 0.005 %}color: var(--orange, #d97706); font-weight: 500;{% elif remaining < -0.005 %}color: var(--red, #dc2626);{% else %}color: var(--gray-400);{% endif %}">
+                                    ${{ '{:,.2f}'.format(remaining) }}
+                                </span>
+                            </td>
+                            <td style="padding: 6px 4px; text-align: center;">
+                                <button type="button" onclick="invDeleteItem(this)"
+                                        style="background: none; border: none; cursor: pointer; color: var(--gray-400); font-size: 16px; line-height: 1; padding: 2px 4px;"
+                                        title="Remove line">×</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr style="border-top: 2px solid var(--blue); background: var(--blue-tint, #eff6ff);">
+                            <td style="width:24px;"></td>
+                            <td style="padding: 10px 8px; font-weight: 600;">Total</td>
+                            <td style="padding: 10px 8px; text-align: right; font-weight: 600;" id="inv-total-orig">
+                                ${{ '{:,.2f}'.format(invoice_items | sum(attribute='original_total') if invoice_items else 0) }}
+                            </td>
+                            <td></td>
+                            <td style="padding: 10px 8px; text-align: right; font-weight: 700; font-size: 15px;" id="inv-total-billed">
+                                $<span id="inv-total-billed-val">{{ '{:,.2f}'.format(inv.amount_due or 0) }}</span>
+                            </td>
+                            <td style="padding: 10px 8px; text-align: right; font-weight: 600; color: var(--orange, #d97706);" id="inv-total-remaining">
+                                ${{ '{:,.2f}'.format((invoice_items | sum(attribute='original_total') - invoice_items | sum(attribute='billed_amount')) if invoice_items else 0) }}
+                            </td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+
+        <!-- Payment Summary -->
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Payment</h3>
+            {% set balance = (inv.amount_due or 0) - (inv.amount_paid or 0) %}
+            <div style="display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px;">
+                <div>
+                    <p style="margin: 0; font-size: 12px; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Invoice Total</p>
+                    <p style="margin: 4px 0 0; font-size: 20px; font-weight: 600;">$<span id="pay-summary-due">{{ '{:,.2f}'.format(inv.amount_due or 0) }}</span></p>
+                </div>
+                <div>
+                    <p style="margin: 0; font-size: 12px; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Paid</p>
+                    <p style="margin: 4px 0 0; font-size: 20px; font-weight: 600; color: var(--green, #16a34a);">${{ '{:,.2f}'.format(inv.amount_paid or 0) }}</p>
+                </div>
+                <div>
+                    <p style="margin: 0; font-size: 12px; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Balance Due</p>
+                    <p style="margin: 4px 0 0; font-size: 20px; font-weight: 700; {% if balance > 0 and inv.status not in ('paid','void') %}color: var(--red, #dc2626);{% endif %}">$<span id="pay-summary-balance">{{ '{:,.2f}'.format(balance) }}</span></p>
+                </div>
+            </div>
+
+            {% if inv.status != 'void' %}
+            <!-- Record payment -->
+            <form method="POST" action="{{ url_for('invoices.admin_invoice_record_payment', invoice_id=inv.id) }}"
+                  style="display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap;">
+                <input type="hidden" name="token" value="{{ inv.token }}">
+                <div class="form-group">
+                    <label for="amount_paid">Payment Received ($)</label>
+                    <input type="number" id="amount_paid" name="amount_paid" step="0.01" min="0"
+                           value="{{ '%.2f' % (inv.amount_paid or 0) }}" style="width: 140px;">
+                </div>
+                <button type="submit" class="btn btn-green">Record Payment</button>
+            </form>
+            {% endif %}
+        </div>
+
+        <!-- Status Controls -->
+        {% if inv.status != 'void' %}
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Update Status</h3>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                {% if inv.status == 'draft' %}
+                <form method="POST" action="{{ url_for('invoices.admin_invoice_update_status', invoice_id=inv.id) }}" style="display: inline;">
+                    <input type="hidden" name="token" value="{{ inv.token }}">
+                    <input type="hidden" name="status" value="sent">
+                    <button type="submit" class="btn btn-blue">Mark as Sent</button>
+                </form>
+                {% endif %}
+                {% if inv.status in ('draft', 'sent') %}
+                <form method="POST" action="{{ url_for('invoices.admin_invoice_update_status', invoice_id=inv.id) }}" style="display: inline;">
+                    <input type="hidden" name="token" value="{{ inv.token }}">
+                    <input type="hidden" name="status" value="paid">
+                    <button type="submit" class="btn btn-green">Mark as Paid in Full</button>
+                </form>
+                {% endif %}
+                {% if inv.status == 'paid' %}
+                <form method="POST" action="{{ url_for('invoices.admin_invoice_update_status', invoice_id=inv.id) }}" style="display: inline;">
+                    <input type="hidden" name="token" value="{{ inv.token }}">
+                    <input type="hidden" name="status" value="sent">
+                    <button type="submit" class="btn btn-sm" style="background: var(--gray-200); color: var(--gray-700);">Reopen (Mark Sent)</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Danger Zone -->
+        <div class="meta-card" style="border: 1px solid var(--red, #dc2626); margin-bottom: 24px;">
+            <h3 style="margin-top: 0; color: var(--red, #dc2626);">Danger Zone</h3>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+                {% if inv.status != 'void' %}
+                <form method="POST" action="{{ url_for('invoices.admin_invoice_update_status', invoice_id=inv.id) }}" style="display: inline;">
+                    <input type="hidden" name="token" value="{{ inv.token }}">
+                    <input type="hidden" name="status" value="void">
+                    <button type="submit" class="btn btn-orange" onclick="return confirm('Void this invoice?')">Void Invoice</button>
+                </form>
+                {% endif %}
+                <form method="POST" action="{{ url_for('invoices.admin_invoice_delete', invoice_id=inv.id) }}"
+                      style="display: inline;"
+                      onsubmit="return confirm('Delete this invoice permanently?')">
+                    <input type="hidden" name="token" value="{{ inv.token }}">
+                    <button type="submit" class="btn btn-red">Delete Invoice</button>
+                </form>
+                <span style="font-size: 12px; color: var(--gray-400);">Created {{ inv.created_at[:10] if inv.created_at else '—' }}</span>
+            </div>
+        </div>
+
+    </div>
+    {% include '_footer.html' %}
+
+    {# Hidden row template — cloned by JS, no dynamic string interpolation #}
+    <template id="inv-row-tpl">
+        <tr data-item-id="" style="border-bottom: 1px solid var(--gray-200);">
+            <td style="width:24px;"></td>
+            <td style="padding:6px 8px;">
+                <input type="text" class="inv-desc" placeholder="Description"
+                       onchange="invSaveItem(this)"
+                       style="width:100%;border:1px solid var(--gray-300);border-radius:4px;padding:4px 6px;font-size:13px;background:var(--gray-50);">
+            </td>
+            <td style="padding:6px 8px;text-align:right;" class="inv-orig-display">
+                <span style="color:var(--gray-400);font-size:12px;">—</span>
+                <input type="hidden" class="inv-orig" value="0">
+            </td>
+            <td style="padding:6px 8px;text-align:right;">
+                <input type="number" class="inv-pct" value="100" min="0" max="100" step="0.1"
+                       style="width:70px;text-align:right;border:1px solid var(--blue);border-radius:4px;padding:4px 6px;font-size:13px;background:var(--gray-50);"
+                       oninput="invPctChanged(this)" onchange="invSaveItem(this)">
+                <span style="font-size:11px;color:var(--gray-400);">%</span>
+            </td>
+            <td style="padding:6px 8px;text-align:right;">
+                <span style="font-size:12px;color:var(--gray-400);">$</span>
+                <input type="number" class="inv-amt" value="0.00" min="0" step="0.01"
+                       style="width:90px;text-align:right;border:1px solid var(--blue);border-radius:4px;padding:4px 6px;font-size:13px;background:var(--gray-50);"
+                       oninput="invAmtChanged(this)" onchange="invSaveItem(this)">
+            </td>
+            <td style="padding:6px 8px;text-align:right;" class="inv-remaining">
+                <span style="color:var(--gray-400);">$0.00</span>
+            </td>
+            <td style="padding:6px 4px;text-align:center;">
+                <button type="button" onclick="invDeleteItem(this)"
+                        style="background:none;border:none;cursor:pointer;color:var(--gray-400);font-size:16px;line-height:1;padding:2px 4px;"
+                        title="Remove line">×</button>
+            </td>
+        </tr>
+    </template>
+
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+    <script>
+    var INVOICE_ID  = {{ inv.id }};
+    var AMOUNT_PAID = {{ inv.amount_paid or 0 }};
+
+    function fmtMoney(n) {
+        return n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+
+    function invPctChanged(input) {
+        var row  = input.closest('tr');
+        var orig = parseFloat(row.querySelector('.inv-orig').value) || 0;
+        var pct  = parseFloat(input.value) || 0;
+        var amt  = orig > 0 ? Math.round(orig * pct / 100 * 100) / 100 : 0;
+        row.querySelector('.inv-amt').value = amt.toFixed(2);
+        _updateRemaining(row, orig, amt);
+    }
+
+    function invAmtChanged(input) {
+        var row  = input.closest('tr');
+        var orig = parseFloat(row.querySelector('.inv-orig').value) || 0;
+        var amt  = parseFloat(input.value) || 0;
+        var pct  = orig > 0 ? Math.round(amt / orig * 1000) / 10 : 0;
+        row.querySelector('.inv-pct').value = pct.toFixed(1);
+        _updateRemaining(row, orig, amt);
+    }
+
+    function _updateRemaining(row, orig, amt) {
+        var rem  = orig - amt;
+        var cell = row.querySelector('.inv-remaining');
+        if (!cell) return;
+        var span = cell.querySelector('span') || cell;
+        span.textContent  = '$' + fmtMoney(rem);
+        span.style.color      = rem > 0.005 ? 'var(--orange,#d97706)' : rem < -0.005 ? 'var(--red,#dc2626)' : 'var(--gray-400)';
+        span.style.fontWeight = Math.abs(rem) > 0.005 ? '500' : 'normal';
+        _recalcFooter();
+    }
+
+    function _recalcFooter() {
+        var rows = document.querySelectorAll('#inv-items-body tr[data-item-id]');
+        var totalOrig = 0, totalBilled = 0;
+        rows.forEach(function (row) {
+            totalOrig   += parseFloat(row.querySelector('.inv-orig').value) || 0;
+            totalBilled += parseFloat(row.querySelector('.inv-amt').value)  || 0;
+        });
+        var totalRem = totalOrig - totalBilled;
+
+        var billedEl = document.getElementById('inv-total-billed-val');
+        if (billedEl) billedEl.textContent = fmtMoney(totalBilled);
+
+        var remCell = document.getElementById('inv-total-remaining');
+        if (remCell) {
+            remCell.textContent  = '$' + fmtMoney(totalRem);
+            remCell.style.color  = totalRem > 0.005 ? 'var(--orange,#d97706)' : totalRem < -0.005 ? 'var(--red,#dc2626)' : 'var(--gray-400)';
+        }
+
+        var dueSp = document.getElementById('pay-summary-due');
+        var balSp = document.getElementById('pay-summary-balance');
+        if (dueSp) dueSp.textContent = fmtMoney(totalBilled);
+        if (balSp) balSp.textContent  = fmtMoney(totalBilled - AMOUNT_PAID);
+    }
+
+    function invSaveItem(el) {
+        var row    = el.closest('tr');
+        var itemId = row.getAttribute('data-item-id');
+        var payload = {
+            description:    row.querySelector('.inv-desc').value.trim(),
+            original_total: parseFloat(row.querySelector('.inv-orig').value) || 0,
+            billed_pct:     parseFloat(row.querySelector('.inv-pct').value)  || 0,
+            billed_amount:  parseFloat(row.querySelector('.inv-amt').value)  || 0
+        };
+
+        if (itemId) {
+            fetch('/admin/invoices/items/' + itemId + '/update', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+        } else {
+            fetch('/admin/invoices/' + INVOICE_ID + '/items/create', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                if (data.ok && data.item) row.setAttribute('data-item-id', String(data.item.id));
+            });
+        }
+    }
+
+    function invDeleteItem(btn) {
+        var row    = btn.closest('tr');
+        var itemId = row.getAttribute('data-item-id');
+        if (itemId) fetch('/admin/invoices/items/' + itemId + '/delete', {method: 'POST'});
+        row.remove();
+        _recalcFooter();
+    }
+
+    function invAddItem() {
+        var tpl   = document.getElementById('inv-row-tpl');
+        var clone = tpl.content.cloneNode(true);
+        document.getElementById('inv-items-body').appendChild(clone);
+        var newRow = document.querySelector('#inv-items-body tr:last-child');
+        if (newRow) newRow.querySelector('.inv-desc').focus();
+    }
+
+    function applyInvSnippet() {
+        var sel = document.getElementById('snippet-select');
+        if (!sel || !sel.value) return;
+        var ta = document.getElementById('inv-client-message');
+        if (ta) ta.value = sel.value;
+    }
+
+    Sortable.create(document.getElementById('inv-items-body'), {
+        handle: '.drag-handle',
+        animation: 150,
+        onEnd: function () {
+            document.querySelectorAll('#inv-items-body tr[data-item-id]').forEach(function (row, idx) {
+                var id = row.getAttribute('data-item-id');
+                if (!id) return;
+                fetch('/admin/invoices/items/' + id + '/update', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({sort_order: idx})
+                });
+            });
+        }
+    });
+    </script>
+</body>
+</html>

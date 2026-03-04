@@ -625,3 +625,194 @@ def generate_client_estimate_pdf(output_path, estimate, job, items, token_data, 
     _embed_photos(pdf, photos, usable_width)
 
     pdf.output(str(output_path))
+
+
+def generate_invoice_pdf(output_path, inv, estimate, items, customer, job, token_data):
+    """Generate a professional invoice PDF with line items, totals, and payment status."""
+    import config as _cfg
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    usable_width = pdf.w - pdf.l_margin - pdf.r_margin
+    company_name = token_data["company_name"] if token_data else ""
+
+    # --- Header: Logo + Company + Invoice Info ---
+    logo_placed = False
+    if token_data and token_data.get("logo_file"):
+        logo_path = Path(_cfg.LOGOS_DIR) / token_data["logo_file"]
+        if logo_path.exists():
+            try:
+                pdf.image(str(logo_path), x=pdf.l_margin, y=pdf.get_y(), w=40)
+                logo_placed = True
+            except Exception:
+                pass
+
+    right_x = pdf.l_margin + usable_width - 80
+    top_y = pdf.get_y()
+
+    pdf.set_xy(right_x, top_y)
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.cell(80, 10, "INVOICE", align="R", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(80, 80, 80)
+    pdf.set_x(right_x)
+    pdf.cell(80, 5, f"Invoice #{inv['invoice_number']}", align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(right_x)
+    pdf.cell(80, 5, f"Date: {inv['created_at'][:10]}", align="R", new_x="LMARGIN", new_y="NEXT")
+    if inv.get("due_date"):
+        pdf.set_x(right_x)
+        pdf.cell(80, 5, f"Due: {inv['due_date']}", align="R", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(right_x)
+    pdf.cell(80, 5, f"Status: {inv['status'].upper()}", align="R", new_x="LMARGIN", new_y="NEXT")
+
+    if logo_placed:
+        pdf.set_y(top_y + 42)
+    else:
+        pdf.set_y(top_y)
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(usable_width / 2, 8, company_name, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_y(max(pdf.get_y(), top_y + 30))
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(4)
+
+    # --- Divider ---
+    y_div = pdf.get_y()
+    pdf.set_draw_color(200, 200, 200)
+    pdf.line(pdf.l_margin, y_div, pdf.l_margin + usable_width, y_div)
+    pdf.ln(4)
+
+    # --- Bill To + Job ---
+    col_w = usable_width / 2
+    start_y = pdf.get_y()
+
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(80, 80, 80)
+    pdf.cell(col_w, 6, "BILL TO:", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(0, 0, 0)
+    if customer:
+        pdf.cell(col_w, 5, customer.get("company_name", ""), new_x="LMARGIN", new_y="NEXT")
+        if customer.get("customer_name"):
+            pdf.cell(col_w, 5, customer["customer_name"], new_x="LMARGIN", new_y="NEXT")
+        if customer.get("phone"):
+            pdf.cell(col_w, 5, customer["phone"], new_x="LMARGIN", new_y="NEXT")
+        if customer.get("email"):
+            pdf.cell(col_w, 5, customer["email"], new_x="LMARGIN", new_y="NEXT")
+    elif estimate:
+        if estimate.get("customer_company_name"):
+            pdf.cell(col_w, 5, estimate["customer_company_name"], new_x="LMARGIN", new_y="NEXT")
+        if estimate.get("customer_name"):
+            pdf.cell(col_w, 5, estimate["customer_name"], new_x="LMARGIN", new_y="NEXT")
+        if estimate.get("customer_phone"):
+            pdf.cell(col_w, 5, estimate["customer_phone"], new_x="LMARGIN", new_y="NEXT")
+        if estimate.get("customer_email"):
+            pdf.cell(col_w, 5, estimate["customer_email"], new_x="LMARGIN", new_y="NEXT")
+
+    left_end_y = pdf.get_y()
+
+    if job:
+        pdf.set_xy(pdf.l_margin + col_w, start_y)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(80, 80, 80)
+        pdf.cell(col_w, 6, "JOB:", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_x(pdf.l_margin + col_w)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(col_w, 5, job.get("job_name", ""), new_x="LMARGIN", new_y="NEXT")
+        if job.get("job_address"):
+            pdf.set_x(pdf.l_margin + col_w)
+            pdf.cell(col_w, 5, job["job_address"], new_x="LMARGIN", new_y="NEXT")
+
+    pdf.set_y(max(left_end_y, pdf.get_y()) + 6)
+
+    # --- Divider ---
+    y_div = pdf.get_y()
+    pdf.line(pdf.l_margin, y_div, pdf.l_margin + usable_width, y_div)
+    pdf.ln(4)
+
+    # --- Line Items ---
+    if items:
+        col_num = 12
+        col_desc = usable_width - 12 - 20 - 30 - 30
+        col_qty = 20
+        col_price = 30
+        col_total = 30
+        row_h = 7
+
+        pdf.set_fill_color(50, 50, 70)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(col_num, row_h, "#", border=1, fill=True, align="C")
+        pdf.cell(col_desc, row_h, "Description", border=1, fill=True)
+        pdf.cell(col_qty, row_h, "Qty", border=1, fill=True, align="C")
+        pdf.cell(col_price, row_h, "Price", border=1, fill=True, align="R")
+        pdf.cell(col_total, row_h, "Total", border=1, fill=True, align="R",
+                 new_x="LMARGIN", new_y="NEXT")
+
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Helvetica", "", 9)
+        for i, item in enumerate(items, 1):
+            fill = (i % 2 == 0)
+            if fill:
+                pdf.set_fill_color(245, 245, 250)
+            row_total = round(float(item.get("quantity", 0) or 0) * float(item.get("unit_price", 0) or 0), 2)
+            pdf.cell(col_num, row_h, str(i), border=1, fill=fill, align="C")
+            pdf.cell(col_desc, row_h, str(item.get("description", ""))[:60], border=1, fill=fill)
+            pdf.cell(col_qty, row_h, str(item.get("quantity", 0)), border=1, fill=fill, align="C")
+            pdf.cell(col_price, row_h, f"${item.get('unit_price', 0):,.2f}", border=1, fill=fill, align="R")
+            pdf.cell(col_total, row_h, f"${row_total:,.2f}", border=1, fill=fill, align="R",
+                     new_x="LMARGIN", new_y="NEXT")
+
+    pdf.ln(4)
+
+    # --- Totals ---
+    amount_due = float(inv.get("amount_due", 0) or 0)
+    amount_paid = float(inv.get("amount_paid", 0) or 0)
+    balance = amount_due - amount_paid
+
+    totals_x = pdf.l_margin + usable_width - 80
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_x(totals_x)
+    pdf.cell(40, 6, "Invoice Total:", align="R")
+    pdf.cell(40, 6, f"${amount_due:,.2f}", align="R", new_x="LMARGIN", new_y="NEXT")
+
+    if amount_paid > 0:
+        pdf.set_x(totals_x)
+        pdf.cell(40, 6, "Amount Paid:", align="R")
+        pdf.cell(40, 6, f"${amount_paid:,.2f}", align="R", new_x="LMARGIN", new_y="NEXT")
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_x(totals_x)
+    pdf.cell(40, 8, "BALANCE DUE:", align="R")
+    pdf.cell(40, 8, f"${balance:,.2f}", align="R", new_x="LMARGIN", new_y="NEXT")
+
+    # --- Notes ---
+    if inv.get("notes"):
+        pdf.ln(8)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(80, 80, 80)
+        pdf.cell(0, 6, "Notes:", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.multi_cell(usable_width, 4.5, inv["notes"])
+
+    # --- Message to Client ---
+    if inv.get("client_message"):
+        pdf.ln(8)
+        pdf.set_draw_color(200, 200, 200)
+        y_msg = pdf.get_y()
+        pdf.line(pdf.l_margin, y_msg, pdf.l_margin + usable_width, y_msg)
+        pdf.ln(6)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(80, 80, 80)
+        pdf.cell(0, 6, "Message:", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(0, 0, 0)
+        pdf.multi_cell(usable_width, 4.5, inv["client_message"])
+
+    pdf.output(str(output_path))

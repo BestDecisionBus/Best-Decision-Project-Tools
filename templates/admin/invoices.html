@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoices — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Invoices</h2>
+
+        {% if current_user.is_bdb or tokens|length > 1 %}
+        <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+            <label for="token-select">Company</label>
+            <select id="token-select" onchange="window.location.href='?token=' + this.value">
+                {% if current_user.is_bdb %}<option value="">All Companies</option>{% endif %}
+                {% for t in tokens %}
+                <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% else %}
+            {% if selected_token %}
+            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
+            {% endif %}
+        {% endif %}
+
+        {% if selected_token %}
+        <!-- Status filter -->
+        <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
+            {% set statuses = [('', 'All'), ('draft', 'Draft'), ('sent', 'Sent'), ('paid', 'Paid'), ('void', 'Void')] %}
+            {% for val, label in statuses %}
+            <a href="?token={{ selected_token.token }}&status={{ val }}"
+               class="btn btn-sm {% if status_filter == val %}btn-blue{% else %}""{% endif %}"
+               style="{% if status_filter != val %}background: var(--gray-100); color: var(--gray-700); border: 1px solid var(--gray-300);{% endif %}">
+                {{ label }}
+            </a>
+            {% endfor %}
+            <span style="margin-left: auto; font-size: 13px; color: var(--gray-400);">Create invoices from accepted estimates via the Jobs tab.</span>
+        </div>
+
+        {% if invoices %}
+        <div class="table-wrap">
+            <table class="resizable">
+                <thead>
+                    <tr>
+                        <th>Invoice #</th>
+                        <th>Customer</th>
+                        <th>Job</th>
+                        <th>Date</th>
+                        <th>Due Date</th>
+                        <th style="text-align: right;">Amount Due</th>
+                        <th style="text-align: right;">Paid</th>
+                        <th style="text-align: right;">Balance</th>
+                        <th>Status</th>
+                        <th data-no-sort>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for inv in invoices %}
+                    {% set balance = (inv.amount_due or 0) - (inv.amount_paid or 0) %}
+                    <tr>
+                        <td><a href="{{ url_for('invoices.admin_invoice_detail', invoice_id=inv.id) }}" style="font-weight: 500;">{{ inv.invoice_number }}</a></td>
+                        <td>{{ inv.company_name or '—' }}</td>
+                        <td>{{ inv.job_name or '—' }}</td>
+                        <td style="white-space: nowrap;">{{ inv.created_at[:10] if inv.created_at else '—' }}</td>
+                        <td style="white-space: nowrap;">{{ inv.due_date or '—' }}</td>
+                        <td style="text-align: right; white-space: nowrap;">${{ '{:,.2f}'.format(inv.amount_due or 0) }}</td>
+                        <td style="text-align: right; white-space: nowrap;">
+                            {% if inv.amount_paid %}${{ '{:,.2f}'.format(inv.amount_paid) }}{% else %}—{% endif %}
+                        </td>
+                        <td style="text-align: right; white-space: nowrap; {% if balance > 0 and inv.status not in ('paid','void') %}color: var(--red, #dc2626); font-weight: 500;{% endif %}">
+                            ${{ '{:,.2f}'.format(balance) }}
+                        </td>
+                        <td>
+                            {% if inv.status == 'paid' %}
+                            <span class="badge badge-active">Paid</span>
+                            {% elif inv.status == 'sent' %}
+                            <span class="badge" style="background: #dbeafe; color: #1d4ed8;">Sent</span>
+                            {% elif inv.status == 'void' %}
+                            <span class="badge" style="background: #f3f4f6; color: #6b7280;">Void</span>
+                            {% else %}
+                            <span class="badge" style="background: #fef3c7; color: #92400e;">Draft</span>
+                            {% endif %}
+                        </td>
+                        <td style="display: flex; gap: 6px;">
+                            <a href="{{ url_for('invoices.admin_invoice_detail', invoice_id=inv.id) }}" class="btn btn-blue btn-sm">View</a>
+                            <a href="{{ url_for('invoices.admin_invoice_pdf', invoice_id=inv.id) }}" class="btn btn-sm" style="background: var(--gray-200); color: var(--gray-700);" target="_blank">PDF</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500);">No invoices yet. Open an accepted estimate and click "Create Invoice".</p>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>
