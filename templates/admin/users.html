@@ -67,11 +67,13 @@
                     <tr>
                         <td><strong>{{ u.username }}</strong></td>
                         <td>
-                            {% if u.role == 'admin' %}
-                            <span class="badge badge-active">Admin</span>
-                            {% else %}
-                            <span class="badge badge-processing">Viewer</span>
-                            {% endif %}
+                            <form method="POST" action="{{ url_for('admin.admin_user_change_role', user_id=u.id) }}" style="display: flex; gap: 4px; align-items: center;">
+                                <select name="role" style="font-size: 12px; padding: 2px 6px;">
+                                    <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Admin</option>
+                                    <option value="viewer" {% if u.role == 'viewer' %}selected{% endif %}>Viewer</option>
+                                </select>
+                                <button type="submit" class="btn btn-blue btn-sm" style="font-size: 11px; padding: 2px 8px;">Save</button>
+                            </form>
                         </td>
                         <td>
                             <form method="POST" action="{{ url_for('admin.admin_user_change_password', user_id=u.id) }}" style="display: flex; gap: 6px; align-items: center;">

@@ -166,7 +166,16 @@
                                     {{ u.username }}
                                     {% if u.is_extra %}<span style="font-size: 10px; color: var(--gray-400);">(extra)</span>{% endif %}
                                 </td>
-                                <td style="padding: 4px 8px;"><span class="badge badge-active" style="font-size: 10px;">{{ u.role }}</span></td>
+                                <td style="padding: 4px 8px;">
+                                    <form method="POST" action="{{ url_for('admin.admin_company_user_change_role', user_id=u.id) }}" style="display: flex; gap: 3px; align-items: center;">
+                                        <select name="role" style="font-size: 11px; padding: 1px 4px;">
+                                            <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Admin</option>
+                                            <option value="viewer" {% if u.role == 'viewer' %}selected{% endif %}>Viewer</option>
+                                            <option value="scheduler" {% if u.role == 'scheduler' %}selected{% endif %}>Scheduler</option>
+                                        </select>
+                                        <button type="submit" class="btn btn-blue btn-sm" style="font-size: 10px; padding: 1px 6px;">Save</button>
+                                    </form>
+                                </td>
                                 <td style="padding: 4px 8px;">
                                     {% set extras = user_extra_tokens.get(u.id, []) %}
                                     {% if extras %}

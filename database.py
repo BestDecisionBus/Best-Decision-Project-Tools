@@ -814,6 +814,41 @@ def update_user_password(user_id, new_password):
     conn.close()
 
 
+def update_user_role(user_id, role):
+    """Update role for any user. Returns False if it would demote the last BDB admin."""
+    valid = ("admin", "viewer", "scheduler")
+    if role not in valid:
+        return False
+    conn = get_db()
+    user = conn.execute("SELECT role, token FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        conn.close()
+        return False
+    # Prevent demoting the last BDB admin
+    if user["token"] is None and user["role"] == "admin" and role != "admin":
+        admin_count = conn.execute(
+            "SELECT COUNT(*) as cnt FROM users WHERE token IS NULL AND role = 'admin'"
+        ).fetchone()["cnt"]
+        if admin_count <= 1:
+            conn.close()
+            return False
+    conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_primary_users_for_token(token_str):
+    """Return users whose primary token is token_str (excludes extra-access users)."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, username, role FROM users WHERE token = ? ORDER BY username ASC",
+        (token_str,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def delete_bdb_user(user_id):
     """Delete a BDB user (token IS NULL). Refuses to delete the last admin."""
     conn = get_db()
@@ -4163,8 +4198,8 @@ def create_project_task(estimate_id: int, job_id: int, name: str, token_str: str
     """Create a project-specific task linked to an estimate."""
     conn = get_db()
     cur = conn.execute(
-        "INSERT INTO job_tasks (estimate_id, job_id, name, token, is_active, sort_order) "
-        "VALUES (?, ?, ?, ?, 1, 0)",
+        "INSERT INTO job_tasks (estimate_id, job_id, name, token, is_active, sort_order, created_at) "
+        "VALUES (?, ?, ?, ?, 1, 0, datetime('now'))",
         (estimate_id, job_id, name.strip(), token_str),
     )
     new_id = cur.lastrowid

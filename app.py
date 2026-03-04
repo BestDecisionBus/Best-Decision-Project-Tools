@@ -479,8 +479,10 @@ def company_home(token_str):
         # Fallback: try admin user credentials
         user = database.verify_user(username, password)
         if user:
-            # Company admin: token must match. BDB admin: token is None, allow any.
-            if user["token"] == token_str or user["token"] is None:
+            # BDB admin: token is None, allow any company.
+            # Company admin: token must be in their list of accessible companies (primary or extra).
+            user_token_set = {t["token"] for t in database.get_tokens_for_user(user["id"])} if user["token"] else set()
+            if user["token"] is None or token_str in user_token_set:
                 employee = database.get_or_create_admin_employee(
                     user["username"], user["password_hash"], token_str
                 )

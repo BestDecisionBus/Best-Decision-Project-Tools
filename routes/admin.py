@@ -213,6 +213,21 @@ def admin_user_change_password(user_id):
     return redirect(url_for("admin.admin_users"))
 
 
+@admin_bp.route("/admin/users/<int:user_id>/change-role", methods=["POST"])
+@login_required
+def admin_user_change_role(user_id):
+    if not current_user.is_bdb or not current_user.is_admin:
+        abort(403)
+    role = request.form.get("role", "").strip()
+    if role not in ("admin", "viewer"):
+        flash("Invalid role.", "error")
+    elif not database.update_user_role(user_id, role):
+        flash("Cannot demote the last BDB admin.", "error")
+    else:
+        flash("Role updated.", "success")
+    return redirect(url_for("admin.admin_users"))
+
+
 @admin_bp.route("/admin/users/<int:user_id>/delete", methods=["POST"])
 @login_required
 def admin_user_delete(user_id):
@@ -472,6 +487,25 @@ def admin_company_user_create(token_id):
     return redirect(url_for("admin.admin_tokens"))
 
 
+@admin_bp.route("/admin/company-users/<int:user_id>/change-role", methods=["POST"])
+@login_required
+def admin_company_user_change_role(user_id):
+    if not current_user.is_bdb or not current_user.is_admin:
+        abort(403)
+    user = database.get_user_by_id(user_id)
+    if not user or user.get("token") is None:
+        flash("Cannot change role of BDB users this way.", "error")
+        return redirect(url_for("admin.admin_tokens"))
+    role = request.form.get("role", "").strip()
+    if role not in ("admin", "viewer", "scheduler"):
+        flash("Invalid role.", "error")
+    elif not database.update_user_role(user_id, role):
+        flash("Could not update role.", "error")
+    else:
+        flash(f"Role updated for '{user['username']}'.", "success")
+    return redirect(url_for("admin.admin_tokens"))
+
+
 @admin_bp.route("/admin/company-users/<int:user_id>/delete", methods=["POST"])
 @login_required
 def admin_company_user_delete(user_id):
@@ -544,6 +578,49 @@ def admin_company_user_remove_token(user_id):
         name = token_data["company_name"] if token_data else token_str
         flash(f"Removed access to {name} from '{user['username']}'.", "success")
     return redirect(url_for("admin.admin_tokens"))
+
+
+# ---------------------------------------------------------------------------
+# Company Admin — My Users (non-BDB company admins manage their own users)
+# ---------------------------------------------------------------------------
+
+@admin_bp.route("/admin/my-users")
+@login_required
+def admin_my_users():
+    if current_user.is_bdb or not current_user.is_admin:
+        abort(403)
+    h = _helpers()
+    tokens = h._get_tokens_for_user()
+    token_str, selected_token = h._get_selected_token(tokens)
+    users = database.get_primary_users_for_token(token_str) if token_str else []
+    return render_template(
+        "admin/my_users.html",
+        tokens=tokens,
+        selected_token=selected_token,
+        users=users,
+    )
+
+
+@admin_bp.route("/admin/my-users/<int:user_id>/change-role", methods=["POST"])
+@login_required
+def admin_my_user_change_role(user_id):
+    if current_user.is_bdb or not current_user.is_admin:
+        abort(403)
+    h = _helpers()
+    tokens = h._get_tokens_for_user()
+    token_str, _ = h._get_selected_token(tokens)
+    # Verify the target user belongs to this company
+    user = database.get_user_by_id(user_id)
+    if not user or user.get("token") != token_str:
+        abort(403)
+    role = request.form.get("role", "").strip()
+    if role not in ("admin", "viewer", "scheduler"):
+        flash("Invalid role.", "error")
+    elif not database.update_user_role(user_id, role):
+        flash("Could not update role.", "error")
+    else:
+        flash(f"Role updated for '{user['username']}'.", "success")
+    return redirect(url_for("admin.admin_my_users"))
 
 
 # ---------------------------------------------------------------------------

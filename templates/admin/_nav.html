@@ -15,7 +15,7 @@
 {% set g_receipts = ('receipt' in ep) %}
 {% set g_finance = ('finance' in ep) %}
 {% set g_lists = ('categor' in ep or 'common_task' in ep or 'message_snippet' in ep or 'product' in ep or 'shift_type' in ep or 'task_template' in ep or 'task_completion' in ep) %}
-{% set g_admin = ('audit' in ep or 'token' in ep or 'admin.admin_user' in ep or 'setting' in ep) %}
+{% set g_admin = ('audit' in ep or 'token' in ep or 'admin.admin_user' in ep or 'admin.admin_my_user' in ep or 'setting' in ep) %}
 {% set g_guide = ('guide' in ep) %}
 
 {# ---- URL helper ---- #}
@@ -121,6 +121,8 @@
     {% if current_user.is_admin %}
     <a href="{{ url_for('admin.admin_users') }}" {% if 'admin.admin_user' in ep %}class="active"{% endif %}>Users</a>
     {% endif %}
+    {% elif current_user.is_admin %}
+    <a href="{{ turl('admin.admin_my_users') }}" {% if 'admin.admin_my_user' in ep %}class="active"{% endif %}>Users</a>
     {% endif %}
     <a href="{{ turl('admin.admin_settings') }}" {% if 'setting' in ep %}class="active"{% endif %}>Settings</a>
 </nav>

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Users — BDB Tools</title>
+    <link rel="stylesheet" href="/static/css/style.css?v={{ cache_bust }}">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest-admin.json">
+    <meta name="theme-color" content="#ffffff">
+</head>
+<body>
+    <div class="admin-layout">
+        {% include 'admin/_nav.html' %}
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endwith %}
+
+        <h2>Users</h2>
+        <p style="color: var(--gray-500); font-size: 14px; margin-bottom: 16px;">
+            Manage access levels for users in your company.
+        </p>
+
+        {% if users %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Role</th>
+                        <th>Change Role</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td><strong>{{ u.username }}</strong>{% if u.id == current_user.id %} <span style="font-size: 11px; color: var(--gray-400);">(you)</span>{% endif %}</td>
+                        <td>
+                            {% if u.role == 'admin' %}
+                            <span class="badge badge-active">Admin</span>
+                            {% elif u.role == 'scheduler' %}
+                            <span class="badge badge-processing">Scheduler</span>
+                            {% else %}
+                            <span class="badge badge-inactive">Viewer</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <form method="POST" action="{{ url_for('admin.admin_my_user_change_role', user_id=u.id) }}" style="display: flex; gap: 6px; align-items: center;">
+                                <select name="role" style="font-size: 13px; padding: 4px 8px;">
+                                    <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>Admin</option>
+                                    <option value="viewer" {% if u.role == 'viewer' %}selected{% endif %}>Viewer</option>
+                                    <option value="scheduler" {% if u.role == 'scheduler' %}selected{% endif %}>Scheduler</option>
+                                </select>
+                                <button type="submit" class="btn btn-blue btn-sm">Save</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--gray-500);">No users found for this company.</p>
+        {% endif %}
+    </div>
+    {% include '_footer.html' %}
+    <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
+</body>
+</html>
