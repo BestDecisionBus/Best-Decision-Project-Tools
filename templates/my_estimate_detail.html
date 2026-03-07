@@ -78,19 +78,24 @@
             </div>
             <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
                 {% for p in photos %}
-                <div id="photo-tile-{{ p.id }}" style="display: flex; flex-direction: column; gap: 4px;">
+                <div id="photo-tile-{{ p.id }}" class="photo-tile photo-tile-selected"
+                     style="display: flex; flex-direction: column; gap: 4px; cursor: pointer; border-radius: 8px;"
+                     onclick="togglePhotoTile(this, {{ p.id }})">
                     <div style="position: relative; height: 90px;">
-                        <label style="position: absolute; top: 4px; left: 4px; z-index: 1; background: rgba(255,255,255,0.9); border-radius: 4px; padding: 2px 4px; cursor: pointer;">
-                            <input type="checkbox" class="photo-select" value="{{ p.id }}" checked>
-                        </label>
-                        <button type="button" onclick="deletePhoto({{ p.id }})"
-                                style="position:absolute; top:4px; right:4px; z-index:1; background:rgba(220,38,38,0.85); border:none; border-radius:4px; color:#fff; font-size:13px; line-height:1; padding:3px 6px; cursor:pointer;">✕</button>
+                        <input type="checkbox" class="photo-select" value="{{ p.id }}" checked style="display:none;">
+                        <div class="photo-select-overlay" style="position:absolute; inset:0; border-radius:6px; z-index:1; pointer-events:none; border:3px solid var(--blue); background:rgba(37,99,235,0.18);">
+                            <div style="position:absolute; top:3px; left:3px; background:var(--blue); color:#fff; border-radius:50%; width:20px; height:20px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; line-height:1;">✓</div>
+                        </div>
+                        <button type="button" onclick="event.stopPropagation(); deletePhoto({{ p.id }})"
+                                style="position:absolute; top:4px; right:4px; z-index:2; background:rgba(220,38,38,0.85); border:none; border-radius:4px; color:#fff; font-size:13px; line-height:1; padding:3px 6px; cursor:pointer;">✕</button>
+                        <button type="button" onclick="event.stopPropagation(); window.open('/api/job-photos/{{ p.id }}', '_blank')"
+                                style="position:absolute; bottom:4px; right:4px; z-index:2; background:rgba(0,0,0,0.5); border:none; border-radius:4px; color:#fff; font-size:11px; padding:2px 5px; cursor:pointer;">&#128269;</button>
                         <img src="/api/job-photos/{{ p.id }}?thumb=1" alt="Photo"
-                             style="width: 100%; height: 100%; object-fit: cover; border-radius: 6px; border: 1px solid var(--gray-200); cursor: pointer;"
-                             onclick="window.open('/api/job-photos/{{ p.id }}', '_blank')">
+                             style="width: 100%; height: 100%; object-fit: cover; border-radius: 6px;">
                     </div>
                     <input type="text" value="{{ p.caption or '' }}" placeholder="Caption..."
                            style="width: 100%; padding: 4px 6px; font-size: 11px; border: 1px solid var(--gray-300); border-radius: 4px; box-sizing: border-box;"
+                           onclick="event.stopPropagation()"
                            oninput="scheduleCaption({{ p.id }}, this.value)">
                 </div>
                 {% endfor %}
@@ -279,6 +284,10 @@
         <button type="button" onclick="downloadScopePDF()" class="btn" style="width: 100%; padding: 14px; font-size: 16px; background: var(--purple); color: #fff; margin-top: 10px; font-weight: 600;">
             Export Scope of Work PDF
         </button>
+        <button type="button" id="btn-push-folder" onclick="pushToJobFolder()" class="btn" style="width: 100%; padding: 14px; font-size: 16px; background: #0d9488; color: #fff; margin-top: 8px; font-weight: 600;">
+            Push Scope of Work to Job Files Folder
+        </button>
+        <div id="push-folder-status" style="display:none; text-align:center; margin-top:6px; font-size:14px;"></div>
         <button type="button" onclick="viewClientPDF()" class="btn btn-blue" style="width: 100%; padding: 14px; font-size: 16px; margin-top: 8px; font-weight: 600;">
             View Client Estimate
         </button>
@@ -764,8 +773,27 @@
         return { ids: ids, total: checks.length };
     }
 
+    function _updatePhotoTileVisual(tileEl, selected) {
+        var overlay = tileEl.querySelector('.photo-select-overlay');
+        if (!overlay) return;
+        overlay.style.display = selected ? '' : 'none';
+    }
+
+    function togglePhotoTile(tileEl, photoId) {
+        var cb = tileEl.querySelector('.photo-select');
+        if (!cb) return;
+        cb.checked = !cb.checked;
+        _updatePhotoTileVisual(tileEl, cb.checked);
+    }
+
     function toggleAllPhotos(checked) {
-        document.querySelectorAll('.photo-select').forEach(function(cb) { cb.checked = checked; });
+        document.querySelectorAll('.photo-tile').forEach(function(tile) {
+            var cb = tile.querySelector('.photo-select');
+            if (cb) {
+                cb.checked = checked;
+                _updatePhotoTileVisual(tile, checked);
+            }
+        });
     }
 
     // ---- Delete photo ----
@@ -832,34 +860,54 @@
 
                     // Build a selectable thumbnail tile matching the existing photos grid
                     var outer = document.createElement('div');
-                    outer.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+                    outer.className = 'photo-tile photo-tile-selected';
+                    outer.style.cssText = 'display:flex; flex-direction:column; gap:4px; cursor:pointer; border-radius:8px;';
+                    (function(pid) {
+                        outer.onclick = function() { togglePhotoTile(outer, pid); };
+                    })(data.photo_id);
 
                     var wrap = document.createElement('div');
                     wrap.style.cssText = 'position:relative; height:90px;';
 
-                    var lbl = document.createElement('label');
-                    lbl.style.cssText = 'position:absolute; top:4px; left:4px; z-index:1; background:rgba(255,255,255,0.9); border-radius:4px; padding:2px 4px; cursor:pointer;';
                     var cb = document.createElement('input');
                     cb.type = 'checkbox';
                     cb.className = 'photo-select';
                     cb.value = data.photo_id;
                     cb.checked = true;
-                    lbl.appendChild(cb);
-                    wrap.appendChild(lbl);
+                    cb.style.display = 'none';
+                    wrap.appendChild(cb);
+
+                    var overlay = document.createElement('div');
+                    overlay.className = 'photo-select-overlay';
+                    overlay.style.cssText = 'position:absolute; inset:0; border-radius:6px; z-index:1; pointer-events:none; border:3px solid var(--blue); background:rgba(37,99,235,0.18);';
+                    var checkBadge = document.createElement('div');
+                    checkBadge.style.cssText = 'position:absolute; top:3px; left:3px; background:var(--blue); color:#fff; border-radius:50%; width:20px; height:20px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; line-height:1;';
+                    checkBadge.textContent = '\u2713';
+                    overlay.appendChild(checkBadge);
+                    wrap.appendChild(overlay);
 
                     var delBtn = document.createElement('button');
                     delBtn.type = 'button';
-                    delBtn.style.cssText = 'position:absolute; top:4px; right:4px; z-index:1; background:rgba(220,38,38,0.85); border:none; border-radius:4px; color:#fff; font-size:13px; line-height:1; padding:3px 6px; cursor:pointer;';
-                    delBtn.textContent = '✕';
+                    delBtn.style.cssText = 'position:absolute; top:4px; right:4px; z-index:2; background:rgba(220,38,38,0.85); border:none; border-radius:4px; color:#fff; font-size:13px; line-height:1; padding:3px 6px; cursor:pointer;';
+                    delBtn.textContent = '\u2715';
                     (function(pid, outerEl) {
-                        delBtn.onclick = function() { deletePhoto(pid, outerEl); };
+                        delBtn.onclick = function(e) { e.stopPropagation(); deletePhoto(pid, outerEl); };
                     })(data.photo_id, outer);
                     wrap.appendChild(delBtn);
 
+                    var viewBtn = document.createElement('button');
+                    viewBtn.type = 'button';
+                    viewBtn.style.cssText = 'position:absolute; bottom:4px; right:4px; z-index:2; background:rgba(0,0,0,0.5); border:none; border-radius:4px; color:#fff; font-size:11px; padding:2px 5px; cursor:pointer;';
+                    viewBtn.textContent = '\uD83D\uDD0D';
+                    (function(pid) {
+                        viewBtn.onclick = function(e) { e.stopPropagation(); window.open('/api/job-photos/' + pid, '_blank'); };
+                    })(data.photo_id);
+                    wrap.appendChild(viewBtn);
+
                     var img = document.createElement('img');
                     img.src = '/api/job-photos/' + data.photo_id + '?thumb=1';
-                    img.style.cssText = 'width:100%; height:100%; object-fit:cover; border-radius:6px; border:1px solid var(--gray-200); cursor:pointer;';
-                    img.onclick = function() { window.open('/api/job-photos/' + data.photo_id, '_blank'); };
+                    img.alt = 'Photo';
+                    img.style.cssText = 'width:100%; height:100%; object-fit:cover; border-radius:6px;';
                     wrap.appendChild(img);
                     outer.appendChild(wrap);
 
@@ -882,6 +930,47 @@
                 statusEl.style.color = 'var(--red)';
                 statusEl.textContent = 'Error: ' + err.message;
             });
+    }
+
+    // ---- Push scope of work to job files folder ----
+    function pushToJobFolder() {
+        var sel = _selectedPhotoIds();
+        var btn = document.getElementById('btn-push-folder');
+        var statusEl = document.getElementById('push-folder-status');
+        if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+        statusEl.style.display = '';
+        statusEl.style.color = 'var(--blue)';
+        statusEl.textContent = 'Saving to job files folder...';
+
+        var body = {token: TOKEN};
+        if (sel.ids.length > 0 && sel.ids.length < sel.total) {
+            body.photos = sel.ids.join(',');
+        } else if (sel.ids.length === 0) {
+            body.photos = '';
+        }
+
+        fetch('/my-estimates/' + ESTIMATE_ID + '/send-to-job-folder', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                statusEl.style.color = 'var(--green)';
+                statusEl.textContent = 'Scope of Work saved to job files folder!';
+            } else {
+                statusEl.style.color = 'var(--red)';
+                statusEl.textContent = data.error || 'Failed to save.';
+            }
+            if (btn) { btn.disabled = false; btn.textContent = 'Push Scope of Work to Job Files Folder'; }
+            setTimeout(function() { statusEl.style.display = 'none'; }, 5000);
+        })
+        .catch(function() {
+            statusEl.style.color = 'var(--red)';
+            statusEl.textContent = 'Network error. Please try again.';
+            if (btn) { btn.disabled = false; btn.textContent = 'Push Scope of Work to Job Files Folder'; }
+        });
     }
 
     // ---- Voice memo append recording ----

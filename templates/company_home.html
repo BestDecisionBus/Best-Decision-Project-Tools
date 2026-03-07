@@ -56,9 +56,14 @@
                     <span class="tool-icon">&#128248;</span>
                     <span class="tool-label">Job Photos / Files</span>
                 </a>
-                <a href="/photo-library?token={{ token.token }}" style="display: block; text-align: center; padding: 8px; font-size: 13px; font-weight: 600; color: var(--purple); background: #f3f0ff; border: 2px solid var(--purple); border-top: 1px solid var(--purple); border-radius: 0 0 12px 12px; text-decoration: none;">
-                    View Files
-                </a>
+                <div style="display: flex; gap: 0;">
+                    <a href="/photo-library?token={{ token.token }}" style="display: block; text-align: center; padding: 8px; flex: 1; font-size: 13px; font-weight: 600; color: var(--purple); background: #f3f0ff; border: 2px solid var(--purple); border-top: 1px solid var(--purple); border-right: 1px solid var(--purple); border-radius: 0 0 0 12px; text-decoration: none;">
+                        View Photos
+                    </a>
+                    <a href="/job-files?token={{ token.token }}" style="display: block; text-align: center; padding: 8px; flex: 1; font-size: 13px; font-weight: 600; color: var(--purple); background: #f3f0ff; border: 2px solid var(--purple); border-top: 1px solid var(--purple); border-left: none; border-radius: 0 0 12px 0; text-decoration: none;">
+                        View Files
+                    </a>
+                </div>
             </div>
             {% endif %}
             {% endif %}

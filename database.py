@@ -570,6 +570,15 @@ def init_db():
 
     _add_column_if_missing(conn, "job_tasks",  "estimate_id",          "INTEGER DEFAULT NULL")
     _add_column_if_missing(conn, "schedules",  "include_project_tasks","INTEGER DEFAULT 0")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS rate_limits (
+            key    TEXT    NOT NULL,
+            bucket INTEGER NOT NULL,
+            count  INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (key, bucket)
+        )
+    """)
     conn.commit()
 
     # Migrate legacy category_1_id / category_2_id into junction table
@@ -592,6 +601,51 @@ def _add_column_if_missing(conn, table, column, col_type):
     cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
     if column not in cols:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting (shared across all Gunicorn workers via SQLite)
+# ---------------------------------------------------------------------------
+
+def check_rate_limit(key: str, max_requests: int, window_minutes: int) -> bool:
+    """Return True if *key* has exceeded *max_requests* in the current time window.
+
+    Uses a fixed-window counter keyed by (key, bucket) where bucket =
+    floor(unix_time / window_seconds).  BEGIN IMMEDIATE ensures the
+    read-check-write is atomic even with 12 concurrent workers.
+    """
+    import time
+    window_seconds = window_minutes * 60
+    bucket = int(time.time() / window_seconds)
+
+    conn = get_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        # Drop buckets older than the previous window (keep current + 1 back)
+        conn.execute("DELETE FROM rate_limits WHERE bucket < ?", (bucket - 1,))
+        row = conn.execute(
+            "SELECT count FROM rate_limits WHERE key = ? AND bucket = ?",
+            (key, bucket),
+        ).fetchone()
+        current = row["count"] if row else 0
+        if current >= max_requests:
+            conn.execute("COMMIT")
+            return True
+        conn.execute(
+            "INSERT INTO rate_limits (key, bucket, count) VALUES (?, ?, 1)"
+            " ON CONFLICT(key, bucket) DO UPDATE SET count = count + 1",
+            (key, bucket),
+        )
+        conn.execute("COMMIT")
+        return False
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        return False  # fail open — don't block requests on DB error
+    finally:
+        conn.close()
 
 
 def _ensure_user(conn, username, password, role):
@@ -2900,7 +2954,7 @@ def get_jobs_with_photos(token_str):
         """SELECT j.id, j.job_name, COUNT(jp.id) as photo_count
            FROM job_photos jp
            JOIN jobs j ON jp.job_id = j.id
-           WHERE jp.token = ?
+           WHERE jp.token = ? AND j.is_active = 1
            GROUP BY j.id, j.job_name
            ORDER BY j.job_name ASC""",
         (token_str,),

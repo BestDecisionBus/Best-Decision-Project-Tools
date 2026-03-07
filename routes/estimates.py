@@ -767,7 +767,7 @@ def admin_estimate_jobs_json():
     if not token_str:
         return jsonify([])
     h._verify_token_access(token_str)
-    jobs = database.get_jobs_by_token(token_str)
+    jobs = database.get_jobs_by_token(token_str, active_only=True)
     return jsonify([{"id": j["id"], "job_name": j["job_name"], "job_address": j.get("job_address", "")} for j in jobs])
 
 
@@ -1552,6 +1552,96 @@ def my_estimate_scope_pdf(estimate_id):
             as_attachment=True,
             download_name=_fname,
         )
+
+
+# ---------------------------------------------------------------------------
+# Employee-facing: Send Scope PDF to Job Folder
+# ---------------------------------------------------------------------------
+
+@estimates_bp.route("/my-estimates/<int:estimate_id>/send-to-job-folder", methods=["POST"])
+def my_estimate_send_to_job_folder(estimate_id):
+    data = request.get_json(silent=True) or {}
+    token_str = data.get("token", "")
+    token_data = database.get_token(token_str)
+    if not token_data or not token_data["is_active"]:
+        return jsonify({"error": "Invalid token"}), 403
+
+    h = _helpers()
+    employee = h._require_employee_session(token_str)
+    if not employee:
+        return jsonify({"error": "Not authorized"}), 403
+
+    est = database.get_estimate(estimate_id)
+    if not est or est["token"] != token_str:
+        return jsonify({"error": "Not found"}), 404
+
+    job = database.get_job(est["job_id"])
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    items = database.get_estimate_items(estimate_id)
+    company_name = token_data["company_name"] if token_data else ""
+    photos = database.get_all_job_photos_for_job(est["job_id"])
+
+    photos_param = data.get("photos")
+    if photos_param is not None:
+        try:
+            selected_ids = {int(x) for x in str(photos_param).split(",") if str(x).strip()}
+            photos = [p for p in photos if p["id"] in selected_ids]
+        except (ValueError, TypeError):
+            photos = []
+
+    import pdf_generator
+    import shutil
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        pdf_generator.generate_scope_of_work_pdf(
+            output_path=tmp.name,
+            estimate=est,
+            job=job,
+            items=items,
+            company_name=company_name,
+            photos=photos,
+        )
+        tmp_path = tmp.name
+
+    def _sanitize(name):
+        sanitized = re.sub(r"[^a-zA-Z0-9]+", "-", name)
+        return sanitized.strip("-")
+
+    now = datetime.now()
+    iso = now.isocalendar()
+    week_folder = f"{iso[0]}-W{iso[1]:02d}"
+    safe_job_name = _sanitize(job["job_name"])
+    pdf_filename = f"scope_of_work_{estimate_id}.pdf"
+
+    dest_dir = config.JOB_PHOTOS_DIR / token_str / safe_job_name / week_folder
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / pdf_filename
+
+    shutil.copy2(tmp_path, str(dest_path))
+    import os
+    os.unlink(tmp_path)
+
+    rel_path = f"{token_str}/{safe_job_name}/{week_folder}/{pdf_filename}"
+    est_num = est.get("estimate_number") or str(est["id"])
+    caption = f"Scope of Work - Estimate #{est_num}"
+
+    existing = database.get_job_photos_by_job_week(est["job_id"], week_folder)
+    already_exists = any(p.get("image_file") == rel_path for p in existing)
+
+    if not already_exists:
+        database.create_job_photo(
+            job_id=est["job_id"],
+            token_str=token_str,
+            week_folder=week_folder,
+            image_file=rel_path,
+            thumb_file="",
+            caption=caption,
+        )
+
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------

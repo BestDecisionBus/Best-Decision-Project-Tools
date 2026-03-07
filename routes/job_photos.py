@@ -229,7 +229,7 @@ def photo_library():
     date_from = request.args.get("date_from", "").strip()
     date_to = request.args.get("date_to", "").strip()
 
-    jobs = database.get_jobs_by_token(token_str, active_only=False)
+    jobs = database.get_jobs_by_token(token_str, active_only=True)
     photos = []
     selected_job = None
     if job_id:
@@ -279,6 +279,13 @@ def upload_photo():
     token_data = _validate_token(token_str)
     if not token_data:
         return jsonify({"error": "Invalid or inactive token"}), 403
+
+    h = _helpers()
+    if not h._require_employee_session(token_str):
+        return jsonify({"error": "Not authorized"}), 403
+
+    if database.check_rate_limit(token_str, config.RATE_LIMIT, 60):
+        return jsonify({"error": "Rate limit exceeded. Try again later."}), 429
 
     job_id = request.form.get("job_id", "").strip()
     if not job_id:
@@ -729,7 +736,7 @@ def job_files():
         return redirect(url_for("company_home", token_str=token_str))
 
     job_id = request.args.get("job_id", "").strip()
-    jobs = database.get_jobs_by_token(token_str, active_only=False)
+    jobs = database.get_jobs_by_token(token_str, active_only=True)
     files = []
     selected_job = None
     if job_id:

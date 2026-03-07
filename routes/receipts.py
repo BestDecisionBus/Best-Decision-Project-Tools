@@ -116,7 +116,10 @@ def api_upload():
     if not token_data or not token_data["is_active"]:
         return jsonify({"error": "Invalid or inactive token"}), 403
 
-    if h._is_rate_limited(token_str, h._rate_limits, config.RATE_LIMIT, 60):
+    if not h._require_employee_session(token_str):
+        return jsonify({"error": "Not authorized"}), 403
+
+    if database.check_rate_limit(token_str, config.RATE_LIMIT, 60):
         return jsonify({"error": "Rate limit exceeded. Try again later."}), 429
 
     image = request.files.get("image")
@@ -217,7 +220,7 @@ def receipt_library():
     date_from = request.args.get("date_from", "").strip()
     date_to = request.args.get("date_to", "").strip()
 
-    jobs = database.get_jobs_by_token(token_str, active_only=False)
+    jobs = database.get_jobs_by_token(token_str, active_only=True)
     receipts = []
     selected_job = None
     if job_id:
