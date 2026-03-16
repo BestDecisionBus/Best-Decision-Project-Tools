@@ -29,7 +29,20 @@
                     <label style="font-size: 15px; color: var(--gray-500); font-weight: 600; margin: 0; white-space: nowrap;">Expected Completion:</label>
                     <input type="date" id="edit-expected-completion" value="{{ estimate.expected_completion or '' }}" class="est-input" style="width: 170px; font-size: 16px; font-weight: 600; padding: 4px 8px;">
                 </div>
-                <div style="display: flex; gap: 8px;">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    {% if qbo_connection %}
+                    <form method="POST" action="{{ url_for('qbo.qbo_push_estimate', estimate_id=estimate.id) }}" style="display: inline;">
+                        <button type="submit" class="btn btn-sm btn-blue">
+                            {% if estimate.qbo_estimate_id %}Update in QuickBooks{% else %}Send to QuickBooks{% endif %}
+                        </button>
+                    </form>
+                    {% if estimate.qbo_synced_at %}
+                    <span style="font-size: 11px; color: var(--gray-400);" title="Last synced {{ estimate.qbo_synced_at }}">QBO synced</span>
+                    {% endif %}
+                    {% if estimate.qbo_sync_error %}
+                    <span style="font-size: 11px; color: var(--red, #dc2626); font-weight: 600;" title="{{ estimate.qbo_sync_error }}">QBO error</span>
+                    {% endif %}
+                    {% endif %}
                     <a href="/admin/estimates?token={{ selected_token.token if selected_token else '' }}" class="btn btn-sm" style="background: var(--gray-400); color: #fff;">Back to Estimates / Projects</a>
                     <form method="POST" action="/admin/estimates/{{ estimate.id }}/delete" style="display: inline;" onsubmit="return confirm('Permanently delete this {% if is_project %}project{% else %}estimate{% endif %}?')">
                         <button type="submit" class="btn btn-sm btn-red">Delete {% if is_project %}Project{% else %}Estimate{% endif %}</button>
@@ -136,9 +149,9 @@
                     {% if estimate.status == 'complete' %}
                     <span class="badge badge-active" style="font-size: 13px; padding: 5px 14px;">Complete</span>
                     {% elif estimate.status == 'error' %}
-                    <span class="badge" style="background: #fee2e2; color: #991b1b; font-size: 13px; padding: 5px 14px;">Error</span>
+                    <span class="badge badge-red" style="font-size: 13px; padding: 5px 14px;">Error</span>
                     {% else %}
-                    <span class="badge" style="background: #fef3c7; color: #92400e; font-size: 13px; padding: 5px 14px;">{{ estimate.status }}</span>
+                    <span class="badge badge-yellow" style="font-size: 13px; padding: 5px 14px;">{{ estimate.status }}</span>
                     {% endif %}
                 </div>
                 <textarea id="edit-transcription" rows="6" style="width: 100%; resize: vertical; font-size: 16px; line-height: 1.6; margin-top: 4px; padding: 12px; background: #fefce8; border: 1px solid var(--gray-300); border-radius: 6px;">{{ estimate.transcription or '' }}</textarea>
@@ -302,6 +315,7 @@
             </table>
             <button type="button" class="btn btn-sm btn-blue" onclick="addLineItem()">+ Add Line Item</button>
             <button type="button" class="btn btn-sm btn-green" onclick="addAllToTasks(this)" style="margin-left: 8px;">+ Add All to Project Tasks</button>
+            <button type="button" class="btn btn-sm" onclick="addAllToTemplate(this)" style="margin-left: 8px; background: var(--purple, #7c3aed); color: #fff;">+ Add All to Task Template</button>
 
             <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
                 <div style="width: 360px;">
@@ -1049,6 +1063,37 @@
                 btn.textContent = '+ Add All to Project Tasks';
                 btn.style.background = '';
             }, 2500);
+        }).catch(function() { btn.disabled = false; alert('Network error.'); });
+    }
+
+    function addAllToTemplate(btn) {
+        var rows = document.querySelectorAll('#line-items-body tr');
+        var names = [];
+        rows.forEach(function(row) {
+            var desc = row.querySelector('.li-desc');
+            if (desc && desc.value.trim()) names.push(desc.value.trim());
+        });
+        if (!names.length) { alert('No line items to add.'); return; }
+        var templateName = prompt('Name for the new task template:', document.title.replace(' — BDB Tools', '').trim());
+        if (!templateName || !templateName.trim()) return;
+        btn.disabled = true;
+        fetch('/admin/estimates/' + ESTIMATE_ID + '/create-template-json', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({template_name: templateName.trim()})
+        }).then(function(r) { return r.json(); })
+        .then(function(data) {
+            btn.disabled = false;
+            if (data.ok) {
+                btn.textContent = '\u2713 Template Created (' + data.count + ')';
+                btn.style.background = '#15803d';
+                setTimeout(function() {
+                    btn.textContent = '+ Add All to Task Template';
+                    btn.style.background = '';
+                }, 2500);
+            } else {
+                alert(data.error || 'Failed to create template.');
+            }
         }).catch(function() { btn.disabled = false; alert('Network error.'); });
     }
 

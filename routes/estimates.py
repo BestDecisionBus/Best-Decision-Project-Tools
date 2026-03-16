@@ -33,13 +33,7 @@ def _compute_finance_targets(token_str, token_data):
     return margin_target, markup_required
 
 
-# ---------------------------------------------------------------------------
-# Lazy import of app-level helpers to avoid circular imports
-# ---------------------------------------------------------------------------
-
-def _helpers():
-    import app as _app
-    return _app
+from routes._shared import helpers as _helpers
 
 
 def _require_admin(h=None):
@@ -52,6 +46,15 @@ def _require_admin(h=None):
 # ---------------------------------------------------------------------------
 # Feature gate
 # ---------------------------------------------------------------------------
+
+@estimates_bp.before_request
+def _enforce_admin_on_writes():
+    """Require admin role for all POST requests under /admin/."""
+    if request.method == "POST" and request.path.startswith("/admin/"):
+        if not current_user.is_authenticated:
+            abort(401)
+        _require_admin()
+
 
 @estimates_bp.before_request
 def _gate_estimates_feature():
@@ -273,23 +276,8 @@ def api_estimate_geocode():
     if not address:
         return jsonify({"error": "Address required"}), 400
 
-    import json
-    import urllib.parse
-    import urllib.request
-    encoded = urllib.parse.quote(address)
-    url = f"https://nominatim.openstreetmap.org/search?format=json&q={encoded}&limit=1"
-    req = urllib.request.Request(url, headers={"User-Agent": "BDB-Tools/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-            if data:
-                return jsonify({
-                    "lat": float(data[0]["lat"]),
-                    "lng": float(data[0]["lon"]),
-                })
-            return jsonify({"error": "Address not found"}), 404
-    except Exception:
-        return jsonify({"error": "Geocoding service unavailable"}), 500
+    result, status = h._geocode_address(address)
+    return jsonify(result), status
 
 
 # ---------------------------------------------------------------------------
@@ -643,6 +631,8 @@ def admin_estimate_detail(estimate_id):
                            if t["id"] not in {lt["id"] for lt in linked_templates}]
     project_tasks = database.get_project_tasks_by_estimate(estimate_id, est["token"])
 
+    qbo_connection = database.get_qbo_connection(est["token"])
+
     return render_template(
         "admin/estimate_detail.html",
         estimate=est,
@@ -661,6 +651,7 @@ def admin_estimate_detail(estimate_id):
         linked_templates=linked_templates,
         available_templates=available_templates,
         project_tasks=project_tasks,
+        qbo_connection=qbo_connection,
     )
 
 
@@ -737,6 +728,30 @@ def admin_estimate_task_create_json(estimate_id):
         return jsonify({"error": "Name required"}), 400
     task_id = database.create_project_task(estimate_id, est["job_id"], name, est["token"])
     return jsonify({"ok": True, "id": task_id, "name": name})
+
+
+@estimates_bp.route("/admin/estimates/<int:estimate_id>/create-template-json", methods=["POST"])
+def admin_estimate_create_template_json(estimate_id):
+    h = _helpers()
+    if not h.current_user.is_authenticated:
+        return jsonify({"error": "Not authenticated"}), 401
+    est = database.get_estimate(estimate_id)
+    if not est:
+        return jsonify({"error": "Not found"}), 404
+    h._verify_token_access(est["token"])
+    _require_admin()
+    data = request.get_json(silent=True) or {}
+    template_name = data.get("template_name", "").strip()
+    if not template_name:
+        return jsonify({"error": "Template name is required"}), 400
+    items = database.get_estimate_items(estimate_id)
+    descriptions = [item["description"].strip() for item in items if item.get("description", "").strip()]
+    if not descriptions:
+        return jsonify({"error": "No line items to add"}), 400
+    template_id = database.create_task_template(template_name, est["token"])
+    for desc in descriptions:
+        database.create_template_item(template_id, desc, est["token"])
+    return jsonify({"ok": True, "template_id": template_id, "name": template_name, "count": len(descriptions)})
 
 
 @estimates_bp.route("/admin/estimates/<int:estimate_id>/tasks/<int:task_id>/delete", methods=["POST"])

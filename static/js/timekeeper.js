@@ -60,6 +60,7 @@
         fetch("/api/employee-status?employee_id=" + empId)
             .then(function (r) { return r.json(); })
             .then(function (data) {
+                hideAll();
                 if (data.active_entry) {
                     showClockedIn(data.active_entry);
                 } else {
@@ -74,7 +75,7 @@
             });
     }
 
-    function showClockedIn(entry) {
+    function showClockedIn(entry, debounce) {
         statusSection.style.display = "block";
         statusMessage.className = "status-box status-clocked-in";
         statusMessage.textContent = "Currently clocked in";
@@ -83,6 +84,14 @@
         var inTime = formatTime(entry.clock_in_time);
         activeInfo.textContent = "Clocked in at " + inTime +
             (entry.job_name ? " \u2014 " + entry.job_name : "");
+
+        // Brief disable to prevent accidental clock-out tap on mobile
+        if (debounce) {
+            var btn = document.getElementById("clock-out-btn");
+            btn.disabled = true;
+            btn.textContent = "CLOCK OUT";
+            setTimeout(function () { btn.disabled = false; }, 800);
+        }
     }
 
     function showClockInForm() {
@@ -120,8 +129,21 @@
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
         .then(function (res) {
             if (res.ok) {
-                showResult("Clocked in at " + formatTime(res.data.clock_in_time), false);
-                setTimeout(function () { checkEmployeeStatus(EMPLOYEE_ID); }, 1500);
+                // Immediately show clocked-in state using local job data
+                var job = (JOBS || []).find(function (j) { return j.id === parseInt(jobId); }) || {};
+                hideAll();
+                showClockedIn({ clock_in_time: res.data.clock_in_time, job_name: job.job_name || "" }, true);
+                // Background fetch: populate today's entries
+                setTimeout(function () {
+                    fetch("/api/employee-status?employee_id=" + EMPLOYEE_ID)
+                        .then(function (r) { return r.json(); })
+                        .then(function (data) {
+                            if (data.today_entries && data.today_entries.length > 0) {
+                                showTodayEntries(data.today_entries);
+                            }
+                        })
+                        .catch(function () {});
+                }, 1000);
             } else {
                 showResult(res.data.error || "Clock in failed.", true);
                 btn.disabled = false;
@@ -156,12 +178,30 @@
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
         .then(function (res) {
             if (res.ok) {
-                var msg = "Clocked out at " + formatTime(res.data.clock_out_time);
-                if (res.data.total_hours != null) {
-                    msg += " \u2014 " + res.data.total_hours + " hours";
-                }
-                showResult(msg, false);
-                setTimeout(function () { checkEmployeeStatus(EMPLOYEE_ID); }, 1500);
+                // Immediately show clocked-out state
+                hideAll();
+                statusSection.style.display = "block";
+                statusMessage.className = "status-box status-clocked-out";
+                var hours = res.data.total_hours != null ? " \u2014 " + res.data.total_hours + " hrs" : "";
+                statusMessage.textContent = "Clocked out at " + formatTime(res.data.clock_out_time) + hours;
+                jobSection.style.display = "block";
+                clockInSection.style.display = "block";
+                // Brief disable to prevent accidental re-clock-in tap on mobile
+                var ciBtn = document.getElementById("clock-in-btn");
+                ciBtn.disabled = true;
+                ciBtn.textContent = "CLOCK IN";
+                setTimeout(function () { ciBtn.disabled = false; }, 800);
+                // Background fetch: populate today's entries
+                setTimeout(function () {
+                    fetch("/api/employee-status?employee_id=" + EMPLOYEE_ID)
+                        .then(function (r) { return r.json(); })
+                        .then(function (data) {
+                            if (data.today_entries && data.today_entries.length > 0) {
+                                showTodayEntries(data.today_entries);
+                            }
+                        })
+                        .catch(function () {});
+                }, 1000);
             } else {
                 showResult(res.data.error || "Clock out failed.", true);
                 btn.disabled = false;

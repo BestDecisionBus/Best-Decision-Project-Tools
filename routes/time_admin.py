@@ -1,6 +1,5 @@
 """Admin timekeeper routes (employees, jobs, time entries, export, audit)."""
 
-import math
 from collections import defaultdict
 from io import BytesIO
 
@@ -25,13 +24,7 @@ _SECTION_COLORS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Lazy import helpers to avoid circular imports
-# ---------------------------------------------------------------------------
-
-def _helpers():
-    import app as _app
-    return _app
+from routes._shared import helpers as _helpers, gate_admin_feature, safe_latin1 as _safe
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +40,16 @@ _SCHEDULER_ALLOWED = frozenset({
     'time_admin.admin_manual_entry',
     'time_admin.admin_audit_log',
 })
+
+
+@time_admin_bp.before_request
+def _enforce_admin_on_writes():
+    """Require admin/BDB/scheduler role for all POST requests (blocks viewer role)."""
+    if request.method == "POST":
+        if not current_user.is_authenticated:
+            abort(401)
+        if not current_user.is_admin and not current_user.is_bdb and not current_user.is_scheduler:
+            abort(403)
 
 
 @time_admin_bp.before_request
@@ -86,16 +89,7 @@ _TIMEKEEPER_GATED_ENDPOINTS = frozenset({
 def _gate_timekeeper_feature():
     if request.endpoint not in _TIMEKEEPER_GATED_ENDPOINTS:
         return
-    if not current_user.is_authenticated:
-        return
-    h = _helpers()
-    tokens = h._get_tokens_for_user()
-    token_str, selected_token = h._get_selected_token(tokens)
-    if not token_str or not selected_token:
-        return
-    if not selected_token.get("feature_timekeeper", 1):
-        flash("Timekeeper & Scheduling is not enabled for this company.", "error")
-        return redirect(url_for("admin.admin_dashboard"))
+    return gate_admin_feature("feature_timekeeper", "Timekeeper & Scheduling")
 
 
 # ---------------------------------------------------------------------------
@@ -139,11 +133,6 @@ def _resize_logo(path, max_w=800, max_h=800, target_kb=750):
     buf.seek(0)
     buf.name = "logo.jpg"
     return buf, img.size[0], img.size[1]
-
-
-def _safe(text):
-    """Replace non-latin-1 chars so Helvetica won't choke."""
-    return str(text).encode("latin-1", "replace").decode("latin-1")
 
 
 def _xl_add_logos(ws, token_str, last_row, logo_col="H"):
@@ -215,15 +204,8 @@ def _pdf_table_header(pdf, headers, widths, color_rgb):
 # ---------------------------------------------------------------------------
 
 def _haversine_miles(lat1, lng1, lat2, lng2):
-    if any(v is None for v in (lat1, lng1, lat2, lng2)):
-        return None
-    R = 3958.8  # Earth radius in miles
-    dlat = math.radians(lat2 - lat1)
-    dlng = math.radians(lng2 - lng1)
-    a = (math.sin(dlat / 2) ** 2 +
-         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-         math.sin(dlng / 2) ** 2)
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    import app as _app
+    return _app.haversine_miles(lat1, lng1, lat2, lng2)
 
 
 # ---------------------------------------------------------------------------
@@ -268,13 +250,15 @@ def admin_employee_create():
         schedule_access = 1 if request.form.get("schedule_access") else 0
         estimate_access = 1 if request.form.get("estimate_access") else 0
         tasks_access = 1 if request.form.get("tasks_access") else 0
+        task_uncheck_access = 1 if request.form.get("task_uncheck_access") else 0
         database.create_employee(name, employee_id_str, token_str, username, password,
                                  hourly_wage=hourly_wage, receipt_access=receipt_access,
                                  timekeeper_access=timekeeper_access,
                                  job_photos_access=job_photos_access,
                                  schedule_access=schedule_access,
                                  estimate_access=estimate_access,
-                                 tasks_access=tasks_access)
+                                 tasks_access=tasks_access,
+                                 task_uncheck_access=task_uncheck_access)
         flash(f"Employee {name} added.", "success")
     return redirect(url_for("time_admin.admin_employees", token=token_str))
 
@@ -288,7 +272,8 @@ def admin_employee_update(emp_id):
         _app._verify_token_access(emp["token"])
     kwargs = {}
     toggle_fields = ("receipt_access", "timekeeper_access", "job_photos_access",
-                      "schedule_access", "estimate_access", "tasks_access")
+                      "schedule_access", "estimate_access", "tasks_access",
+                      "task_uncheck_access")
     if request.is_json:
         data = request.get_json()
         name = data.get("name", "").strip()
@@ -561,12 +546,24 @@ def admin_time_entries():
         employees = database.get_employees_by_token(token_str)
         jobs = database.get_jobs_by_token(token_str)
 
+    # Build job lookup from already-fetched jobs list (avoids N+1 queries)
+    job_lookup = {j["id"]: j for j in jobs}
+    # If no token_str selected (BDB "All Companies" view), jobs may be empty —
+    # backfill the lookup for any job_ids referenced in entries.
+    if not job_lookup:
+        for entry in entries:
+            jid = entry.get("job_id")
+            if jid and jid not in job_lookup:
+                j = database.get_job(jid)
+                if j:
+                    job_lookup[jid] = j
+
     # Calculate GPS distances for entries
     for entry in entries:
         entry.setdefault("clock_in_distance", None)
         entry.setdefault("clock_in_flagged", False)
         if entry.get("clock_in_lat") and entry.get("job_id"):
-            job = database.get_job(entry["job_id"])
+            job = job_lookup.get(entry["job_id"])
             if job and job.get("latitude"):
                 dist = _haversine_miles(
                     entry["clock_in_lat"], entry["clock_in_lng"],

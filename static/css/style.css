@@ -102,6 +102,19 @@ h2 { font-size: 22px; margin-bottom: 16px; }
 .badge-manual { background: #fef3c7; color: #92400e; }
 .badge-system { background: #e5e7eb; color: #374151; }
 
+/* Semantic badge color utilities */
+.badge-blue         { background: #dbeafe; color: #1d4ed8; }
+.badge-indigo       { background: #e0e7ff; color: #3730a3; }
+.badge-green        { background: #dcfce7; color: #15803d; }
+.badge-yellow       { background: #fef3c7; color: #92400e; }
+.badge-yellow-alt   { background: #fef9c3; color: #854d0e; }
+.badge-red          { background: #fee2e2; color: #991b1b; }
+.badge-gray         { background: #f3f4f6; color: #6b7280; }
+.badge-gray-dark    { background: #f3f4f6; color: #374151; }
+.badge-purple       { background: #f3e8ff; color: #7e22ce; }
+.badge-purple-solid { background: #7c3aed; color: #fff; }
+.badge-blue-solid   { background: #2563eb; color: #fff; }
+
 /* ============================================================
    Admin Layout
    ============================================================ */
@@ -2157,3 +2170,88 @@ table.resizable th .resize-handle.active {
 .task-completed-by { font-size: 11px; color: var(--gray-400); margin-left: auto; white-space: nowrap; }
 
 .ss-no-results { padding: 12px 14px; color: var(--gray-400); font-size: 14px; font-style: italic; }
+
+/* ---- Notification Bell ---- */
+.notif-bell {
+    position: relative;
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 18px;
+    line-height: 1;
+    border-radius: 6px;
+    user-select: none;
+}
+.notif-bell:hover { background: rgba(255,255,255,.15); }
+.notif-badge {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: var(--red);
+    color: #fff;
+    border-radius: 50%;
+    min-width: 16px;
+    height: 16px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    padding: 0 3px;
+    pointer-events: none;
+}
+.notif-dropdown {
+    display: none;
+    position: fixed;
+    top: 56px;
+    right: 8px;
+    z-index: 500;
+    background: #fff;
+    border: 1px solid var(--blue);
+    border-radius: 10px;
+    width: 320px;
+    max-height: 420px;
+    overflow-y: auto;
+    box-shadow: 0 4px 20px rgba(0,0,0,.15);
+}
+.notif-dropdown-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--gray-200);
+    font-weight: 600;
+    font-size: 14px;
+    position: sticky;
+    top: 0;
+    background: #fff;
+}
+.notif-mark-all {
+    font-size: 12px;
+    background: none;
+    border: none;
+    color: var(--blue);
+    cursor: pointer;
+    padding: 0;
+}
+.notif-item {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--gray-100);
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item-link {
+    display: block;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--blue);
+    text-decoration: none;
+}
+.notif-item-link:hover { text-decoration: underline; }
+.notif-body {
+    font-size: 13px;
+    color: var(--gray-600);
+    margin-top: 2px;
+}
+.notif-time {
+    font-size: 11px;
+    color: var(--gray-400);
+    margin-top: 4px;
+}

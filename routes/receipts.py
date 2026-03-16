@@ -13,13 +13,7 @@ import database
 receipts_bp = Blueprint('receipts', __name__)
 
 
-# ---------------------------------------------------------------------------
-# Lazy import of app-level helpers to avoid circular imports
-# ---------------------------------------------------------------------------
-
-def _helpers():
-    import app as _app
-    return _app
+from routes._shared import helpers as _helpers, gate_employee_feature
 
 
 # ---------------------------------------------------------------------------
@@ -28,12 +22,7 @@ def _helpers():
 
 @receipts_bp.before_request
 def _gate_receipts_feature():
-    token_str = request.args.get("token", "") or session.get("employee_token", "")
-    if not token_str:
-        return
-    token_data = database.get_token(token_str)
-    if token_data and not token_data.get("feature_receipts", 1):
-        return redirect(url_for("company_home", token_str=token_str))
+    return gate_employee_feature("feature_receipts")
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +181,19 @@ def api_upload():
         category_1_id=category_1_id,
         category_2_id=category_2_id,
     )
+
+    # Notify admins
+    try:
+        from routes.notifications import notify_admins
+        emp_name = session.get("employee_name", "Employee")
+        notify_admins(
+            token_str, "receipt",
+            "Receipt submitted",
+            f"By {emp_name}",
+            url=f"/admin/receipts?token={token_str}",
+        )
+    except Exception:
+        pass
 
     return jsonify({"submission_id": submission_id, "status": "processing"}), 202
 

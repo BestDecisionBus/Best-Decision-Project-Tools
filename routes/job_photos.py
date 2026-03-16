@@ -25,13 +25,7 @@ IMAGE_SIGNATURES = [b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"RIFF"]
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 
-# ---------------------------------------------------------------------------
-# Lazy import of app-level helpers to avoid circular imports
-# ---------------------------------------------------------------------------
-
-def _helpers():
-    import app as _app
-    return _app
+from routes._shared import helpers as _helpers
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +371,25 @@ def upload_photo():
         longitude=lng,
     )
 
+    # Notify admins + clocked-in employees
+    try:
+        from routes.notifications import notify_admins, notify_clocked_in_employees
+        job_name = job["job_name"]
+        notify_admins(
+            token_str, "photo",
+            "Job photo uploaded",
+            f"Job: {job_name}",
+            url=f"/admin/job-photos?token={token_str}",
+        )
+        notify_clocked_in_employees(
+            token_str, job_id, "photo",
+            f"New photo added to {job_name}",
+            "A photo was just uploaded to your job",
+            url=f"/job-photos?token={token_str}&job_id={job_id}",
+        )
+    except Exception:
+        pass
+
     return jsonify({
         "success": True,
         "photo_id": photo_id,
@@ -395,9 +408,11 @@ def serve_photo(photo_id):
     if not photo:
         abort(404)
 
-    # Auth: require admin login OR valid employee session for this token
-    if not current_user.is_authenticated:
-        h = _helpers()
+    # Auth: require admin login with token access OR valid employee session
+    h = _helpers()
+    if current_user.is_authenticated:
+        h._verify_token_access(photo["token"])
+    else:
         employee = h._require_employee_session(photo["token"])
         if not employee:
             abort(403)
@@ -428,8 +443,10 @@ def api_update_photo_caption(photo_id):
     if not photo:
         return jsonify({"error": "Not found"}), 404
 
-    if not current_user.is_authenticated:
-        h = _helpers()
+    h = _helpers()
+    if current_user.is_authenticated:
+        h._verify_token_access(photo["token"])
+    else:
         employee = h._require_employee_session(photo["token"])
         if not employee:
             return jsonify({"error": "Not authenticated"}), 401
@@ -449,8 +466,10 @@ def api_delete_photo(photo_id):
     if not photo:
         return jsonify({"error": "Not found"}), 404
 
-    if not current_user.is_authenticated:
-        h = _helpers()
+    h = _helpers()
+    if current_user.is_authenticated:
+        h._verify_token_access(photo["token"])
+    else:
         employee = h._require_employee_session(photo["token"])
         if not employee:
             return jsonify({"error": "Not authenticated"}), 401

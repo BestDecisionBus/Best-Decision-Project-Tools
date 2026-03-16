@@ -11,13 +11,17 @@ import database
 customers_bp = Blueprint("customers", __name__)
 
 
-# ---------------------------------------------------------------------------
-# Lazy import helper to avoid circular imports
-# ---------------------------------------------------------------------------
+from routes._shared import helpers as _helpers
 
-def _helpers():
-    import app as _app
-    return _app
+
+@customers_bp.before_request
+def _enforce_admin_on_writes():
+    """Require admin role for all POST requests."""
+    if request.method == "POST":
+        if not current_user.is_authenticated:
+            abort(401)
+        if not current_user.is_admin and not current_user.is_bdb:
+            abort(403)
 
 
 # ---------------------------------------------------------------------------

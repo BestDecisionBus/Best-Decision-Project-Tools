@@ -8,7 +8,7 @@
     <style>
     .day-check {
         display: inline-flex; align-items: center; justify-content: center;
-        padding: 8px 0; background: var(--gray-100); border: 1px solid var(--gray-200);
+        padding: 8px 0; background: var(--gray-100); border: 1px solid var(--blue);
         border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
         user-select: none; flex: 1; min-width: 0; text-align: center;
     }
@@ -41,20 +41,7 @@
 
         <h2>Schedules</h2>
 
-        {% if current_user.is_bdb or tokens|length > 1 %}
-            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
-                <label for="token-select">Company</label>
-                <select id="token-select" onchange="window.location.href='?token=' + this.value">
-                    {% for t in tokens %}
-                    <option value="{{ t.token }}" {% if token_data and token_data.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-        {% else %}
-            {% if token_data %}
-            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ token_data.company_name }}</strong></p>
-            {% endif %}
-        {% endif %}
+        {% with show_all=false %}{% include 'admin/_token_selector.html' %}{% endwith %}
 
         {% if token_data %}
         {# Week navigation #}
@@ -97,7 +84,7 @@
                         <label style="margin: 0;">Employees <span style="font-size: 12px; font-weight: 400; color: var(--gray-500);">(select one or more)</span></label>
                         <span style="font-size: 12px; color: var(--blue); cursor: pointer;" onclick="toggleAllEmployees()">Select All / None</span>
                     </div>
-                    <div id="emp-checkbox-list" style="max-height: 160px; overflow-y: auto; border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px; background: #fff;">
+                    <div id="emp-checkbox-list" style="max-height: 160px; overflow-y: auto; border: 1px solid var(--blue); border-radius: 6px; padding: 6px; background: #fff;">
                         {% for emp in employees %}
                         <label class="emp-cb-label">
                             <input type="checkbox" class="emp-cb" value="{{ emp.id }}"> {{ emp.name }}
@@ -174,7 +161,7 @@
                         <label style="margin: 0;">Standard Tasks <span style="font-size: 12px; font-weight: 400; color: var(--gray-500);">(select one or more)</span></label>
                         <span style="font-size: 12px; color: var(--blue); cursor: pointer;" onclick="toggleAllCommonTasks()">Select All / None</span>
                     </div>
-                    <div id="common-task-checkbox-list" style="max-height: 140px; overflow-y: auto; border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px; background: #fff;">
+                    <div id="common-task-checkbox-list" style="max-height: 140px; overflow-y: auto; border: 1px solid var(--blue); border-radius: 6px; padding: 6px; background: #fff;">
                         <!-- populated by loadCommonTasks() -->
                     </div>
                 </div>
@@ -183,7 +170,7 @@
                         <label style="margin: 0;">Task Lists <span style="font-size: 12px; font-weight: 400; color: var(--gray-500);">(select one or more)</span></label>
                         <span style="font-size: 12px; color: var(--blue); cursor: pointer;" onclick="toggleAllTaskLists()">Select All / None</span>
                     </div>
-                    <div id="task-list-checkboxes" style="max-height: 160px; overflow-y: auto; border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px; background: #fff;">
+                    <div id="task-list-checkboxes" style="max-height: 160px; overflow-y: auto; border: 1px solid var(--blue); border-radius: 6px; padding: 6px; background: #fff;">
                     </div>
                 </div>
                 <div class="form-group">
@@ -270,6 +257,7 @@
         function loadJobProjects(jobId, selectEstimateId) {
             var group = document.getElementById('project-group');
             var sel = document.getElementById('sched-project');
+            if (!group || !sel) { clearTaskLists(); return; }
             while (sel.firstChild) { sel.removeChild(sel.firstChild); }
             var blank = document.createElement('option');
             blank.value = '';
@@ -299,13 +287,15 @@
                 });
         }
 
-        // Load task list checkboxes for a project/estimate
+        // Load task list checkboxes — always loads all company templates.
+        // Passing estimateId also includes "Project Specific Tasks" if available.
         function loadEstimateTaskLists(estimateId, preselectedIds) {
             var group = document.getElementById('task-list-group');
             var container = document.getElementById('task-list-checkboxes');
             while (container.firstChild) { container.removeChild(container.firstChild); }
-            if (!estimateId) { group.style.display = 'none'; return; }
-            fetch('/scheduler/api/estimate-templates?estimate_id=' + encodeURIComponent(estimateId) + '&token=' + encodeURIComponent(TOKEN))
+            var url = '/scheduler/api/estimate-templates?token=' + encodeURIComponent(TOKEN);
+            if (estimateId) url += '&estimate_id=' + encodeURIComponent(estimateId);
+            fetch(url)
                 .then(function(r) { return r.json(); })
                 .then(function(lists) {
                     if (!lists.length) { group.style.display = 'none'; return; }
@@ -330,19 +320,20 @@
         }
 
         function clearTaskLists() {
-            var group = document.getElementById('task-list-group');
-            var container = document.getElementById('task-list-checkboxes');
-            while (container.firstChild) { container.removeChild(container.firstChild); }
-            group.style.display = 'none';
+            // Uncheck all template boxes but keep them visible (templates are company-wide)
+            document.querySelectorAll('#task-list-checkboxes input.task-list-cb').forEach(function(cb) { cb.checked = false; });
         }
 
         document.getElementById('sched-job').addEventListener('change', function() {
             loadJobProjects(this.value);
         });
 
-        document.getElementById('sched-project').addEventListener('change', function() {
-            loadEstimateTaskLists(this.value);
-        });
+        var _schedProject = document.getElementById('sched-project');
+        if (_schedProject) {
+            _schedProject.addEventListener('change', function() {
+                loadEstimateTaskLists(this.value);
+            });
+        }
 
         function getSundayOfWeek(d) {
             d = new Date(d);
@@ -487,8 +478,10 @@
             document.getElementById('repeat-group').style.display = '';
             document.querySelectorAll('.common-task-cb').forEach(function(cb) { cb.checked = false; });
             document.getElementById('sched-custom-note').value = '';
-            document.getElementById('project-group').style.display = 'none';
-            document.getElementById('sched-project').value = '';
+            var _pg = document.getElementById('project-group');
+            if (_pg) _pg.style.display = 'none';
+            var _sp = document.getElementById('sched-project');
+            if (_sp) _sp.value = '';
             clearTaskLists();
             onShiftChange();
             if (window._markClean) window._markClean();
@@ -525,18 +518,16 @@
                         cb.checked = ids.indexOf(cb.value) !== -1;
                     });
                 });
-            // Load project dropdown then task lists
+            // Load project dropdown
             if (s.job_id) {
                 loadJobProjects(s.job_id, s.estimate_id || null);
-                // Fetch pre-selected task list IDs and load checkboxes
-                if (s.estimate_id) {
-                    fetch('/scheduler/api/schedules/' + s.id + '/task-links')
-                        .then(function(r) { return r.json(); })
-                        .then(function(ids) {
-                            loadEstimateTaskLists(s.estimate_id, ids);
-                        });
-                }
             }
+            // Always fetch pre-selected task list IDs and reload checkboxes
+            fetch('/scheduler/api/schedules/' + s.id + '/task-links')
+                .then(function(r) { return r.json(); })
+                .then(function(ids) {
+                    loadEstimateTaskLists(s.estimate_id || null, ids);
+                });
 
             document.getElementById('repeat-group').style.display = 'none';
             onShiftChange();
@@ -697,6 +688,7 @@
         currentWeekStart = getSundayOfWeek(new Date());
         loadWeek();
         loadCommonTasks();
+        loadEstimateTaskLists(null);
         </script>
         {% else %}
         <p style="color: var(--gray-500);">Select a company above to view schedules.</p>

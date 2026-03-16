@@ -10,7 +10,7 @@ import fcntl
 import logging
 import threading
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import config
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 _worker_thread = None
 _lock_path = config.INSTANCE_DIR / "gpu_worker.lock"
 _last_purge_file = config.INSTANCE_DIR / "task_purge_last_run.txt"
+_last_reminder_check = datetime(2000, 1, 1)  # ensures first check runs immediately
 
 POLL_INTERVAL = 2
 
@@ -64,9 +65,30 @@ def _run_daily_task_purge():
         logger.error(f"Daily task purge failed: {e}")
 
 
+def _run_shift_reminders():
+    """Every 5 minutes: send clock-out reminders for employees past their scheduled shift."""
+    global _last_reminder_check
+    if (datetime.now() - _last_reminder_check).total_seconds() < 300:
+        return
+    _last_reminder_check = datetime.now()
+    try:
+        from routes.notifications import notify_employee
+        overdue = database.get_overdue_schedule_clock_ins()
+        for entry in overdue:
+            notify_employee(
+                entry["token"], entry["employee_id"], "shift_reminder",
+                "Don't forget to clock out",
+                f"Your shift ended {entry['minutes_overdue']} minutes ago",
+                url=f"/timekeeper?token={entry['token']}",
+            )
+    except Exception as e:
+        logger.error(f"Shift reminder check failed: {e}")
+
+
 def _poll_and_process():
     """Check for one pending submission or estimate and process it."""
     _run_daily_task_purge()
+    _run_shift_reminders()
     row = database.claim_next_pending()
     if row is None:
         _poll_and_process_estimate()
@@ -135,6 +157,17 @@ def _poll_and_process():
         database.update_submission_transcription(submission_id, text, pdf_filename)
         logger.info(f"Completed submission {submission_id} for {company_name}")
 
+        try:
+            from routes.notifications import notify_admins
+            notify_admins(
+                token, "receipt",
+                "Receipt processed",
+                f"Company: {company_name}",
+                url=f"/admin/receipts?token={token}",
+            )
+        except Exception:
+            pass
+
     except Exception as e:
         logger.error(f"Task failed for submission {submission_id}: {e}")
         try:
@@ -184,6 +217,17 @@ def _poll_and_process_estimate():
             logger.warning(f"Task extraction failed for estimate {estimate_id}: {e}")
 
         logger.info(f"Completed estimate {estimate_id}")
+
+        try:
+            from routes.notifications import notify_admins
+            notify_admins(
+                est["token"], "system",
+                "Estimate transcription complete",
+                f"Job: {est.get('job_name', '?')}",
+                url=f"/admin/estimates?token={est['token']}",
+            )
+        except Exception:
+            pass
 
     except Exception as e:
         logger.error(f"Estimate processing failed for {estimate_id}: {e}")

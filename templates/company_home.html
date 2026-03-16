@@ -30,7 +30,7 @@
 
         {% if employee %}
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; background: #fff; border: 1px solid var(--gray-200); border-radius: 8px; margin-bottom: 12px;">
-            <span style="font-weight: 600; color: var(--gray-800);">{{ employee.name }}{% if admin_session %} <span class="badge" style="background:#fef3c7; color:#92400e; font-size:11px; margin-left:6px;">ADMIN</span>{% endif %}</span>
+            <span style="font-weight: 600; color: var(--gray-800);">{{ employee.name }}{% if admin_session %} <span class="badge badge-yellow" style="font-size:11px; margin-left:6px;">ADMIN</span>{% endif %}</span>
             <a href="/c/{{ token.token }}/logout" style="font-size: 13px; color: var(--red);">Logout</a>
         </div>
 
@@ -131,5 +131,7 @@
         {% endif %}
     </div>
     {% include '_footer.html' %}
+
+{% with show_notif_prefs=true %}{% include 'employee/_notif_bell.html' %}{% endwith %}
 </body>
 </html>

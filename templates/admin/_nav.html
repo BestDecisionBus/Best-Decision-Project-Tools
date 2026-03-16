@@ -10,11 +10,11 @@
 {# ---- Group detection ---- #}
 {% set g_dashboard = (ep == 'admin.admin_dashboard') %}
 {% set g_customers = ('customer' in ep or 'invoice' in ep) %}
-{% set g_jobs = ('job' in ep or 'photo' in ep or 'estimate' in ep) and not g_dashboard %}
+{% set g_jobs = ('job' in ep or 'photo' in ep or 'estimate' in ep or 'task_completion' in ep) and not g_dashboard %}
 {% set g_employees = ('employee' in ep or 'schedule' in ep or 'time_entr' in ep or 'export' in ep or 'manual' in ep) %}
 {% set g_receipts = ('receipt' in ep) %}
 {% set g_finance = ('finance' in ep) %}
-{% set g_lists = ('categor' in ep or 'common_task' in ep or 'message_snippet' in ep or 'product' in ep or 'shift_type' in ep or 'task_template' in ep or 'task_completion' in ep) %}
+{% set g_lists = ('categor' in ep or 'common_task' in ep or 'message_snippet' in ep or 'product' in ep or 'shift_type' in ep or 'task_template' in ep) %}
 {% set g_admin = ('audit' in ep or 'token' in ep or 'admin.admin_user' in ep or 'admin.admin_my_user' in ep or 'setting' in ep) %}
 {% set g_guide = ('guide' in ep) %}
 
@@ -53,6 +53,11 @@
     <a href="{{ turl('time_admin.admin_guide') }}" {% if g_guide %}class="active"{% endif %}>Guide</a>
     {% endif %}
     <span class="spacer"></span>
+    {% if _st and _st.get('feature_push_notify', 0) and _token_param %}
+    <span class="notif-bell" id="notif-bell" title="Notifications">
+        &#128276;<span class="notif-badge" id="notif-badge" style="display:none;"></span>
+    </span>
+    {% endif %}
     <span class="user-info">{{ current_user.username }} <span class="badge badge-active" style="font-size: 10px;">{{ current_user.role }}</span></span>
     <a href="{{ url_for('logout') }}">Logout</a>
 </nav>
@@ -72,7 +77,10 @@
     {% if not _st or _st.get('feature_photos', 1) %}
     <a href="{{ turl('job_photos.admin_job_photos') }}" {% if 'photo' in ep %}class="active"{% endif %}>Job Photos / Files</a>
     {% endif %}
-    <a href="{{ turl('time_admin.admin_jobs') }}" {% if 'job' in ep and 'photo' not in ep and 'estimate' not in ep %}class="active"{% endif %}>Jobs</a>
+    <a href="{{ turl('time_admin.admin_jobs') }}" {% if 'job' in ep and 'photo' not in ep and 'estimate' not in ep and 'task_completion' not in ep %}class="active"{% endif %}>Jobs</a>
+    {% if not _st or _st.get('feature_timekeeper', 1) %}
+    <a href="{{ turl('task_templates.admin_task_completions') }}" {% if 'task_completion' in ep %}class="active"{% endif %}>Task History</a>
+    {% endif %}
 </nav>
 {% elif g_employees %}
 <nav class="admin-subnav">
@@ -100,9 +108,6 @@
     {% if not _st or _st.get('feature_timekeeper', 1) %}
     <a href="{{ turl('task_templates.admin_task_templates') }}" {% if 'task_template' in ep %}class="active"{% endif %}>Task Templates</a>
     {% endif %}
-    {% if not _st or _st.get('feature_timekeeper', 1) %}
-    <a href="{{ turl('task_templates.admin_task_completions') }}" {% if 'task_completion' in ep %}class="active"{% endif %}>Task History</a>
-    {% endif %}
     {% if not _st or _st.get('feature_receipts', 1) %}
     <a href="{{ turl('admin.admin_categories') }}" {% if 'categor' in ep %}class="active"{% endif %}>Expense Categories</a>
     {% endif %}
@@ -126,6 +131,54 @@
     {% endif %}
     <a href="{{ turl('admin.admin_settings') }}" {% if 'setting' in ep %}class="active"{% endif %}>Settings</a>
 </nav>
+{% endif %}
+
+{# ---- Notification bell dropdown + JS ---- #}
+{% if _st and _st.get('feature_push_notify', 0) and _token_param %}
+<div class="notif-dropdown" id="notif-dropdown">
+    <div class="notif-dropdown-header">
+        <span>Notifications</span>
+        <button class="notif-mark-all" id="notif-mark-all">Mark all read</button>
+    </div>
+    <div id="notif-list"></div>
+</div>
+<script src="/static/js/notifications.js"></script>
+<script>
+(function() {
+    var TOKEN = {{ _token_param | tojson }};
+    var NOTIF_START = {{ (_st.get('notify_window_start') or '06:00') | tojson }};
+    var NOTIF_END   = {{ (_st.get('notify_window_end') or '21:00') | tojson }};
+
+    function fetchUnread() {
+        if (!BDBNotify.withinHours(NOTIF_START, NOTIF_END)) return;
+        fetch('/api/notifications/unread?token=' + encodeURIComponent(TOKEN) + '&recipient_type=admin', {credentials: 'same-origin'})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var badge = document.getElementById('notif-badge');
+                badge.textContent = data.unread > 99 ? '99+' : String(data.unread || '');
+                badge.style.display = data.unread > 0 ? 'inline-block' : 'none';
+                var list = document.getElementById('notif-list');
+                while (list.firstChild) list.removeChild(list.firstChild);
+                if (!data.notifications || !data.notifications.length) {
+                    var em = document.createElement('em'); em.style.cssText = 'padding:8px;display:block;color:#888;'; em.textContent = 'No new notifications'; list.appendChild(em);
+                    return;
+                }
+                data.notifications.forEach(function(n) { list.appendChild(BDBNotify.buildItem(n, {useClasses: true})); });
+            }).catch(function(){});
+    }
+    document.getElementById('notif-mark-all').addEventListener('click', function() {
+        fetch('/api/notifications/mark-read', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token:TOKEN, recipient_type:'admin'})}).then(fetchUnread);
+        document.getElementById('notif-dropdown').style.display = 'none';
+    });
+    var bell = document.getElementById('notif-bell'), dd = document.getElementById('notif-dropdown');
+    bell.addEventListener('click', function(e) { e.stopPropagation(); var v = dd.style.display==='block'; dd.style.display = v?'none':'block'; if(!v) fetchUnread(); });
+    document.addEventListener('click', function() { dd.style.display='none'; });
+    dd.addEventListener('click', function(e) { e.stopPropagation(); });
+    fetchUnread();
+    setInterval(fetchUnread, 30000);
+    BDBNotify.setupPush(TOKEN, 'admin', {{ current_user.id | int }});
+})();
+</script>
 {% endif %}
 
 {# ---- Apply company color scheme to admin body ---- #}

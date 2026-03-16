@@ -1,17 +1,20 @@
+import json
 import math
+import re
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import (
-    Flask, abort, flash, jsonify, redirect, render_template, request,
+    Flask, Response, abort, flash, jsonify, redirect, render_template, request,
     send_from_directory, session, url_for,
 )
 from flask_login import (
     LoginManager, UserMixin, current_user, login_required, login_user,
     logout_user,
 )
+from flask_wtf.csrf import CSRFProtect, generate_csrf
 
 import config
 import database
@@ -25,6 +28,9 @@ app.secret_key = config.SECRET_KEY
 app.config["MAX_CONTENT_LENGTH"] = config.MAX_UPLOAD_MB * 1024 * 1024
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = True
+
+csrf = CSRFProtect(app)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -48,13 +54,19 @@ def favicon():
     return send_from_directory("static/icons", "apple-touch-icon.png")
 
 
+@app.route("/sw.js")
+def service_worker():
+    response = send_from_directory("static", "sw.js")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Content-Type"] = "application/javascript"
+    return response
+
+
 @app.route("/c/<token_str>/manifest.json")
 def company_manifest(token_str):
     token_data = database.get_token(token_str)
     if not token_data or not token_data["is_active"]:
         return jsonify({}), 404
-    from flask import Response
-    import json
     manifest = {
         "name": token_data["company_name"],
         "short_name": token_data["company_name"],
@@ -198,8 +210,7 @@ def fmt_time_filter(value):
     if not value:
         return "—"
     try:
-        from datetime import datetime as _dt
-        dt = _dt.fromisoformat(str(value)[:19])
+        dt = datetime.fromisoformat(str(value)[:19])
         h = dt.hour % 12 or 12
         return f"{h}:{dt.minute:02d} {'PM' if dt.hour >= 12 else 'AM'}"
     except Exception:
@@ -212,8 +223,7 @@ def fmt_date_filter(value):
     if not value:
         return "—"
     try:
-        from datetime import datetime as _dt
-        dt = _dt.fromisoformat(str(value)[:19])
+        dt = datetime.fromisoformat(str(value)[:19])
         return f"{dt.strftime('%b')} {dt.day}, {dt.year}"
     except Exception:
         return str(value)[:10]
@@ -225,8 +235,7 @@ def fmt_datetime_filter(value):
     if not value:
         return "—"
     try:
-        from datetime import datetime as _dt
-        dt = _dt.fromisoformat(str(value)[:19])
+        dt = datetime.fromisoformat(str(value)[:19])
         h = dt.hour % 12 or 12
         ampm = "PM" if dt.hour >= 12 else "AM"
         return f"{dt.strftime('%b')} {dt.day}, {dt.year} {h}:{dt.minute:02d} {ampm}"
@@ -240,8 +249,7 @@ def fmt_ts_filter(value):
     if not value:
         return "—"
     try:
-        from datetime import datetime as _dt
-        dt = _dt.fromisoformat(str(value)[:19])
+        dt = datetime.fromisoformat(str(value)[:19])
         h = dt.hour % 12 or 12
         ampm = "PM" if dt.hour >= 12 else "AM"
         return f"{dt.strftime('%b')} {dt.day}, {dt.year} {h}:{dt.minute:02d}:{dt.second:02d} {ampm}"
@@ -260,18 +268,57 @@ def add_security_headers(response):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' https://unpkg.com; "
         "style-src 'self' 'unsafe-inline' https://unpkg.com; "
         "img-src 'self' data: https://*.tile.openstreetmap.org; "
         "font-src 'self'; "
-        "media-src 'self' blob:;"
+        "media-src 'self' blob:; "
+        "worker-src 'self'; "
+        "connect-src 'self';"
     )
     if request.path.startswith("/admin") or request.path.startswith("/scheduler"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+    return response
+
+
+# ---------------------------------------------------------------------------
+# CSRF auto-injection into HTML responses
+# ---------------------------------------------------------------------------
+
+_FORM_POST_RE = re.compile(
+    r'(<form\b[^>]*method=["\']POST["\'][^>]*>)', re.IGNORECASE
+)
+
+_CSRF_FETCH_SCRIPT = """<script>(function(){var o=window.fetch;window.fetch=function(u,p){p=p||{};if(p.method&&p.method.toUpperCase()!=='GET'){p.headers=p.headers||{};var m=document.querySelector('meta[name="csrf-token"]');if(m&&!(p.headers instanceof Headers)){p.headers['X-CSRFToken']=p.headers['X-CSRFToken']||m.content;}else if(m&&p.headers instanceof Headers&&!p.headers.has('X-CSRFToken')){p.headers.set('X-CSRFToken',m.content);}}return o.call(this,u,p);};})();</script>"""
+
+
+@app.after_request
+def inject_csrf_tokens(response):
+    if (
+        response.content_type
+        and "text/html" in response.content_type
+        and response.status_code < 500
+    ):
+        token = generate_csrf()
+        html = response.get_data(as_text=True)
+        csrf_meta = f'<meta name="csrf-token" content="{token}">'
+        csrf_input = f'<input type="hidden" name="csrf_token" value="{token}">'
+        # Inject meta tag into <head> (case-insensitive)
+        head_idx = html.lower().find("<head>")
+        if head_idx >= 0:
+            html = html[:head_idx + 6] + csrf_meta + html[head_idx + 6:]
+        # Inject hidden input into all POST forms
+        html = _FORM_POST_RE.sub(rf"\1{csrf_input}", html)
+        # Inject fetch interceptor before </body> (case-insensitive)
+        body_idx = html.lower().rfind("</body>")
+        if body_idx >= 0:
+            html = html[:body_idx] + _CSRF_FETCH_SCRIPT + html[body_idx:]
+        response.set_data(html)
     return response
 
 
@@ -524,6 +571,36 @@ def _require_employee_session(token_str):
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def _geocode_address(address):
+    """Geocode *address* via Mapbox.  Returns (result_dict, status_code)."""
+    import urllib.parse
+    import urllib.request
+    from config import MAPBOX_TOKEN
+
+    if not MAPBOX_TOKEN:
+        return {"error": "Geocoding not configured"}, 500
+    encoded = urllib.parse.quote(address)
+    url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{encoded}.json?access_token={MAPBOX_TOKEN}&limit=1"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = json.loads(resp.read())
+            features = data.get("features", [])
+            if features:
+                lng, lat = features[0]["center"]
+                return {
+                    "lat": lat,
+                    "lng": lng,
+                    "display": features[0].get("place_name", ""),
+                }, 200
+            return {"error": "Address not found"}, 404
+    except Exception:
+        return {"error": "Geocoding service unavailable"}, 500
+
+
+# ---------------------------------------------------------------------------
 # Shared API endpoints
 # ---------------------------------------------------------------------------
 
@@ -533,33 +610,29 @@ def api_geocode():
     address = request.args.get("address", "")
     if not address:
         return jsonify({"error": "Address required"}), 400
+    result, status = _geocode_address(address)
+    return jsonify(result), status
 
-    import urllib.request
-    import json
-    encoded = urllib.parse.quote(address)
-    url = f"https://nominatim.openstreetmap.org/search?format=json&q={encoded}&limit=1"
-    req = urllib.request.Request(url, headers={"User-Agent": "BDB-Tools/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-            if data:
-                return jsonify({
-                    "lat": float(data[0]["lat"]),
-                    "lng": float(data[0]["lon"]),
-                    "display": data[0].get("display_name", ""),
-                })
-            return jsonify({"error": "Address not found"}), 404
-    except Exception:
-        return jsonify({"error": "Geocoding service unavailable"}), 500
+
+def _check_token_api_access(token_str):
+    """Verify token-based API access for admin or employee. Returns token_data or None."""
+    if not token_str:
+        return None
+    if not current_user.is_authenticated and not _require_employee_session(token_str):
+        return False  # explicit auth failure
+    token_data = database.get_token(token_str)
+    if not token_data or not token_data["is_active"]:
+        return None
+    return token_data
 
 
 @app.route("/api/jobs")
 def api_jobs():
     token_str = request.args.get("token", "")
-    if not token_str:
-        return jsonify([])
-    token_data = database.get_token(token_str)
-    if not token_data or not token_data["is_active"]:
+    access = _check_token_api_access(token_str)
+    if access is False:
+        return jsonify({"error": "Not authorized"}), 403
+    if not access:
         return jsonify([])
     jobs = database.get_jobs_by_token(token_str, active_only=True)
     return jsonify([{"id": j["id"], "name": j["job_name"]} for j in jobs])
@@ -568,10 +641,10 @@ def api_jobs():
 @app.route("/api/categories")
 def api_categories():
     token_str = request.args.get("token", "")
-    if not token_str:
-        return jsonify([])
-    token_data = database.get_token(token_str)
-    if not token_data or not token_data["is_active"]:
+    access = _check_token_api_access(token_str)
+    if access is False:
+        return jsonify({"error": "Not authorized"}), 403
+    if not access:
         return jsonify([])
     cats = database.get_categories_by_token(token_str, active_only=True)
     return jsonify([{"id": c["id"], "name": c["name"]} for c in cats])
@@ -580,10 +653,10 @@ def api_categories():
 @app.route("/api/common-tasks")
 def api_common_tasks():
     token_str = request.args.get("token", "")
-    if not token_str:
-        return jsonify([])
-    token_data = database.get_token(token_str)
-    if not token_data or not token_data["is_active"]:
+    access = _check_token_api_access(token_str)
+    if access is False:
+        return jsonify({"error": "Not authorized"}), 403
+    if not access:
         return jsonify([])
     tasks = database.get_common_tasks_by_token(token_str, active_only=True)
     return jsonify([{"id": t["id"], "name": t["name"]} for t in tasks])
@@ -594,6 +667,10 @@ def api_job_tasks():
     job_id = request.args.get("job_id", type=int)
     if not job_id:
         return jsonify([])
+    if not current_user.is_authenticated:
+        job = database.get_job(job_id)
+        if not job or not _require_employee_session(job["token"]):
+            return jsonify({"error": "Not authorized"}), 403
     tasks = database.get_job_tasks(job_id, active_only=True)
     return jsonify([{"id": t["id"], "name": t["name"]} for t in tasks])
 
@@ -638,6 +715,8 @@ from routes.finance import finance_bp
 from routes.customers import customers_bp
 from routes.task_templates import task_templates_bp
 from routes.invoices import invoices_bp
+from routes.notifications import notifications_bp
+from routes.qbo import qbo_bp
 
 app.register_blueprint(admin_bp)
 app.register_blueprint(timekeeper_bp)
@@ -651,6 +730,8 @@ app.register_blueprint(finance_bp)
 app.register_blueprint(customers_bp)
 app.register_blueprint(task_templates_bp)
 app.register_blueprint(invoices_bp)
+app.register_blueprint(notifications_bp)
+app.register_blueprint(qbo_bp)
 
 
 # ---------------------------------------------------------------------------

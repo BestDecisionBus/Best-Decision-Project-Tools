@@ -223,11 +223,11 @@
                                 {% if inv.status == 'paid' %}
                                 <span class="badge badge-active">Paid</span>
                                 {% elif inv.status == 'sent' %}
-                                <span class="badge" style="background: #dbeafe; color: #1d4ed8;">Sent</span>
+                                <span class="badge badge-blue">Sent</span>
                                 {% elif inv.status == 'void' %}
-                                <span class="badge" style="background: #f3f4f6; color: #6b7280;">Void</span>
+                                <span class="badge badge-gray">Void</span>
                                 {% else %}
-                                <span class="badge" style="background: #fef3c7; color: #92400e;">Draft</span>
+                                <span class="badge badge-yellow">Draft</span>
                                 {% endif %}
                             </td>
                             <td>

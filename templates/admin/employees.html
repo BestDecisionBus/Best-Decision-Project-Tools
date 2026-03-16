@@ -21,21 +21,7 @@
 
         <h2>Employees</h2>
 
-        {% if current_user.is_bdb or tokens|length > 1 %}
-            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
-                <label for="token-select">Company</label>
-                <select id="token-select" onchange="window.location.href='?token=' + this.value">
-                    {% if current_user.is_bdb %}<option value="">All Companies</option>{% endif %}
-                    {% for t in tokens %}
-                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-        {% else %}
-            {% if selected_token %}
-            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
-            {% endif %}
-        {% endif %}
+        {% include 'admin/_token_selector.html' %}
 
         {% if selected_token %}
         <div class="meta-card" style="margin-bottom: 12px; padding: 12px 16px; background: var(--gray-50); border: 1px dashed var(--gray-300); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
@@ -84,7 +70,7 @@
                         <input type="text" id="password" name="password" placeholder="Set login password" autocomplete="off">
                     </div>
                 </div>
-                <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 12px;">
+                <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 12px;">
                     <label style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 8px 4px; border: 1px solid var(--gray-200); border-radius: 6px; background: #fff;">
                         <input type="checkbox" name="timekeeper_access" value="1" checked> Timekeeper
                     </label>
@@ -102,6 +88,9 @@
                     </label>
                     <label style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 8px 4px; border: 1px solid var(--gray-200); border-radius: 6px; background: #fff;">
                         <input type="checkbox" name="tasks_access" value="1" checked> Tasks
+                    </label>
+                    <label style="display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 8px 4px; border: 1px solid var(--orange); border-radius: 6px; background: #fff7ed;" title="Can undo persistent task completions">
+                        <input type="checkbox" name="task_uncheck_access" value="1"> Undo Tasks
                     </label>
                 </div>
                 <div style="margin-top: 12px;">
@@ -125,6 +114,7 @@
                         <th>Rcpts</th>
                         <th>Est</th>
                         <th>Tasks</th>
+                        <th title="Can undo persistent task completions">Undo Tasks</th>
                         <th>Username</th>
                         <th>Status</th>
                         <th>Created</th>
@@ -179,6 +169,12 @@
                             <input type="checkbox" id="tasks-input-{{ emp.id }}"
                                    {% if emp.tasks_access %}checked{% endif %}
                                    onchange="toggleAccess({{ emp.id }}, 'tasks_access', this.checked)">
+                        </td>
+                        <td style="text-align: center;">
+                            <input type="checkbox" id="undo-tasks-input-{{ emp.id }}"
+                                   {% if emp.task_uncheck_access %}checked{% endif %}
+                                   onchange="toggleAccess({{ emp.id }}, 'task_uncheck_access', this.checked)"
+                                   title="Can undo persistent task completions">
                         </td>
                         <td>
                             {% if emp.username %}

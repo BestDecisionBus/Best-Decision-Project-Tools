@@ -21,6 +21,79 @@ def get_db():
 
 
 # ---------------------------------------------------------------------------
+# Generic CRUD helpers (private)
+# ---------------------------------------------------------------------------
+
+def _get_all_by_token(table, token_str, active_only=False, order="sort_order ASC, name ASC"):
+    """Generic: fetch all rows for a token, optionally filtering by is_active."""
+    conn = get_db()
+    if active_only:
+        rows = conn.execute(
+            f"SELECT * FROM {table} WHERE token = ? AND is_active = 1 ORDER BY {order}",
+            (token_str,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            f"SELECT * FROM {table} WHERE token = ? ORDER BY {order}",
+            (token_str,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def _get_by_id(table, row_id):
+    """Generic: fetch a single row by id."""
+    conn = get_db()
+    row = conn.execute(f"SELECT * FROM {table} WHERE id = ?", (row_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def _toggle_active(table, row_id, column="is_active"):
+    """Generic: flip a boolean column between 0 and 1."""
+    conn = get_db()
+    conn.execute(
+        f"UPDATE {table} SET {column} = CASE WHEN {column} = 1 THEN 0 ELSE 1 END WHERE id = ?",
+        (row_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _toggle_active_returning(table, row_id, field="*", column="is_active"):
+    """Generic: flip a boolean column and return a field or the full row."""
+    conn = get_db()
+    conn.execute(
+        f"UPDATE {table} SET {column} = CASE WHEN {column} = 1 THEN 0 ELSE 1 END WHERE id = ?",
+        (row_id,),
+    )
+    conn.commit()
+    row = conn.execute(f"SELECT {field} FROM {table} WHERE id = ?", (row_id,)).fetchone()
+    conn.close()
+    if field == "*":
+        return dict(row) if row else None
+    return row[0] if row else None
+
+
+def _bulk_deactivate(table, token_str):
+    """Generic: set is_active = 0 for all rows with this token."""
+    conn = get_db()
+    conn.execute(f"UPDATE {table} SET is_active = 0 WHERE token = ?", (token_str,))
+    conn.commit()
+    conn.close()
+
+
+def _get_max_sort_order(table, token_str):
+    """Generic: return the highest sort_order value for a token."""
+    conn = get_db()
+    row = conn.execute(
+        f"SELECT COALESCE(MAX(sort_order), 0) AS mx FROM {table} WHERE token = ?", (token_str,)
+    ).fetchone()
+    conn.close()
+    return row["mx"] if row else 0
+
+
+# ---------------------------------------------------------------------------
 # Schema
 # ---------------------------------------------------------------------------
 
@@ -398,7 +471,11 @@ def init_db():
     _add_column_if_missing(conn, "tokens",    "feature_estimates",  "INTEGER DEFAULT 1")
     _add_column_if_missing(conn, "tokens",    "dashboard_tier",     "TEXT DEFAULT 'none'")
     _add_column_if_missing(conn, "schedules", "estimate_id",        "INTEGER DEFAULT NULL")
-    _add_column_if_missing(conn, "employees", "tasks_access",       "INTEGER DEFAULT 1")
+    _add_column_if_missing(conn, "employees", "tasks_access",          "INTEGER DEFAULT 1")
+    _add_column_if_missing(conn, "employees", "task_uncheck_access",   "INTEGER DEFAULT 0")
+    _add_column_if_missing(conn, "task_completions", "reset_by_employee_id",   "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "task_completions", "reset_by_employee_name", 'TEXT DEFAULT ""')
+    _add_column_if_missing(conn, "task_completions", "reset_at",               "TEXT DEFAULT NULL")
     conn.commit()
 
     # Invoicing
@@ -579,6 +656,103 @@ def init_db():
             PRIMARY KEY (key, bucket)
         )
     """)
+
+    # Push notifications infrastructure
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            token          TEXT NOT NULL,
+            recipient_type TEXT NOT NULL CHECK(recipient_type IN ('employee','admin')),
+            recipient_id   INTEGER NOT NULL,
+            endpoint       TEXT NOT NULL UNIQUE,
+            p256dh         TEXT NOT NULL,
+            auth           TEXT NOT NULL,
+            user_agent     TEXT DEFAULT '',
+            created_at     TEXT NOT NULL,
+            FOREIGN KEY (token) REFERENCES tokens(token)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_push_subs_recipient "
+        "ON push_subscriptions(token, recipient_type, recipient_id)"
+    )
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS notifications (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            token          TEXT NOT NULL,
+            recipient_type TEXT NOT NULL CHECK(recipient_type IN ('employee','admin','all_admins')),
+            recipient_id   INTEGER,
+            category       TEXT NOT NULL DEFAULT 'info',
+            title          TEXT NOT NULL,
+            body           TEXT NOT NULL DEFAULT '',
+            url            TEXT NOT NULL DEFAULT '',
+            is_read        INTEGER NOT NULL DEFAULT 0,
+            push_sent      INTEGER NOT NULL DEFAULT 0,
+            push_error     TEXT DEFAULT '',
+            created_at     TEXT NOT NULL,
+            FOREIGN KEY (token) REFERENCES tokens(token)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notifications_recipient "
+        "ON notifications(token, recipient_type, recipient_id, is_read)"
+    )
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS employee_notification_prefs (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id      INTEGER NOT NULL,
+            token            TEXT NOT NULL,
+            push_enabled     INTEGER DEFAULT 1,
+            cat_job_updates  INTEGER DEFAULT 1,
+            cat_shift_remind INTEGER DEFAULT 1,
+            cat_schedule     INTEGER DEFAULT 1,
+            cat_chat         INTEGER DEFAULT 1,
+            UNIQUE(employee_id, token),
+            FOREIGN KEY (token) REFERENCES tokens(token)
+        )
+    """)
+
+    # QuickBooks Online integration
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS qbo_connections (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            token            TEXT NOT NULL UNIQUE,
+            realm_id         TEXT NOT NULL DEFAULT '',
+            access_token     TEXT NOT NULL DEFAULT '',
+            refresh_token    TEXT NOT NULL DEFAULT '',
+            token_expires_at TEXT NOT NULL DEFAULT '',
+            connected_at     TEXT NOT NULL DEFAULT '',
+            last_refreshed   TEXT NOT NULL DEFAULT '',
+            company_name_qbo TEXT NOT NULL DEFAULT '',
+            default_item_id  TEXT NOT NULL DEFAULT '',
+            is_active        INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY (token) REFERENCES tokens(token)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_qbo_connections_token ON qbo_connections(token)"
+    )
+    _add_column_if_missing(conn, "estimates",  "qbo_estimate_id",  "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "estimates",  "qbo_synced_at",    "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "estimates",  "qbo_sync_error",   "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "estimates",  "qbo_sync_token",   "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "invoices",   "qbo_invoice_id",   "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "invoices",   "qbo_synced_at",    "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "invoices",   "qbo_sync_error",   "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "invoices",   "qbo_sync_token",   "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "customers",  "qbo_customer_id",  "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "customers",  "qbo_synced_at",    "TEXT DEFAULT ''")
+
+    _add_column_if_missing(conn, "tokens", "feature_push_notify",       "INTEGER DEFAULT 0")
+    _add_column_if_missing(conn, "tokens", "notify_window_start",       "TEXT DEFAULT '06:00'")
+    _add_column_if_missing(conn, "tokens", "notify_window_end",         "TEXT DEFAULT '21:00'")
+    _add_column_if_missing(conn, "tokens", "notify_clockout_end",       "TEXT DEFAULT '23:59'")
+    _add_column_if_missing(conn, "tokens", "notify_chat_start",         "TEXT DEFAULT '06:00'")
+    _add_column_if_missing(conn, "tokens", "notify_chat_end",           "TEXT DEFAULT '21:00'")
+    _add_column_if_missing(conn, "tokens", "clockout_reminder_minutes", "INTEGER DEFAULT 15")
+
     conn.commit()
 
     # Migrate legacy category_1_id / category_2_id into junction table
@@ -991,15 +1165,7 @@ def update_token(token_id, company_name, logo_file=None):
 
 
 def toggle_token(token_id):
-    conn = get_db()
-    conn.execute(
-        "UPDATE tokens SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?",
-        (token_id,),
-    )
-    conn.commit()
-    t = conn.execute("SELECT is_active FROM tokens WHERE id = ?", (token_id,)).fetchone()
-    conn.close()
-    return t["is_active"] if t else None
+    return _toggle_active_returning("tokens", token_id, "is_active")
 
 
 def regenerate_token(token_id):
@@ -1075,18 +1241,18 @@ def get_employee(employee_id):
 def create_employee(name, employee_id_str, token_str, username=None, password=None,
                      hourly_wage=None, receipt_access=0, timekeeper_access=1,
                      job_photos_access=1, schedule_access=1, estimate_access=0,
-                     tasks_access=1):
+                     tasks_access=1, task_uncheck_access=0):
     conn = get_db()
     now = datetime.now().isoformat()
     pw_hash = generate_password_hash(password) if password else None
     conn.execute(
         """INSERT INTO employees (name, employee_id, token, username, password_hash,
            hourly_wage, receipt_access, timekeeper_access, job_photos_access,
-           schedule_access, estimate_access, tasks_access, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           schedule_access, estimate_access, tasks_access, task_uncheck_access, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (name, employee_id_str, token_str, username or None, pw_hash, hourly_wage,
          receipt_access, timekeeper_access, job_photos_access, schedule_access,
-         estimate_access, tasks_access, now),
+         estimate_access, tasks_access, task_uncheck_access, now),
     )
     conn.commit()
     conn.close()
@@ -1098,7 +1264,8 @@ _SENTINEL = object()
 def update_employee(emp_id, name, employee_id_str, hourly_wage=_SENTINEL,
                     receipt_access=_SENTINEL, timekeeper_access=_SENTINEL,
                     job_photos_access=_SENTINEL, schedule_access=_SENTINEL,
-                    estimate_access=_SENTINEL, tasks_access=_SENTINEL):
+                    estimate_access=_SENTINEL, tasks_access=_SENTINEL,
+                    task_uncheck_access=_SENTINEL):
     conn = get_db()
     fields = ["name = ?", "employee_id = ?"]
     params = [name, employee_id_str]
@@ -1123,6 +1290,9 @@ def update_employee(emp_id, name, employee_id_str, hourly_wage=_SENTINEL,
     if tasks_access is not _SENTINEL:
         fields.append("tasks_access = ?")
         params.append(tasks_access)
+    if task_uncheck_access is not _SENTINEL:
+        fields.append("task_uncheck_access = ?")
+        params.append(task_uncheck_access)
     params.append(emp_id)
     conn.execute(f"UPDATE employees SET {', '.join(fields)} WHERE id = ?", params)
     conn.commit()
@@ -1130,13 +1300,7 @@ def update_employee(emp_id, name, employee_id_str, hourly_wage=_SENTINEL,
 
 
 def toggle_employee(emp_id):
-    conn = get_db()
-    conn.execute(
-        "UPDATE employees SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?",
-        (emp_id,),
-    )
-    conn.commit()
-    conn.close()
+    _toggle_active("employees", emp_id)
 
 
 def get_employee_by_username(username, token_str):
@@ -1295,13 +1459,7 @@ def update_job(job_id, job_name, job_address, latitude, longitude, customer_id=N
 
 
 def toggle_job(job_id):
-    conn = get_db()
-    conn.execute(
-        "UPDATE jobs SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?",
-        (job_id,),
-    )
-    conn.commit()
-    conn.close()
+    _toggle_active("jobs", job_id)
 
 
 def archive_job(job_id):
@@ -1331,26 +1489,11 @@ def unarchive_job(job_id):
 # ---------------------------------------------------------------------------
 
 def get_categories_by_token(token_str, active_only=False):
-    conn = get_db()
-    if active_only:
-        rows = conn.execute(
-            "SELECT * FROM categories WHERE token = ? AND is_active = 1 ORDER BY sort_order ASC, name ASC",
-            (token_str,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM categories WHERE token = ? ORDER BY sort_order ASC, name ASC",
-            (token_str,),
-        ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    return _get_all_by_token("categories", token_str, active_only)
 
 
 def get_category(cat_id):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM categories WHERE id = ?", (cat_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    return _get_by_id("categories", cat_id)
 
 
 def create_category(name, token_str, sort_order=0, account_code=""):
@@ -1381,29 +1524,15 @@ def update_category(cat_id, name, sort_order=None, account_code=None):
 
 
 def toggle_category(cat_id):
-    conn = get_db()
-    conn.execute(
-        "UPDATE categories SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?",
-        (cat_id,),
-    )
-    conn.commit()
-    conn.close()
+    _toggle_active("categories", cat_id)
 
 
 def bulk_deactivate_categories(token_str):
-    conn = get_db()
-    conn.execute("UPDATE categories SET is_active = 0 WHERE token = ?", (token_str,))
-    conn.commit()
-    conn.close()
+    _bulk_deactivate("categories", token_str)
 
 
 def get_max_sort_order_categories(token_str):
-    conn = get_db()
-    row = conn.execute(
-        "SELECT COALESCE(MAX(sort_order), 0) AS mx FROM categories WHERE token = ?", (token_str,)
-    ).fetchone()
-    conn.close()
-    return row["mx"] if row else 0
+    return _get_max_sort_order("categories", token_str)
 
 
 # ---------------------------------------------------------------------------
@@ -1411,26 +1540,11 @@ def get_max_sort_order_categories(token_str):
 # ---------------------------------------------------------------------------
 
 def get_common_tasks_by_token(token_str, active_only=False):
-    conn = get_db()
-    if active_only:
-        rows = conn.execute(
-            "SELECT * FROM common_tasks WHERE token = ? AND is_active = 1 ORDER BY sort_order ASC, name ASC",
-            (token_str,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM common_tasks WHERE token = ? ORDER BY sort_order ASC, name ASC",
-            (token_str,),
-        ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    return _get_all_by_token("common_tasks", token_str, active_only)
 
 
 def get_common_task(task_id):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM common_tasks WHERE id = ?", (task_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    return _get_by_id("common_tasks", task_id)
 
 
 def create_common_task(name, token_str, sort_order=0):
@@ -1458,29 +1572,15 @@ def update_common_task(task_id, name, sort_order=None):
 
 
 def toggle_common_task(task_id):
-    conn = get_db()
-    conn.execute(
-        "UPDATE common_tasks SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?",
-        (task_id,),
-    )
-    conn.commit()
-    conn.close()
+    _toggle_active("common_tasks", task_id)
 
 
 def bulk_deactivate_common_tasks(token_str):
-    conn = get_db()
-    conn.execute("UPDATE common_tasks SET is_active = 0 WHERE token = ?", (token_str,))
-    conn.commit()
-    conn.close()
+    _bulk_deactivate("common_tasks", token_str)
 
 
 def get_max_sort_order_common_tasks(token_str):
-    conn = get_db()
-    row = conn.execute(
-        "SELECT COALESCE(MAX(sort_order), 0) AS mx FROM common_tasks WHERE token = ?", (token_str,)
-    ).fetchone()
-    conn.close()
-    return row["mx"] if row else 0
+    return _get_max_sort_order("common_tasks", token_str)
 
 
 # ---------------------------------------------------------------------------
@@ -1512,26 +1612,11 @@ def seed_default_shift_types(token_str):
 
 
 def get_shift_types_by_token(token_str, active_only=False):
-    conn = get_db()
-    if active_only:
-        rows = conn.execute(
-            "SELECT * FROM shift_types WHERE token = ? AND is_active = 1 ORDER BY sort_order ASC, name ASC",
-            (token_str,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM shift_types WHERE token = ? ORDER BY sort_order ASC, name ASC",
-            (token_str,),
-        ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    return _get_all_by_token("shift_types", token_str, active_only)
 
 
 def get_shift_type(shift_id):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM shift_types WHERE id = ?", (shift_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    return _get_by_id("shift_types", shift_id)
 
 
 def create_shift_type(name, start_time, end_time, token_str, sort_order=0):
@@ -1562,29 +1647,15 @@ def update_shift_type(shift_id, name, start_time, end_time, sort_order=None):
 
 
 def toggle_shift_type(shift_id):
-    conn = get_db()
-    conn.execute(
-        "UPDATE shift_types SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?",
-        (shift_id,),
-    )
-    conn.commit()
-    conn.close()
+    _toggle_active("shift_types", shift_id)
 
 
 def bulk_deactivate_shift_types(token_str):
-    conn = get_db()
-    conn.execute("UPDATE shift_types SET is_active = 0 WHERE token = ?", (token_str,))
-    conn.commit()
-    conn.close()
+    _bulk_deactivate("shift_types", token_str)
 
 
 def get_max_sort_order_shift_types(token_str):
-    conn = get_db()
-    row = conn.execute(
-        "SELECT COALESCE(MAX(sort_order), 0) AS mx FROM shift_types WHERE token = ?", (token_str,)
-    ).fetchone()
-    conn.close()
-    return row["mx"] if row else 0
+    return _get_max_sort_order("shift_types", token_str)
 
 
 # ---------------------------------------------------------------------------
@@ -2745,15 +2816,7 @@ def claim_next_pending():
 
 
 def toggle_processed(submission_id):
-    conn = get_db()
-    conn.execute(
-        "UPDATE submissions SET processed = CASE WHEN processed = 1 THEN 0 ELSE 1 END WHERE id = ?",
-        (submission_id,),
-    )
-    conn.commit()
-    row = conn.execute("SELECT processed FROM submissions WHERE id = ?", (submission_id,)).fetchone()
-    conn.close()
-    return row["processed"] if row else None
+    return _toggle_active_returning("submissions", submission_id, "processed", column="processed")
 
 
 def get_submission_categories(submission_id):
@@ -3332,15 +3395,7 @@ def get_job_task(task_id):
 
 
 def toggle_job_task(task_id):
-    conn = get_db()
-    conn.execute(
-        "UPDATE job_tasks SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?",
-        (task_id,),
-    )
-    conn.commit()
-    row = conn.execute("SELECT * FROM job_tasks WHERE id = ?", (task_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    return _toggle_active_returning("job_tasks", task_id)
 
 
 # ---------------------------------------------------------------------------
@@ -3404,26 +3459,11 @@ def delete_estimate_item(item_id):
 # ---------------------------------------------------------------------------
 
 def get_message_snippets_by_token(token_str, active_only=False):
-    conn = get_db()
-    if active_only:
-        rows = conn.execute(
-            "SELECT * FROM message_snippets WHERE token = ? AND is_active = 1 ORDER BY sort_order ASC, name ASC",
-            (token_str,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM message_snippets WHERE token = ? ORDER BY sort_order ASC, name ASC",
-            (token_str,),
-        ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    return _get_all_by_token("message_snippets", token_str, active_only)
 
 
 def get_message_snippet(snippet_id):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM message_snippets WHERE id = ?", (snippet_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    return _get_by_id("message_snippets", snippet_id)
 
 
 def create_message_snippet(name, token_str, sort_order=0):
@@ -3451,29 +3491,15 @@ def update_message_snippet(snippet_id, name, sort_order=None):
 
 
 def toggle_message_snippet(snippet_id):
-    conn = get_db()
-    conn.execute(
-        "UPDATE message_snippets SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?",
-        (snippet_id,),
-    )
-    conn.commit()
-    conn.close()
+    _toggle_active("message_snippets", snippet_id)
 
 
 def bulk_deactivate_message_snippets(token_str):
-    conn = get_db()
-    conn.execute("UPDATE message_snippets SET is_active = 0 WHERE token = ?", (token_str,))
-    conn.commit()
-    conn.close()
+    _bulk_deactivate("message_snippets", token_str)
 
 
 def get_max_sort_order_message_snippets(token_str):
-    conn = get_db()
-    row = conn.execute(
-        "SELECT COALESCE(MAX(sort_order), 0) AS mx FROM message_snippets WHERE token = ?", (token_str,)
-    ).fetchone()
-    conn.close()
-    return row["mx"] if row else 0
+    return _get_max_sort_order("message_snippets", token_str)
 
 
 # ---------------------------------------------------------------------------
@@ -3481,26 +3507,11 @@ def get_max_sort_order_message_snippets(token_str):
 # ---------------------------------------------------------------------------
 
 def get_products_services_by_token(token_str, active_only=False):
-    conn = get_db()
-    if active_only:
-        rows = conn.execute(
-            "SELECT * FROM products_services WHERE token = ? AND is_active = 1 ORDER BY sort_order ASC, name ASC",
-            (token_str,),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM products_services WHERE token = ? ORDER BY sort_order ASC, name ASC",
-            (token_str,),
-        ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    return _get_all_by_token("products_services", token_str, active_only)
 
 
 def get_product_service(ps_id):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM products_services WHERE id = ?", (ps_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    return _get_by_id("products_services", ps_id)
 
 
 def create_product_service(name, unit_price, token_str, sort_order=0, unit_cost=0, item_type='product', taxable=0):
@@ -3536,29 +3547,15 @@ def update_product_service(ps_id, **kwargs):
 
 
 def toggle_product_service(ps_id):
-    conn = get_db()
-    conn.execute(
-        "UPDATE products_services SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?",
-        (ps_id,),
-    )
-    conn.commit()
-    conn.close()
+    _toggle_active("products_services", ps_id)
 
 
 def bulk_deactivate_products_services(token_str):
-    conn = get_db()
-    conn.execute("UPDATE products_services SET is_active = 0 WHERE token = ?", (token_str,))
-    conn.commit()
-    conn.close()
+    _bulk_deactivate("products_services", token_str)
 
 
 def get_max_sort_order_products_services(token_str):
-    conn = get_db()
-    row = conn.execute(
-        "SELECT COALESCE(MAX(sort_order), 0) AS mx FROM products_services WHERE token = ?", (token_str,)
-    ).fetchone()
-    conn.close()
-    return row["mx"] if row else 0
+    return _get_max_sort_order("products_services", token_str)
 
 
 # ---------------------------------------------------------------------------
@@ -3917,24 +3914,73 @@ def log_task_completion(token_str: str, job_id: int, estimate_id, schedule_id,
 
 def remove_task_completion(token_str: str, job_id: int, task_source: str,
                             task_ref_id, task_description: str,
-                            employee_id: int, shift_date: str) -> None:
+                            employee_id: int, shift_date: str,
+                            reset_by_employee_id: int = None,
+                            reset_by_employee_name: str = "",
+                            persistent: bool = False) -> None:
+    """Soft-delete a task completion by setting is_reset=1 with audit fields.
+
+    For refreshing jobs (persistent=False): filters by employee_id + shift_date.
+    For persistent jobs (persistent=True): updates ALL is_reset=0 rows for the task
+    regardless of who checked it or when.
+    """
     conn = get_db()
-    if task_ref_id is not None:
-        conn.execute(
-            """DELETE FROM task_completions
-               WHERE token = ? AND job_id = ? AND task_source = ?
-               AND task_ref_id = ? AND employee_id = ? AND shift_date = ? AND is_reset = 0""",
-            (token_str, job_id, task_source, task_ref_id, employee_id, shift_date),
-        )
+    now = datetime.now().isoformat()
+    set_clause = "is_reset=1, reset_by_employee_id=?, reset_by_employee_name=?, reset_at=?"
+    set_params = [reset_by_employee_id, reset_by_employee_name, now]
+
+    if persistent:
+        if task_ref_id is not None:
+            conn.execute(
+                f"""UPDATE task_completions SET {set_clause}
+                   WHERE token=? AND job_id=? AND task_source=? AND task_ref_id=? AND is_reset=0""",
+                set_params + [token_str, job_id, task_source, task_ref_id],
+            )
+        else:
+            conn.execute(
+                f"""UPDATE task_completions SET {set_clause}
+                   WHERE token=? AND job_id=? AND task_source=? AND task_description=? AND is_reset=0""",
+                set_params + [token_str, job_id, task_source, task_description],
+            )
     else:
-        conn.execute(
-            """DELETE FROM task_completions
-               WHERE token = ? AND job_id = ? AND task_source = ?
-               AND task_description = ? AND employee_id = ? AND shift_date = ? AND is_reset = 0""",
-            (token_str, job_id, task_source, task_description, employee_id, shift_date),
-        )
+        if task_ref_id is not None:
+            conn.execute(
+                f"""UPDATE task_completions SET {set_clause}
+                   WHERE token=? AND job_id=? AND task_source=?
+                   AND task_ref_id=? AND employee_id=? AND shift_date=? AND is_reset=0""",
+                set_params + [token_str, job_id, task_source, task_ref_id, employee_id, shift_date],
+            )
+        else:
+            conn.execute(
+                f"""UPDATE task_completions SET {set_clause}
+                   WHERE token=? AND job_id=? AND task_source=?
+                   AND task_description=? AND employee_id=? AND shift_date=? AND is_reset=0""",
+                set_params + [token_str, job_id, task_source, task_description, employee_id, shift_date],
+            )
     conn.commit()
     conn.close()
+
+
+def get_task_completion_record(token_str: str, job_id: int, task_source: str,
+                               task_ref_id, task_description: str):
+    """Return the most recent active (is_reset=0) completion row for a task, or None."""
+    conn = get_db()
+    if task_ref_id is not None:
+        row = conn.execute(
+            """SELECT * FROM task_completions
+               WHERE token=? AND job_id=? AND task_source=? AND task_ref_id=? AND is_reset=0
+               ORDER BY completed_at DESC LIMIT 1""",
+            (token_str, job_id, task_source, int(task_ref_id)),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """SELECT * FROM task_completions
+               WHERE token=? AND job_id=? AND task_source=? AND task_description=? AND is_reset=0
+               ORDER BY completed_at DESC LIMIT 1""",
+            (token_str, job_id, task_source, task_description),
+        ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def get_completions_for_job_date(token_str: str, job_id: int, shift_date: str) -> list:
@@ -3966,9 +4012,13 @@ def get_completions_for_admin(token_str: str, job_id: int = None, days_back: int
 def purge_old_task_completions(token_str: str, retention_days: int) -> int:
     conn = get_db()
     cutoff = (datetime.now() - timedelta(days=retention_days)).isoformat()
+    # Only purge completions for refreshing jobs (reset_per_visit=1).
+    # Persistent jobs (reset_per_visit=0) are never auto-purged.
     cur = conn.execute(
-        "DELETE FROM task_completions WHERE token = ? AND completed_at < ?",
-        (token_str, cutoff),
+        """DELETE FROM task_completions
+           WHERE token=? AND completed_at < ?
+           AND job_id IN (SELECT id FROM jobs WHERE token=? AND reset_per_visit=1)""",
+        (token_str, cutoff, token_str),
     )
     conn.commit()
     deleted = cur.rowcount
@@ -3994,7 +4044,23 @@ def get_tasks_for_schedule(token_str: str, schedule_id: int, shift_date: str) ->
     estimate_id = sched.get("estimate_id")
     include_pt = sched.get("include_project_tasks", 0)
 
-    completions = get_completions_for_job_date(token_str, sched["job_id"], shift_date)
+    # Determine task mode for this job
+    job = get_job(sched["job_id"])
+    reset_per_visit = job.get("reset_per_visit", 0) if job else 1
+
+    if reset_per_visit:
+        # Refreshing: completions for today's shift only
+        completions = get_completions_for_job_date(token_str, sched["job_id"], shift_date)
+    else:
+        # Persistent: all active completions for this job regardless of date
+        _c = get_db()
+        comp_rows = _c.execute(
+            "SELECT * FROM task_completions WHERE token=? AND job_id=? AND is_reset=0 "
+            "ORDER BY completed_at ASC",
+            (token_str, sched["job_id"]),
+        ).fetchall()
+        _c.close()
+        completions = [dict(r) for r in comp_rows]
     completed_keys = set()
     completion_map = {}
     for c in completions:
@@ -4668,3 +4734,416 @@ def get_active_time_entry_for_employee(employee_id: int, token_str: str) -> dict
     ).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Push Notifications
+# ---------------------------------------------------------------------------
+
+def upsert_push_subscription(token, recipient_type, recipient_id,
+                              endpoint, p256dh, auth, user_agent=""):
+    """Insert or update a push subscription by endpoint (unique device/browser)."""
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        """INSERT INTO push_subscriptions
+               (token, recipient_type, recipient_id, endpoint, p256dh, auth, user_agent, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(endpoint) DO UPDATE SET
+               token=excluded.token,
+               recipient_type=excluded.recipient_type,
+               recipient_id=excluded.recipient_id,
+               p256dh=excluded.p256dh,
+               auth=excluded.auth,
+               user_agent=excluded.user_agent""",
+        (token, recipient_type, recipient_id, endpoint, p256dh, auth, user_agent, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_push_subscription_by_endpoint(endpoint):
+    """Remove a subscription (used when push returns 404/410 Gone)."""
+    conn = get_db()
+    conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+    conn.commit()
+    conn.close()
+
+
+def get_push_subscriptions_for_recipients(token, recipient_type, recipient_ids):
+    """Return push subscriptions for a list of recipient IDs."""
+    if not recipient_ids:
+        return []
+    conn = get_db()
+    placeholders = ",".join("?" * len(recipient_ids))
+    rows = conn.execute(
+        f"SELECT * FROM push_subscriptions "
+        f"WHERE token=? AND recipient_type=? AND recipient_id IN ({placeholders})",
+        [token, recipient_type] + list(recipient_ids),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_all_admin_push_subscriptions(token):
+    """Return all admin push subscriptions for a company."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT ps.* FROM push_subscriptions ps "
+        "JOIN users u ON ps.recipient_id = u.id "
+        "WHERE ps.token = ? AND ps.recipient_type = 'admin'",
+        (token,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def create_notification(token, recipient_type, recipient_id, category,
+                        title, body, url=""):
+    """Insert a notification record. Returns the new notification id."""
+    conn = get_db()
+    now = datetime.now().isoformat()
+    cur = conn.execute(
+        """INSERT INTO notifications
+               (token, recipient_type, recipient_id, category, title, body, url, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (token, recipient_type, recipient_id, category, title, body, url, now),
+    )
+    notif_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return notif_id
+
+
+def get_unread_notifications(token, recipient_type, recipient_id, limit=50):
+    """Return unread notifications. Admins also receive 'all_admins' broadcasts."""
+    conn = get_db()
+    if recipient_type == "admin":
+        rows = conn.execute(
+            """SELECT * FROM notifications
+               WHERE token = ?
+                 AND ((recipient_type = 'admin' AND recipient_id = ?)
+                      OR recipient_type = 'all_admins')
+                 AND is_read = 0
+               ORDER BY created_at DESC LIMIT ?""",
+            (token, recipient_id, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT * FROM notifications
+               WHERE token = ? AND recipient_type = ? AND recipient_id = ? AND is_read = 0
+               ORDER BY created_at DESC LIMIT ?""",
+            (token, recipient_type, recipient_id, limit),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def mark_notifications_read(token, recipient_type, recipient_id, notification_ids=None):
+    """Mark specific notification IDs read, or all unread for this recipient."""
+    conn = get_db()
+    if notification_ids:
+        placeholders = ",".join("?" * len(notification_ids))
+        conn.execute(
+            f"UPDATE notifications SET is_read = 1 "
+            f"WHERE token = ? AND recipient_id = ? AND id IN ({placeholders})",
+            [token, recipient_id] + list(notification_ids),
+        )
+    else:
+        if recipient_type == "admin":
+            conn.execute(
+                "UPDATE notifications SET is_read = 1 "
+                "WHERE token = ? AND ((recipient_type='admin' AND recipient_id=?) "
+                "OR recipient_type='all_admins')",
+                (token, recipient_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE notifications SET is_read = 1 "
+                "WHERE token = ? AND recipient_type = ? AND recipient_id = ?",
+                (token, recipient_type, recipient_id),
+            )
+    conn.commit()
+    conn.close()
+
+
+def mark_notification_push_sent(notification_id, error=""):
+    conn = get_db()
+    conn.execute(
+        "UPDATE notifications SET push_sent = 1, push_error = ? WHERE id = ?",
+        (error, notification_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_clocked_in_employees_for_job(token, job_id):
+    """Return employees currently clocked into a specific job."""
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT te.employee_id, e.name AS employee_name
+           FROM time_entries te
+           JOIN employees e ON te.employee_id = e.id
+           WHERE te.token = ? AND te.job_id = ? AND te.status = 'active'""",
+        (token, job_id),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_overdue_schedule_clock_ins():
+    """Return employees still clocked in past their scheduled shift end + grace period.
+
+    Joins schedules, time_entries, and tokens (for clockout_reminder_minutes).
+    Only returns rows for companies with feature_push_notify enabled.
+    Excludes employees already sent a shift_reminder today.
+    """
+    conn = get_db()
+    today = datetime.now().strftime("%Y-%m-%d")
+    now_iso = datetime.now().isoformat()
+    rows = conn.execute(
+        """SELECT te.employee_id, te.token, te.id AS entry_id,
+                  s.end_time, t.clockout_reminder_minutes,
+                  e.name AS employee_name
+           FROM time_entries te
+           JOIN schedules s ON s.employee_id = te.employee_id
+               AND s.token = te.token AND s.date = ?
+           JOIN tokens t ON t.token = te.token
+           JOIN employees e ON e.id = te.employee_id
+           WHERE te.status = 'active'
+             AND t.feature_push_notify = 1
+             AND (? > DATE(s.date) || 'T' || s.end_time || ':00'
+                  OR time('now', 'localtime') > s.end_time)
+             AND te.employee_id NOT IN (
+                 SELECT recipient_id FROM notifications
+                 WHERE token = te.token
+                   AND category = 'shift_reminder'
+                   AND DATE(created_at) = ?
+             )""",
+        (today, now_iso, today),
+    ).fetchall()
+    conn.close()
+
+    results = []
+    now_dt = datetime.now()
+    for r in rows:
+        try:
+            end_h, end_m = map(int, r["end_time"].split(":"))
+            today_dt = now_dt.replace(hour=end_h, minute=end_m, second=0, microsecond=0)
+            delta_minutes = (now_dt - today_dt).total_seconds() / 60
+            grace = r["clockout_reminder_minutes"] or 15
+            if delta_minutes >= grace:
+                results.append({
+                    "employee_id": r["employee_id"],
+                    "token": r["token"],
+                    "employee_name": r["employee_name"],
+                    "minutes_overdue": int(delta_minutes),
+                })
+        except Exception:
+            continue
+    return results
+
+
+def get_employee_notification_prefs(employee_id, token):
+    """Return notification prefs for an employee, creating defaults if missing."""
+    conn = get_db()
+    conn.execute(
+        "INSERT OR IGNORE INTO employee_notification_prefs (employee_id, token) VALUES (?, ?)",
+        (employee_id, token),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM employee_notification_prefs WHERE employee_id = ? AND token = ?",
+        (employee_id, token),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
+
+def update_employee_notification_prefs(employee_id, token, **prefs):
+    """Update one or more notification preference columns for an employee."""
+    allowed = {"push_enabled", "cat_job_updates", "cat_shift_remind", "cat_schedule", "cat_chat"}
+    updates = {k: v for k, v in prefs.items() if k in allowed}
+    if not updates:
+        return
+    conn = get_db()
+    conn.execute(
+        "INSERT OR IGNORE INTO employee_notification_prefs (employee_id, token) VALUES (?, ?)",
+        (employee_id, token),
+    )
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    conn.execute(
+        f"UPDATE employee_notification_prefs SET {set_clause} "
+        f"WHERE employee_id = ? AND token = ?",
+        list(updates.values()) + [employee_id, token],
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_token_notify_settings(token_str, feature_push_notify,
+                                  notify_window_start, notify_window_end,
+                                  notify_clockout_end, clockout_reminder_minutes):
+    """Save all push notification settings for a company token."""
+    conn = get_db()
+    conn.execute(
+        """UPDATE tokens SET
+               feature_push_notify = ?,
+               notify_window_start = ?,
+               notify_window_end = ?,
+               notify_clockout_end = ?,
+               clockout_reminder_minutes = ?
+           WHERE token = ?""",
+        (feature_push_notify, notify_window_start, notify_window_end,
+         notify_clockout_end, clockout_reminder_minutes, token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# QuickBooks Online — Connection CRUD
+# ---------------------------------------------------------------------------
+
+def save_qbo_connection(token_str, realm_id, access_token, refresh_token,
+                        token_expires_at, company_name_qbo=""):
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        """INSERT INTO qbo_connections
+               (token, realm_id, access_token, refresh_token,
+                token_expires_at, connected_at, last_refreshed, company_name_qbo, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+           ON CONFLICT(token) DO UPDATE SET
+               realm_id = excluded.realm_id,
+               access_token = excluded.access_token,
+               refresh_token = excluded.refresh_token,
+               token_expires_at = excluded.token_expires_at,
+               last_refreshed = excluded.last_refreshed,
+               company_name_qbo = excluded.company_name_qbo,
+               is_active = 1""",
+        (token_str, realm_id, access_token, refresh_token,
+         token_expires_at, now, now, company_name_qbo),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_qbo_connection(token_str):
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM qbo_connections WHERE token = ? AND is_active = 1",
+        (token_str,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_qbo_tokens(token_str, access_token, refresh_token, token_expires_at):
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        """UPDATE qbo_connections
+           SET access_token = ?, refresh_token = ?,
+               token_expires_at = ?, last_refreshed = ?
+           WHERE token = ?""",
+        (access_token, refresh_token, token_expires_at, now, token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_qbo_default_item(token_str, item_id):
+    conn = get_db()
+    conn.execute(
+        "UPDATE qbo_connections SET default_item_id = ? WHERE token = ?",
+        (str(item_id), token_str),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_qbo_connection(token_str):
+    conn = get_db()
+    conn.execute("DELETE FROM qbo_connections WHERE token = ?", (token_str,))
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# QuickBooks Online — Sync tracking
+# ---------------------------------------------------------------------------
+
+def update_estimate_qbo_sync(estimate_id, qbo_estimate_id, qbo_sync_token):
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        """UPDATE estimates
+           SET qbo_estimate_id = ?, qbo_synced_at = ?,
+               qbo_sync_error = '', qbo_sync_token = ?
+           WHERE id = ?""",
+        (str(qbo_estimate_id), now, str(qbo_sync_token), estimate_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _set_qbo_sync_error(table, record_id, error_msg):
+    conn = get_db()
+    conn.execute(
+        f"UPDATE {table} SET qbo_sync_error = ? WHERE id = ?",
+        (str(error_msg)[:500], record_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _clear_qbo_sync_error(table, record_id):
+    conn = get_db()
+    conn.execute(
+        f"UPDATE {table} SET qbo_sync_error = '' WHERE id = ?",
+        (record_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_estimate_qbo_error(estimate_id, error_msg):
+    _set_qbo_sync_error("estimates", estimate_id, error_msg)
+
+
+def clear_estimate_qbo_error(estimate_id):
+    _clear_qbo_sync_error("estimates", estimate_id)
+
+
+def update_invoice_qbo_sync(invoice_id, qbo_invoice_id, qbo_sync_token):
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        """UPDATE invoices
+           SET qbo_invoice_id = ?, qbo_synced_at = ?,
+               qbo_sync_error = '', qbo_sync_token = ?
+           WHERE id = ?""",
+        (str(qbo_invoice_id), now, str(qbo_sync_token), invoice_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_invoice_qbo_error(invoice_id, error_msg):
+    _set_qbo_sync_error("invoices", invoice_id, error_msg)
+
+
+def clear_invoice_qbo_error(invoice_id):
+    _clear_qbo_sync_error("invoices", invoice_id)
+
+
+def update_customer_qbo_sync(customer_id, qbo_customer_id):
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        "UPDATE customers SET qbo_customer_id = ?, qbo_synced_at = ? WHERE id = ?",
+        (str(qbo_customer_id), now, customer_id),
+    )
+    conn.commit()
+    conn.close()

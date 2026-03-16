@@ -1,0 +1,96 @@
+{# Employee notification bell — include with: {% include 'employee/_notif_bell.html' %}
+   Requires: token, employee in template context.
+   Optional: show_notif_prefs (default false) to show preferences gear button.
+#}
+{% if employee and token.get('feature_push_notify', 0) %}
+<div id="emp-notif-bell" style="position:fixed;bottom:72px;right:16px;z-index:200;background:var(--blue);color:#fff;border-radius:50%;width:48px;height:48px;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2);font-size:20px;" title="Notifications">
+    &#128276;<span id="emp-notif-badge" style="display:none;position:absolute;top:2px;right:2px;background:var(--red);color:#fff;border-radius:50%;min-width:18px;height:18px;font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 3px;"></span>
+</div>
+<div id="emp-notif-dropdown" style="display:none;position:fixed;bottom:126px;right:16px;z-index:201;background:#fff;border:1px solid var(--blue);border-radius:10px;width:300px;max-height:360px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.15);">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid var(--gray-200);font-weight:600;">
+        <span>Notifications</span>
+        <button id="emp-mark-all" style="font-size:12px;background:none;border:none;color:var(--blue);cursor:pointer;padding:0;">Mark all read</button>
+    </div>
+    <div id="emp-notif-list"></div>
+</div>
+{% if show_notif_prefs %}
+<div id="emp-notif-prefs" style="display:none;position:fixed;bottom:126px;right:16px;z-index:201;background:#fff;border:1px solid var(--blue);border-radius:10px;width:300px;padding:16px;box-shadow:0 4px 16px rgba(0,0,0,.15);">
+    <div style="font-weight:600;margin-bottom:12px;">Notification Preferences</div>
+    <label style="display:flex;justify-content:space-between;margin-bottom:8px;"><span>Job updates (photos, tasks, files)</span><input type="checkbox" id="pref-job-updates" style="width:auto;"></label>
+    <label style="display:flex;justify-content:space-between;margin-bottom:8px;"><span>Shift clock-out reminders</span><input type="checkbox" id="pref-shift-remind" style="width:auto;"></label>
+    <label style="display:flex;justify-content:space-between;margin-bottom:8px;"><span>Schedule changes</span><input type="checkbox" id="pref-schedule" style="width:auto;"></label>
+    <button id="pref-save-btn" class="btn btn-green" style="width:100%;margin-top:4px;">Save</button>
+    <button id="pref-cancel-btn" style="width:100%;margin-top:6px;background:none;border:none;color:var(--gray-500);cursor:pointer;">Cancel</button>
+</div>
+<div style="position:fixed;bottom:72px;right:72px;z-index:200;">
+    <button id="emp-pref-btn" style="background:var(--gray-200);border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;font-size:16px;" title="Notification settings">&#9881;</button>
+</div>
+{% endif %}
+
+<script src="/static/js/notifications.js"></script>
+<script>
+(function() {
+    var TOKEN = {{ token.token | tojson }};
+    var EMP_ID = {{ employee.id | int }};
+    var NOTIF_START = {{ (token.get('notify_window_start') or '06:00') | tojson }};
+    var NOTIF_END   = {{ (token.get('notify_window_end') or '21:00') | tojson }};
+
+    function fetchUnread() {
+        if(!BDBNotify.withinHours(NOTIF_START, NOTIF_END)) return;
+        fetch('/api/notifications/unread?token='+encodeURIComponent(TOKEN)+'&recipient_type=employee',{credentials:'same-origin'})
+            .then(function(r){return r.json();}).then(function(data){
+                var badge=document.getElementById('emp-notif-badge');
+                badge.textContent=data.unread>99?'99+':String(data.unread||'');
+                badge.style.display=data.unread>0?'inline-block':'none';
+                var list=document.getElementById('emp-notif-list');
+                while(list.firstChild)list.removeChild(list.firstChild);
+                if(!data.notifications||!data.notifications.length){
+                    var em=document.createElement('em');em.style.cssText='padding:12px;display:block;color:#888;font-size:13px;';em.textContent='No new notifications';list.appendChild(em);return;
+                }
+                data.notifications.forEach(function(n){list.appendChild(BDBNotify.buildItem(n));});
+            }).catch(function(){});
+    }
+    var bell=document.getElementById('emp-notif-bell'), dd=document.getElementById('emp-notif-dropdown');
+    bell.addEventListener('click', function(e){
+        e.stopPropagation();
+        var v=dd.style.display==='block'; dd.style.display=v?'none':'block';
+        {% if show_notif_prefs %}document.getElementById('emp-notif-prefs').style.display='none';{% endif %}
+        if(!v) fetchUnread();
+    });
+    document.getElementById('emp-mark-all').addEventListener('click', function(){
+        fetch('/api/notifications/mark-read',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:TOKEN,recipient_type:'employee'})}).then(fetchUnread);
+        dd.style.display='none';
+    });
+    {% if show_notif_prefs %}
+    document.getElementById('emp-pref-btn').addEventListener('click', function(e){
+        e.stopPropagation();
+        dd.style.display='none';
+        var prefs=document.getElementById('emp-notif-prefs');
+        var v=prefs.style.display==='block'; prefs.style.display=v?'none':'block';
+        if(!v) fetch('/api/notifications/prefs',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+            document.getElementById('pref-job-updates').checked=!!d.cat_job_updates;
+            document.getElementById('pref-shift-remind').checked=!!d.cat_shift_remind;
+            document.getElementById('pref-schedule').checked=!!d.cat_schedule;
+        }).catch(function(){});
+    });
+    document.getElementById('pref-save-btn').addEventListener('click', function(){
+        fetch('/api/notifications/prefs',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+            cat_job_updates:document.getElementById('pref-job-updates').checked?1:0,
+            cat_shift_remind:document.getElementById('pref-shift-remind').checked?1:0,
+            cat_schedule:document.getElementById('pref-schedule').checked?1:0
+        })}).then(function(){document.getElementById('emp-notif-prefs').style.display='none';});
+    });
+    document.getElementById('pref-cancel-btn').addEventListener('click', function(){document.getElementById('emp-notif-prefs').style.display='none';});
+    {% endif %}
+    document.addEventListener('click', function(){
+        dd.style.display='none';
+        {% if show_notif_prefs %}document.getElementById('emp-notif-prefs').style.display='none';{% endif %}
+    });
+    [dd{% if show_notif_prefs %}, document.getElementById('emp-notif-prefs'), document.getElementById('emp-pref-btn'){% endif %}].forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();});});
+
+    fetchUnread();
+    setInterval(fetchUnread, 30000);
+    BDBNotify.setupPush(TOKEN, 'employee', EMP_ID);
+})();
+</script>
+{% endif %}

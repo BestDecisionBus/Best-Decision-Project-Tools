@@ -28,16 +28,7 @@
         </p>
         {% endif %}
 
-        {% if current_user.is_bdb or tokens|length > 1 %}
-            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
-                <label for="token-select">Company</label>
-                <select id="token-select" onchange="window.location.href='?token=' + this.value">
-                    {% for t in tokens %}
-                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-        {% endif %}
+        {% with show_all=false %}{% include 'admin/_token_selector.html' %}{% endwith %}
 
         {% if selected_token %}
         <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
@@ -87,15 +78,15 @@
                         <td style="white-space: nowrap;">{{ e.created_at[:10] if e.created_at else '' }}</td>
                         <td>
                             {% if e.approval_status == 'accepted' %}
-                            <span class="badge" style="background: #dbeafe; color: #1d4ed8;">Accepted</span>
+                            <span class="badge badge-blue">Accepted</span>
                             {% elif e.approval_status == 'in_progress' %}
-                            <span class="badge" style="background: #e0e7ff; color: #3730a3;">In Progress</span>
+                            <span class="badge badge-indigo">In Progress</span>
                             {% elif e.approval_status == 'completed' %}
                             <span class="badge badge-active">Completed</span>
                             {% elif e.approval_status == 'declined' %}
-                            <span class="badge" style="background: #fee2e2; color: #991b1b;">Declined</span>
+                            <span class="badge badge-red">Declined</span>
                             {% else %}
-                            <span class="badge" style="background: #fef3c7; color: #92400e;">Pending</span>
+                            <span class="badge badge-yellow">Pending</span>
                             {% endif %}
                         </td>
                         <td style="text-align: right; white-space: nowrap;">

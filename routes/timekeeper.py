@@ -1,6 +1,6 @@
 """Employee-facing timekeeper routes (clock in/out, login, help)."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import (
     Blueprint, abort, flash, jsonify, redirect, render_template, request,
@@ -12,13 +12,7 @@ import database
 timekeeper_bp = Blueprint('timekeeper', __name__)
 
 
-# ---------------------------------------------------------------------------
-# Lazy import helpers to avoid circular imports
-# ---------------------------------------------------------------------------
-
-def _helpers():
-    import app as _app
-    return _app
+from routes._shared import helpers as _helpers
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +133,8 @@ def employee_tasks():
         tasks = database.get_tasks_for_schedule(token_str, sched["id"], today)
         if not tasks:
             continue
+        job_obj = database.get_job(sched["job_id"])
+        job_mode = job_obj.get("reset_per_visit", 1) if job_obj else 1
         estimate_id = sched.get("estimate_id")
         estimate = database.get_estimate(estimate_id) if estimate_id else None
         display_name = database.get_project_display_name(estimate) if estimate else sched.get("job_name", "Work")
@@ -154,6 +150,7 @@ def employee_tasks():
             "display_name": display_name,
             "sections": sections,
             "estimate_id": estimate_id,
+            "job_mode": job_mode,
         })
 
     return render_template(
@@ -202,6 +199,9 @@ def api_tasks_check():
     if not job or job["token"] != token_str:
         return jsonify({"error": "invalid job"}), 403
 
+    reset_per_visit = job.get("reset_per_visit", 1)
+    persistent = (reset_per_visit == 0)
+
     if checked:
         database.log_task_completion(
             token_str=token_str,
@@ -216,6 +216,30 @@ def api_tasks_check():
             shift_date=shift_date,
         )
     else:
+        if persistent:
+            # Persistent job: enforce uncheck rules
+            record = database.get_task_completion_record(
+                token_str=token_str,
+                job_id=int(job_id),
+                task_source=task_source,
+                task_ref_id=int(task_ref_id),
+                task_description=task_description,
+            )
+            if record:
+                completed_dt = datetime.fromisoformat(record["completed_at"])
+                elapsed = (datetime.now() - completed_dt).total_seconds()
+                same_employee = (record["employee_id"] == employee["id"])
+                can_uncheck = (
+                    (same_employee and elapsed < 60)
+                    or bool(employee.get("task_uncheck_access", 0))
+                )
+                if not can_uncheck:
+                    return jsonify({
+                        "success": False,
+                        "error": "locked",
+                        "message": "This task is locked. Only a supervisor can undo it.",
+                    }), 403
+
         database.remove_task_completion(
             token_str=token_str,
             job_id=int(job_id),
@@ -224,6 +248,9 @@ def api_tasks_check():
             task_description=task_description,
             employee_id=employee["id"],
             shift_date=shift_date,
+            reset_by_employee_id=employee["id"],
+            reset_by_employee_name=employee["name"],
+            persistent=persistent,
         )
 
     return jsonify({"success": True})
@@ -278,6 +305,22 @@ def api_clock_in():
     # Audit
     database.add_audit_log(entry_id, session_token, "clock_in", None, None, now, "employee")
 
+    # Notify admins
+    try:
+        from routes.notifications import notify_admins
+        employee = database.get_employee(employee_id)
+        job = database.get_job(job_id)
+        emp_name = employee["name"] if employee else "Employee"
+        job_name = job["job_name"] if job else "Unknown Job"
+        notify_admins(
+            session_token, "clock_in",
+            f"{emp_name} clocked in",
+            f"Job: {job_name}",
+            url=f"/admin/time-entries?token={session_token}",
+        )
+    except Exception:
+        pass
+
     return jsonify({"success": True, "entry_id": entry_id, "clock_in_time": now}), 201
 
 
@@ -319,6 +362,20 @@ def api_clock_out():
 
     # Audit
     database.add_audit_log(active["id"], session_token, "clock_out", None, None, now, "employee")
+
+    # Notify admins
+    try:
+        from routes.notifications import notify_admins
+        employee = database.get_employee(employee_id)
+        emp_name = employee["name"] if employee else "Employee"
+        notify_admins(
+            session_token, "clock_out",
+            f"{emp_name} clocked out",
+            f"{total_hours:.1f} hours",
+            url=f"/admin/time-entries?token={session_token}",
+        )
+    except Exception:
+        pass
 
     return jsonify({
         "success": True, "entry_id": active["id"],

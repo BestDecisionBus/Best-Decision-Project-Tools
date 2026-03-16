@@ -165,6 +165,12 @@
                     </select>
                 </div>
                 <div class="form-group">
+                    <label>Task Templates <span style="font-weight:400; color:var(--gray-400);">(optional, check all that apply)</span></label>
+                    <div id="sched-task-templates" style="display:flex; flex-wrap:wrap; gap:8px; padding:8px; border:1px solid var(--blue); border-radius:6px; background:var(--gray-50); min-height:36px;">
+                        <span id="task-templates-loading" style="color:var(--gray-400); font-size:13px;">Loading...</span>
+                    </div>
+                </div>
+                <div class="form-group">
                     <label for="sched-custom-note">Custom Note (optional)</label>
                     <textarea id="sched-custom-note" rows="8" placeholder="e.g. Bring safety gear" style="width: 100%; resize: vertical;"></textarea>
                 </div>
@@ -314,6 +320,7 @@
             document.getElementById('sched-job-task').value = '';
             document.getElementById('sched-custom-note').value = '';
             document.getElementById('job-task-group').style.display = 'none';
+            document.querySelectorAll('#sched-task-templates input[type=checkbox]').forEach(function(cb) { cb.checked = false; });
             onShiftChange();
         }
 
@@ -330,6 +337,38 @@
                         opt.value = t.id;
                         opt.textContent = t.name;
                         sel.appendChild(opt);
+                    });
+                });
+        }
+
+        // Load all active task templates as checkboxes
+        function loadTaskTemplates(preselected) {
+            if (!TOKEN) return;
+            var container = document.getElementById('sched-task-templates');
+            fetch('/scheduler/api/estimate-templates?token=' + TOKEN)
+                .then(function(r) { return r.json(); })
+                .then(function(templates) {
+                    while (container.firstChild) { container.removeChild(container.firstChild); }
+                    if (templates.length === 0) {
+                        var empty = document.createElement('span');
+                        empty.style.cssText = 'color:var(--gray-400); font-size:13px;';
+                        empty.textContent = 'No templates defined.';
+                        container.appendChild(empty);
+                        return;
+                    }
+                    templates.forEach(function(t) {
+                        var label = document.createElement('label');
+                        label.style.cssText = 'display:flex; align-items:center; gap:4px; font-size:13px; cursor:pointer; padding:4px 8px; border:1px solid var(--gray-200); border-radius:4px; background:#fff;';
+                        var cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.className = 'task-list-cb';
+                        cb.value = t.id;
+                        if (preselected && preselected.indexOf(String(t.id)) !== -1) {
+                            cb.checked = true;
+                        }
+                        label.appendChild(cb);
+                        label.appendChild(document.createTextNode('\u00a0' + t.name));
+                        container.appendChild(label);
                     });
                 });
         }
@@ -383,6 +422,10 @@
                     document.getElementById('sched-job-task').value = s.job_task_id || '';
                 }, 300);
             }
+            // Load templates and pre-select existing assignments
+            fetch('/scheduler/api/schedules/' + s.id + '/task-links?token=' + TOKEN)
+                .then(function(r) { return r.json(); })
+                .then(function(ids) { loadTaskTemplates(ids.map(String)); });
             onShiftChange();
             openModal('Edit Schedule');
         }
@@ -396,6 +439,11 @@
             if (!jobVal) { alert('Please select a job.'); return; }
             if (!dateVal) { alert('Please select a date.'); return; }
 
+            var checkedTemplates = [];
+            document.querySelectorAll('#sched-task-templates input.task-list-cb:checked').forEach(function(cb) {
+                checkedTemplates.push(cb.value);
+            });
+
             var data = {
                 employee_id: parseInt(empVal),
                 job_id: parseInt(jobVal),
@@ -406,7 +454,8 @@
                 end_time: document.getElementById('sched-end').value,
                 common_task_id: document.getElementById('sched-common-task').value || null,
                 job_task_id: document.getElementById('sched-job-task').value || null,
-                custom_note: document.getElementById('sched-custom-note').value
+                custom_note: document.getElementById('sched-custom-note').value,
+                task_template_ids: checkedTemplates
             };
 
             var url = '/scheduler/api/schedules';
@@ -475,6 +524,7 @@
         currentWeekStart = getMondayOfWeek(new Date());
         loadWeek();
         loadCommonTasks();
+        loadTaskTemplates([]);
         </script>
         {% else %}
         <p style="color: var(--gray-500);">Select a company above to manage schedules.</p>

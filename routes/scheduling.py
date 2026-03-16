@@ -13,13 +13,7 @@ from flask_login import current_user, login_required, login_user
 
 import database
 
-# ---------------------------------------------------------------------------
-# Lazy import for app-level helpers
-# ---------------------------------------------------------------------------
-
-def _helpers():
-    import app as _app
-    return _app
+from routes._shared import helpers as _helpers
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +266,20 @@ def api_create_schedule():
     if common_task_ids:
         database.set_common_task_links_for_schedule(schedule_id, [int(x) for x in common_task_ids], token_str)
 
+    # Notify employee of new schedule assignment
+    try:
+        from routes.notifications import notify_employee
+        job = database.get_job(int(job_id))
+        job_name = job["job_name"] if job else "Unknown Job"
+        notify_employee(
+            token_str, int(employee_id), "schedule",
+            "You have been scheduled",
+            f"{date} {start_time}–{end_time} at {job_name}",
+            url=f"/my_schedule?token={token_str}",
+        )
+    except Exception:
+        pass
+
     schedule = database.get_schedule(schedule_id)
     return jsonify(schedule), 201
 
@@ -357,6 +365,20 @@ def api_update_schedule(schedule_id):
         database.set_common_task_links_for_schedule(
             schedule_id, [int(x) for x in data.get("common_task_ids", [])], token_str
         )
+
+    # Notify employee of schedule change
+    try:
+        from routes.notifications import notify_employee
+        job = database.get_job(int(job_id))
+        job_name = job["job_name"] if job else "Unknown Job"
+        notify_employee(
+            token_str, int(employee_id), "schedule",
+            "Your schedule was updated",
+            f"{date} {start_time}–{end_time} at {job_name}",
+            url=f"/my_schedule?token={token_str}",
+        )
+    except Exception:
+        pass
 
     updated = database.get_schedule(schedule_id)
     return jsonify(updated), 200
@@ -508,18 +530,21 @@ def api_job_estimates():
 @scheduling_bp.route("/scheduler/api/estimate-templates")
 @scheduler_allowed
 def api_estimate_templates():
-    """Return task lists (templates + project tasks flag) available for a project."""
+    """Return all active task templates for a company, plus project tasks if estimate provided."""
     helpers = _helpers()
     token_str = request.args.get("token", "")
     estimate_id = request.args.get("estimate_id", type=int)
-    if not token_str or not estimate_id:
+    if not token_str:
         return jsonify([])
     helpers._verify_token_access(token_str)
-    templates = database.get_templates_for_estimate(estimate_id, token_str)
-    project_tasks = database.get_project_tasks_by_estimate(estimate_id, token_str)
     result = []
-    if project_tasks:
-        result.append({"id": "project_tasks", "name": "Project Specific Tasks"})
+    # If an estimate is linked, offer "Project Specific Tasks" if the estimate has them
+    if estimate_id:
+        project_tasks = database.get_project_tasks_by_estimate(estimate_id, token_str)
+        if project_tasks:
+            result.append({"id": "project_tasks", "name": "Project Specific Tasks"})
+    # Return all active company templates (no longer filtered by estimate link)
+    templates = database.get_task_templates(token_str, active_only=True)
     result.extend({"id": t["id"], "name": t["name"]} for t in templates)
     return jsonify(result)
 

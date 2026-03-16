@@ -28,13 +28,11 @@ def _check_scheduler_access():
 
 
 # Allowed logo extensions and magic byte signatures
-_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".svg", ".webp"}
+_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 _LOGO_SIGNATURES = [
     b"\xff\xd8\xff",        # JPEG
     b"\x89PNG\r\n\x1a\n",   # PNG
     b"RIFF",                 # WebP (RIFF container)
-    b"<?xml",                # SVG (XML-based)
-    b"<svg",                 # SVG (direct)
 ]
 
 
@@ -54,9 +52,6 @@ def _validate_logo(file_storage):
 def _save_logo(file_storage, dest_path):
     """Save logo, resizing raster images if wider than 800px (matches report size)."""
     ext = os.path.splitext(dest_path)[1].lower()
-    if ext == ".svg":
-        file_storage.save(dest_path)
-        return
     from PIL import Image
     img = Image.open(file_storage)
     max_w = 800
@@ -73,13 +68,7 @@ def _save_logo(file_storage, dest_path):
     img.save(dest_path, **save_kwargs)
 
 
-# ---------------------------------------------------------------------------
-# Lazy import of app-level helpers to avoid circular imports
-# ---------------------------------------------------------------------------
-
-def _helpers():
-    import app as _app
-    return _app
+from routes._shared import helpers as _helpers
 
 
 # ---------------------------------------------------------------------------
@@ -450,13 +439,27 @@ def admin_settings():
             token_str, feature_timekeeper, feature_receipts,
             feature_photos, feature_estimates, dashboard_tier
         )
+        # Push notification settings
+        feature_push_notify = int(bool(request.form.get("feature_push_notify")))
+        notify_window_start = request.form.get("notify_window_start", "06:00").strip() or "06:00"
+        notify_window_end   = request.form.get("notify_window_end", "21:00").strip() or "21:00"
+        notify_clockout_end = request.form.get("notify_clockout_end", "23:59").strip() or "23:59"
+        clockout_reminder_minutes = max(1, min(240, int(request.form.get("clockout_reminder_minutes", 15) or 15)))
+        database.update_token_notify_settings(
+            token_str, feature_push_notify,
+            notify_window_start, notify_window_end,
+            notify_clockout_end, clockout_reminder_minutes
+        )
         flash("Settings saved.", "success")
         return redirect(url_for("admin.admin_settings", token=token_str))
+
+    qbo_connection = database.get_qbo_connection(token_str)
 
     return render_template(
         "admin/settings.html",
         tokens=tokens,
         selected_token=selected_token,
+        qbo_connection=qbo_connection,
     )
 
 

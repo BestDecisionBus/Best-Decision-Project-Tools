@@ -40,7 +40,7 @@
         {% for entry in jobs_tasks %}
         <div class="meta-card task-job-card" style="margin-bottom: 12px; padding: 0; overflow: hidden;">
             <button class="task-job-toggle" onclick="toggleJobTasks(this)" aria-expanded="true">
-                <span class="task-job-name">{{ entry.display_name }}</span>
+                <span class="task-job-name">{{ entry.display_name }}{% if not entry.job_mode %} <span title="Persistent — tasks stay checked once done" style="font-size:12px; opacity:0.7;">&#128274;</span>{% endif %}</span>
                 {% set total = namespace(n=0) %}{% set done = namespace(n=0) %}
                 {% for section in entry.sections %}{% for task in section.tasks %}{% set total.n = total.n + 1 %}{% if task.is_complete %}{% set done.n = done.n + 1 %}{% endif %}{% endfor %}{% endfor %}
                 <span class="task-job-count">{{ done.n }}/{{ total.n }}</span>
@@ -128,14 +128,38 @@
             })
         }).then(function(resp) {
             if (!resp.ok) {
-                // Revert on failure
-                checkbox.checked = !checked;
-                if (!checked) {
-                    span.classList.add('task-done');
-                } else {
-                    span.classList.remove('task-done');
-                }
-                alert('Could not save. Please try again.');
+                return resp.json().then(function(body) {
+                    if (!checked && body && body.error === 'locked') {
+                        // Locked: keep checkbox checked, show inline message
+                        checkbox.checked = true;
+                        span.classList.add('task-done');
+                        var existing = li.querySelector('.task-locked-msg');
+                        if (!existing) {
+                            var msg = document.createElement('span');
+                            msg.className = 'task-locked-msg';
+                            msg.style.cssText = 'font-size:12px; color:var(--orange); margin-left:6px;';
+                            msg.textContent = 'Locked — ask a supervisor to undo.';
+                            li.appendChild(msg);
+                        }
+                    } else {
+                        // Other error: revert
+                        checkbox.checked = !checked;
+                        if (!checked) {
+                            span.classList.add('task-done');
+                        } else {
+                            span.classList.remove('task-done');
+                        }
+                        alert('Could not save. Please try again.');
+                    }
+                }).catch(function() {
+                    checkbox.checked = !checked;
+                    if (!checked) { span.classList.add('task-done'); } else { span.classList.remove('task-done'); }
+                    alert('Could not save. Please try again.');
+                });
+            } else {
+                // Success: remove any locked message
+                var existing = li.querySelector('.task-locked-msg');
+                if (existing) { li.removeChild(existing); }
             }
         }).catch(function() {
             checkbox.checked = !checked;
@@ -148,5 +172,7 @@
         });
     }
     </script>
+
+{% include 'employee/_notif_bell.html' %}
 </body>
 </html>

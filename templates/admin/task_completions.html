@@ -21,24 +21,10 @@
 
         <h2>Task History</h2>
         <p style="color: var(--gray-500); font-size: 14px; margin-bottom: 16px;">
-            Employee task completions logged via the Task Checklist.
+            Full audit trail of task check and uncheck events via the Task Checklist.
         </p>
 
-        {% if current_user.is_bdb or tokens|length > 1 %}
-        <div class="form-group" style="max-width: 300px; margin-bottom: 16px;">
-            <label for="token-select">Company</label>
-            <select id="token-select" onchange="applyFilter()">
-                {% if current_user.is_bdb %}<option value="">— Select company —</option>{% endif %}
-                {% for t in tokens %}
-                <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        {% else %}
-            {% if selected_token %}
-            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
-            {% endif %}
-        {% endif %}
+        {% with show_all=false %}{% include 'admin/_token_selector.html' %}{% endwith %}
 
         {% if selected_token %}
         <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
@@ -72,7 +58,10 @@
                         <th>Employee</th>
                         <th>Task</th>
                         <th>Source</th>
-                        <th>Completed At</th>
+                        <th>Status</th>
+                        <th>Checked At</th>
+                        <th>Unchecked By</th>
+                        <th>Unchecked At</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -84,14 +73,23 @@
                         <td>{{ c.task_description }}</td>
                         <td>
                             {% if c.task_source == 'job_task' %}
-                            <span class="badge" style="background:#dbeafe; color:#1d4ed8; font-size:11px;">Job Task</span>
+                            <span class="badge badge-blue" style="font-size:11px;">Job Task</span>
                             {% elif c.task_source == 'estimate_task' %}
-                            <span class="badge" style="background:#dcfce7; color:#15803d; font-size:11px;">Estimate</span>
+                            <span class="badge badge-green" style="font-size:11px;">Estimate</span>
                             {% else %}
-                            <span class="badge" style="background:#f3e8ff; color:#7e22ce; font-size:11px;">Template</span>
+                            <span class="badge badge-purple" style="font-size:11px;">Template</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if c.is_reset %}
+                            <span class="badge badge-red" style="font-size:11px;">Unchecked</span>
+                            {% else %}
+                            <span class="badge badge-green" style="font-size:11px;">Checked</span>
                             {% endif %}
                         </td>
                         <td style="font-size: 12px;">{{ c.completed_at[:16] if c.completed_at else '' }}</td>
+                        <td style="font-size: 12px;">{{ c.reset_by_employee_name if c.is_reset else '—' }}</td>
+                        <td style="font-size: 12px;">{{ c.reset_at[:16] if c.is_reset and c.reset_at else '—' }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>

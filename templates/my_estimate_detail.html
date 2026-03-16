@@ -37,11 +37,11 @@
                 {% if estimate.status == 'complete' %}
                 <span class="badge badge-active">Complete</span>
                 {% elif estimate.status == 'error' %}
-                <span class="badge" style="background: #fee2e2; color: #991b1b;">Error</span>
+                <span class="badge badge-red">Error</span>
                 {% elif estimate.status in ('appending', 'transcribing_append') %}
-                <span class="badge" style="background: #e0e7ff; color: #3730a3;">Adding Memo</span>
+                <span class="badge badge-indigo">Adding Memo</span>
                 {% else %}
-                <span class="badge" style="background: #fef3c7; color: #92400e;">Processing</span>
+                <span class="badge badge-yellow">Processing</span>
                 {% endif %}
             </div>
             {% if job and job.job_address %}

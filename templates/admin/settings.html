@@ -24,16 +24,7 @@
             Company-wide settings for {{ selected_token.company_name }}.
         </p>
 
-        {% if current_user.is_bdb or tokens|length > 1 %}
-        <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
-            <label for="token-select">Company</label>
-            <select id="token-select" onchange="window.location.href='?token=' + this.value">
-                {% for t in tokens %}
-                <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        {% endif %}
+        {% with show_all=false %}{% include 'admin/_token_selector.html' %}{% endwith %}
 
         <form method="POST" action="{{ url_for('admin.admin_settings', token=selected_token.token) }}">
             <div class="meta-card" style="max-width: 540px;">
@@ -128,10 +119,80 @@
                 </div>
             </div>
 
+            <div style="max-width: 540px; margin-top: 24px; border-top: 1px solid var(--gray-200); padding-top: 20px;">
+                <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 4px; color: var(--gray-800);">Push Notifications</h3>
+                <p style="font-size: 13px; color: var(--gray-500); margin-bottom: 14px;">Send browser push notifications to employees and admins. Employees must grant permission on their device.</p>
+
+                <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin-bottom: 16px;">
+                    <input type="checkbox" name="feature_push_notify" value="1"
+                           {% if selected_token.get('feature_push_notify', 0) %}checked{% endif %}
+                           style="margin-top: 3px; width: 16px; height: 16px; flex-shrink: 0;">
+                    <span>
+                        <span style="font-weight: 600; font-size: 14px;">Enable Push Notifications</span><br>
+                        <span style="color: var(--gray-500); font-size: 12px;">Master on/off switch for this company</span>
+                    </span>
+                </label>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+                    <div>
+                        <label style="font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px;">General push start</label>
+                        <input type="time" name="notify_window_start" value="{{ selected_token.get('notify_window_start', '06:00') }}" style="width:100%;">
+                        <p style="font-size: 11px; color: var(--gray-400); margin-top: 2px;">No pushes sent before this time</p>
+                    </div>
+                    <div>
+                        <label style="font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px;">General push end</label>
+                        <input type="time" name="notify_window_end" value="{{ selected_token.get('notify_window_end', '21:00') }}" style="width:100%;">
+                        <p style="font-size: 11px; color: var(--gray-400); margin-top: 2px;">No general pushes sent after this time</p>
+                    </div>
+                    <div>
+                        <label style="font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px;">Clock-out reminder end</label>
+                        <input type="time" name="notify_clockout_end" value="{{ selected_token.get('notify_clockout_end', '23:59') }}" style="width:100%;">
+                        <p style="font-size: 11px; color: var(--gray-400); margin-top: 2px;">Shift reminders can go later</p>
+                    </div>
+                    <div>
+                        <label style="font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px;">Clock-out grace period (minutes)</label>
+                        <input type="number" name="clockout_reminder_minutes" min="1" max="240" value="{{ selected_token.get('clockout_reminder_minutes', 15) }}" style="width:100%;">
+                        <p style="font-size: 11px; color: var(--gray-400); margin-top: 2px;">Minutes after shift end before reminder</p>
+                    </div>
+                </div>
+            </div>
+
             <div style="max-width: 540px; margin-top: 16px;">
                 <button type="submit" class="btn btn-green">Save Settings</button>
             </div>
         </form>
+
+        <div class="meta-card" style="max-width: 540px; margin-top: 24px;">
+            <h3 style="margin-top: 0; margin-bottom: 4px; font-size: 16px;">QuickBooks Online</h3>
+            <p style="color: var(--gray-500); font-size: 13px; margin-bottom: 16px;">
+                Push estimates and invoices to QuickBooks Online so you don't have to double-enter data.
+            </p>
+
+            {% if qbo_connection %}
+            <div style="background: var(--green-50, #f0fdf4); border: 1px solid var(--green, #16a34a); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <span style="width: 10px; height: 10px; border-radius: 50%; background: var(--green, #16a34a); flex-shrink: 0;"></span>
+                    <span style="font-weight: 600; font-size: 14px; color: var(--gray-800);">Connected</span>
+                </div>
+                {% if qbo_connection.company_name_qbo %}
+                <p style="font-size: 13px; color: var(--gray-600); margin: 0 0 4px 0;">
+                    <strong>QBO Company:</strong> {{ qbo_connection.company_name_qbo }}
+                </p>
+                {% endif %}
+                <p style="font-size: 12px; color: var(--gray-500); margin: 0;">
+                    Connected {{ qbo_connection.connected_at[:10] if qbo_connection.connected_at else '' }}
+                </p>
+            </div>
+            <form method="POST" action="{{ url_for('qbo.qbo_disconnect') }}" onsubmit="return confirm('Disconnect from QuickBooks? You can reconnect later.')">
+                <button type="submit" class="btn btn-sm btn-red">Disconnect from QuickBooks</button>
+            </form>
+            {% else %}
+            <a href="{{ url_for('qbo.qbo_connect') }}" class="btn btn-sm btn-blue">Connect to QuickBooks</a>
+            <p style="font-size: 12px; color: var(--gray-400); margin-top: 8px;">
+                You'll be redirected to Intuit to authorize access. Requires a QuickBooks Online account.
+            </p>
+            {% endif %}
+        </div>
     </div>
 
     <style>

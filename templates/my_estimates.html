@@ -39,9 +39,9 @@
                     {% if e.status == 'complete' %}
                     <span class="badge badge-active" style="font-size: 10px;">Complete</span>
                     {% elif e.status == 'error' %}
-                    <span class="badge" style="background: #fee2e2; color: #991b1b; font-size: 10px;">Error</span>
+                    <span class="badge badge-red" style="font-size: 10px;">Error</span>
                     {% else %}
-                    <span class="badge" style="background: #fef3c7; color: #92400e; font-size: 10px;">Processing</span>
+                    <span class="badge badge-yellow" style="font-size: 10px;">Processing</span>
                     {% endif %}
                 </div>
                 <div style="font-size: 12px; color: var(--gray-500); margin-top: 4px;">{{ e.created_at[:10] if e.created_at else '' }}</div>

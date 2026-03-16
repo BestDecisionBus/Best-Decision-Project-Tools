@@ -25,13 +25,26 @@
             {% if inv.status == 'paid' %}
             <span class="badge badge-active">Paid</span>
             {% elif inv.status == 'sent' %}
-            <span class="badge" style="background: #dbeafe; color: #1d4ed8;">Sent</span>
+            <span class="badge badge-blue">Sent</span>
             {% elif inv.status == 'void' %}
-            <span class="badge" style="background: #f3f4f6; color: #6b7280;">Void</span>
+            <span class="badge badge-gray">Void</span>
             {% else %}
-            <span class="badge" style="background: #fef3c7; color: #92400e;">Draft</span>
+            <span class="badge badge-yellow">Draft</span>
             {% endif %}
-            <div style="margin-left: auto; display: flex; gap: 8px;">
+            <div style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+                {% if qbo_connection %}
+                <form method="POST" action="{{ url_for('qbo.qbo_push_invoice', invoice_id=inv.id) }}" style="display: inline;">
+                    <button type="submit" class="btn btn-sm btn-blue">
+                        {% if inv.qbo_invoice_id %}Update in QuickBooks{% else %}Send to QuickBooks{% endif %}
+                    </button>
+                </form>
+                {% if inv.qbo_synced_at %}
+                <span style="font-size: 11px; color: var(--gray-400);" title="Last synced {{ inv.qbo_synced_at }}">QBO synced</span>
+                {% endif %}
+                {% if inv.qbo_sync_error %}
+                <span style="font-size: 11px; color: var(--red, #dc2626); font-weight: 600;" title="{{ inv.qbo_sync_error }}">QBO error</span>
+                {% endif %}
+                {% endif %}
                 <a href="{{ url_for('invoices.admin_invoice_pdf', invoice_id=inv.id) }}" class="btn btn-sm" style="background: var(--gray-200); color: var(--gray-700);" target="_blank">Download PDF</a>
                 {% if estimate %}
                 <a href="{{ url_for('estimates.admin_estimate_detail', estimate_id=estimate.id) }}" class="btn btn-sm btn-blue">View Estimate</a>

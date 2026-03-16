@@ -1,0 +1,22 @@
+{# Token company selector — include with:
+   {% include 'admin/_token_selector.html' %}
+   Optional: {% with show_all=false %}{% include 'admin/_token_selector.html' %}{% endwith %}
+   Auto-resolves token dict from selected_token or token_data (handles scheduling.py reversed unpacking).
+#}
+{% set _tref = selected_token if (selected_token is defined and selected_token is mapping) else (token_data if (token_data is defined and token_data is mapping) else none) %}
+{% set _show_all = show_all if show_all is defined else true %}
+{% if current_user.is_bdb or tokens|length > 1 %}
+    <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
+        <label for="token-select">Company</label>
+        <select id="token-select" onchange="window.location.href='?token=' + this.value">
+            {% if _show_all and current_user.is_bdb %}<option value="" {% if not _tref %}selected{% endif %}>All Companies</option>{% endif %}
+            {% for t in tokens %}
+            <option value="{{ t.token }}" {% if _tref and _tref.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+{% else %}
+    {% if _tref %}
+    <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ _tref.company_name }}</strong></p>
+    {% endif %}
+{% endif %}

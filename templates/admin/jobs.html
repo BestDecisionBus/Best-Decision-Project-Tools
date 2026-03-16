@@ -21,21 +21,7 @@
 
         <h2>Jobs</h2>
 
-        {% if current_user.is_bdb or tokens|length > 1 %}
-            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
-                <label for="token-select">Company</label>
-                <select id="token-select" onchange="window.location.href='?token=' + this.value">
-                    {% if current_user.is_bdb %}<option value="">All Companies</option>{% endif %}
-                    {% for t in tokens %}
-                    <option value="{{ t.token }}" {% if selected_token and selected_token.token == t.token %}selected{% endif %}>{{ t.company_name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-        {% else %}
-            {% if selected_token %}
-            <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">Company: <strong>{{ selected_token.company_name }}</strong></p>
-            {% endif %}
-        {% endif %}
+        {% include 'admin/_token_selector.html' %}
 
         {% if selected_token %}
         <div class="meta-card" style="margin-bottom: 24px;">
@@ -146,10 +132,10 @@
                         </td>
                         <td>
                             <span id="reset-display-{{ job.id }}">
-                                {% if job.reset_per_visit %}<span class="badge" style="background:#dbeafe; color:#1d4ed8; font-size:11px;">Reset</span>{% else %}<span style="color:var(--gray-400);">—</span>{% endif %}
+                                {% if job.reset_per_visit %}<span class="badge badge-blue" style="font-size:11px;" title="Tasks clear each visit">Refreshing</span>{% else %}<span class="badge badge-purple" style="font-size:11px;" title="Tasks stay checked once done">Persistent</span>{% endif %}
                             </span>
-                            <label id="reset-edit-{{ job.id }}" style="display:none; font-size:13px; white-space:nowrap;">
-                                <input type="checkbox" id="reset-input-{{ job.id }}" {% if job.reset_per_visit %}checked{% endif %}> Reset tasks
+                            <label id="reset-edit-{{ job.id }}" style="display:none; font-size:13px; white-space:nowrap;" title="Refreshing = tasks reset each visit (e.g. cleaning). Persistent = tasks stay done (e.g. construction).">
+                                <input type="checkbox" id="reset-input-{{ job.id }}" {% if job.reset_per_visit %}checked{% endif %}> Refreshing (resets each visit)
                             </label>
                         </td>
                         <td>
@@ -161,15 +147,15 @@
                         </td>
                         <td>
                             {% if job.job_status == 'in_progress' %}
-                            <span class="badge" style="background: #dbeafe; color: #1d4ed8;">In Progress</span>
+                            <span class="badge badge-blue">In Progress</span>
                             {% elif job.job_status == 'accepted' %}
-                            <span class="badge" style="background: #dcfce7; color: #15803d;">Accepted</span>
+                            <span class="badge badge-green">Accepted</span>
                             {% elif job.job_status == 'pending' %}
-                            <span class="badge" style="background: #fef9c3; color: #854d0e;">Pending</span>
+                            <span class="badge badge-yellow-alt">Pending</span>
                             {% elif job.job_status == 'completed' %}
-                            <span class="badge" style="background: #f3f4f6; color: #374151;">Completed</span>
+                            <span class="badge badge-gray-dark">Completed</span>
                             {% elif job.job_status == 'declined' %}
-                            <span class="badge" style="background: #fee2e2; color: #b91c1c;">Declined</span>
+                            <span class="badge badge-red">Declined</span>
                             {% else %}
                             <span style="color: var(--gray-400);">—</span>
                             {% endif %}

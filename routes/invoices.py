@@ -5,16 +5,24 @@ import tempfile
 from flask import (
     Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, url_for,
 )
-from flask_login import login_required
+from flask_login import current_user, login_required
 
 import database
 
 invoices_bp = Blueprint("invoices", __name__)
 
 
-def _helpers():
-    import app as _app
-    return _app
+from routes._shared import helpers as _helpers
+
+
+@invoices_bp.before_request
+def _enforce_admin_on_writes():
+    """Require admin role for all POST requests."""
+    if request.method == "POST":
+        if not current_user.is_authenticated:
+            abort(401)
+        if not current_user.is_admin and not current_user.is_bdb:
+            abort(403)
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +112,8 @@ def admin_invoice_detail(invoice_id):
     job = database.get_job(inv["job_id"]) if inv.get("job_id") else None
     snippets = database.get_message_snippets_by_token(inv["token"], active_only=True)
 
+    qbo_connection = database.get_qbo_connection(inv["token"])
+
     return render_template(
         "admin/invoice_detail.html",
         inv=inv,
@@ -114,6 +124,7 @@ def admin_invoice_detail(invoice_id):
         snippets=snippets,
         tokens=tokens,
         selected_token=selected_token,
+        qbo_connection=qbo_connection,
     )
 
 

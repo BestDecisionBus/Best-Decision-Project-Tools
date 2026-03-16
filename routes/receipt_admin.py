@@ -11,7 +11,19 @@ from flask_login import current_user, login_required
 import config
 import database
 
+from routes._shared import helpers as _helpers, gate_admin_feature
+
 receipt_admin_bp = Blueprint('receipt_admin', __name__)
+
+
+@receipt_admin_bp.before_request
+def _enforce_admin_on_writes():
+    """Require admin role for all POST requests."""
+    if request.method == "POST":
+        if not current_user.is_authenticated:
+            abort(401)
+        if not current_user.is_admin and not current_user.is_bdb:
+            abort(403)
 
 
 @receipt_admin_bp.before_request
@@ -25,25 +37,7 @@ def _check_scheduler_access():
 
 @receipt_admin_bp.before_request
 def _gate_receipts_feature():
-    if not current_user.is_authenticated:
-        return
-    h = _helpers()
-    tokens = h._get_tokens_for_user()
-    token_str, selected_token = h._get_selected_token(tokens)
-    if not token_str or not selected_token:
-        return
-    if not selected_token.get("feature_receipts", 1):
-        flash("Receipt Capture is not enabled for this company.", "error")
-        return redirect(url_for("admin.admin_dashboard"))
-
-
-# ---------------------------------------------------------------------------
-# Lazy import of app-level helpers to avoid circular imports
-# ---------------------------------------------------------------------------
-
-def _helpers():
-    import app as _app
-    return _app
+    return gate_admin_feature("feature_receipts", "Receipt Capture")
 
 
 # ---------------------------------------------------------------------------

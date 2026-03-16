@@ -29,9 +29,7 @@ def _gate_finance_feature():
         return redirect(url_for("admin.admin_dashboard"))
 
 
-def _helpers():
-    import app as _app
-    return _app
+from routes._shared import helpers as _helpers
 
 
 @finance_bp.route("/admin/finance")
@@ -246,7 +244,7 @@ def finance_update_targets():
         abort(400)
     token_str = data.get("token", "").strip()
     h._verify_token_access(token_str)
-    if not current_user.is_bdb and current_user.role not in ("admin", "viewer"):
+    if not current_user.is_admin and not current_user.is_bdb:
         abort(403)
     try:
         itp = float(data.get("income_target_pct", 0))

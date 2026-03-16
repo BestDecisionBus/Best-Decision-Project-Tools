@@ -2,24 +2,24 @@
 (function () {
     "use strict";
 
+    // ---- Button feedback flash (shared) ----
+    function flashBtn(btn, text, color, ms) {
+        var orig = btn.textContent, origBg = btn.style.background;
+        btn.textContent = text;
+        if (color) btn.style.background = color;
+        setTimeout(function () { btn.textContent = orig; btn.style.background = origBg; }, ms || 1500);
+    }
+
     // ---- Copy URL to clipboard ----
     window.copyUrl = function (elementId, btn) {
         var text = document.getElementById(elementId).textContent.trim();
-        navigator.clipboard.writeText(text).then(function () {
-            var orig = btn.textContent;
-            btn.textContent = "Copied!";
-            setTimeout(function () { btn.textContent = orig; }, 1500);
-        });
+        navigator.clipboard.writeText(text).then(function () { flashBtn(btn, "Copied!"); });
     };
 
     // ---- Copy credentials (username + password + login URL) ----
     window.copyCredentials = function (username, password, loginUrl, btn) {
         var text = "Login URL: " + loginUrl + "\nUsername: " + username + "\nPassword: " + password;
-        navigator.clipboard.writeText(text).then(function () {
-            var orig = btn.textContent;
-            btn.textContent = "Copied!";
-            setTimeout(function () { btn.textContent = orig; }, 1500);
-        });
+        navigator.clipboard.writeText(text).then(function () { flashBtn(btn, "Copied!"); });
     };
 
     // ---- Inline save buttons (employees, jobs, categories) ----
@@ -47,13 +47,8 @@
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     if (data.success) {
-                        btn.textContent = "Saved!";
-                        btn.style.background = "#16a34a";
+                        flashBtn(btn, "Saved!", "#16a34a");
                         if (window._markClean) window._markClean();
-                        setTimeout(function () {
-                            btn.textContent = "Save";
-                            btn.style.background = "";
-                        }, 1500);
                     } else {
                         alert(data.error || "Save failed.");
                     }
@@ -79,13 +74,8 @@
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
                     if (data.success) {
-                        btn.textContent = "Saved!";
-                        btn.style.background = "#16a34a";
+                        flashBtn(btn, "Saved!", "#16a34a");
                         if (window._markClean) window._markClean();
-                        setTimeout(function () {
-                            btn.textContent = "Save";
-                            btn.style.background = "";
-                        }, 1500);
                     }
                 })
                 .catch(function () {
@@ -113,13 +103,8 @@
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (data.success) {
-                    notesSaveBtn.textContent = "Saved!";
-                    notesSaveBtn.style.background = "#16a34a";
+                    flashBtn(notesSaveBtn, "Saved!", "#16a34a");
                     if (window._markClean) window._markClean();
-                    setTimeout(function () {
-                        notesSaveBtn.textContent = "Save Notes";
-                        notesSaveBtn.style.background = "";
-                    }, 1500);
                 }
             })
             .catch(function () {
@@ -263,11 +248,7 @@
     document.querySelectorAll(".copy-url").forEach(function (btn) {
         btn.addEventListener("click", function () {
             var url = btn.dataset.url;
-            navigator.clipboard.writeText(url).then(function () {
-                var orig = btn.textContent;
-                btn.textContent = "Copied!";
-                setTimeout(function () { btn.textContent = orig; }, 1500);
-            });
+            navigator.clipboard.writeText(url).then(function () { flashBtn(btn, "Copied!"); });
         });
     });
 
