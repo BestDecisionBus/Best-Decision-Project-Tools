@@ -112,6 +112,13 @@ def _qbo_api_call(token_str, method, endpoint, payload=None):
         headers["Authorization"] = f"Bearer {access_token}"
         resp = requests.request(method, url, json=payload, headers=headers, timeout=20)
 
+    # Log intuit_tid for troubleshooting with Intuit support
+    tid = resp.headers.get("intuit_tid", "")
+    if tid:
+        log.info("QBO %s %s → %s (intuit_tid: %s)", method, endpoint, resp.status_code, tid)
+    if resp.status_code >= 400 and tid:
+        log.error("QBO error on %s %s — intuit_tid: %s — %s", method, endpoint, tid, resp.text[:300])
+
     return resp
 
 
