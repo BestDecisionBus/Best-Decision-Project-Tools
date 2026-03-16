@@ -1,6 +1,6 @@
 # BDB Tools
 
-A multi-tenant web application that gives field service companies five essential operational tools — time tracking, receipt capture, employee scheduling, job site photo documentation, and field estimating — all accessible from a mobile browser with no app install required.
+A multi-tenant web application that gives field service companies essential operational tools — time tracking, receipt capture, employee scheduling, job site photo documentation, field estimating, invoicing, customer management, and QuickBooks Online integration — all accessible from a mobile browser with no app install required.
 
 ---
 
@@ -50,14 +50,36 @@ A multi-tenant web application that gives field service companies five essential
 - Employee "My Estimates" view for field-submitted estimates
 - Admin estimate notes and customer message fields
 
+**Invoicing**
+- Create invoices from estimates/projects with automatic line item import
+- Drag-and-drop line item reordering
+- Customer management with contact details
+- Invoice lifecycle: Draft → Sent → Paid → Void
+- Client-facing invoice PDF generation
+- Push invoices to QuickBooks Online
+
+**Push Notifications**
+- Web Push notifications via VAPID/service worker (no app install)
+- Admin and employee notification bells with unread counts
+- Feature-gated per company, with configurable quiet hours
+- Employee notification preferences (per-category opt-in/out)
+- Categories: job updates, shift reminders, schedule changes, chat
+
+**QuickBooks Online Integration**
+- OAuth2 connect/disconnect from admin settings
+- Push estimates and invoices to QBO with line items and customer sync
+- Automatic token refresh and encrypted token storage (Fernet)
+- Supports sandbox and production environments
+
 **Platform**
 - Multi-tenant architecture — each company gets a unique URL token
 - Dual authentication: Flask-Login for admins, Flask session for employees
 - Six user roles: BDB Admin, BDB Viewer, Company Admin, Company Viewer, Scheduler, Employee
 - Company branding (logo and brand color scheme on all admin and employee-facing pages)
+- CSRF protection (Flask-WTF with auto-injection into forms and fetch requests)
+- Security headers (CSP, HSTS, X-Frame-Options), rate limiting, file validation via magic bytes
 - Context-aware admin guide (company admins see only their relevant sections)
 - Comprehensive employee help page
-- Security headers, rate limiting, file validation via magic bytes
 - **CFO Dashboard** — financial health KPIs, WIP gauges, and configurable business targets
 
 ---
@@ -68,10 +90,14 @@ A multi-tenant web application that gives field service companies five essential
 |---|---|---|
 | Language | Python | 3.12 |
 | Web Framework | Flask | 3.1.0 |
+| CSRF Protection | Flask-WTF | 1.2.0+ |
 | Authentication | Flask-Login | 0.6.3 |
 | WSGI Server | Gunicorn | 23.0.0 |
 | Database | SQLite | (stdlib) |
 | Password Hashing | Werkzeug | 3.1.3 |
+| HTTP Client | requests | 2.31.0+ |
+| Encryption | cryptography (Fernet) | 41.0.0+ |
+| Web Push | pywebpush | 2.0.0+ |
 | Audio Transcription | OpenAI Whisper | 20250625 |
 | PDF Generation | fpdf2 | 2.8.3 |
 | Image Processing | Pillow | 12.1.1 |
@@ -80,6 +106,8 @@ A multi-tenant web application that gives field service companies five essential
 | Environment Config | python-dotenv | 1.0.1 |
 | Frontend | Vanilla HTML/CSS/JS | — |
 | Maps | Leaflet + OpenStreetMap | — |
+| Geocoding | Mapbox | — |
+| Accounting | QuickBooks Online API | OAuth2 |
 | Reverse Proxy | Cloudflare Tunnel | — |
 | Process Manager | systemd | — |
 
@@ -177,6 +205,15 @@ All configuration is via environment variables in `.env`:
 | `RATE_LIMIT` | `60` | Maximum API requests per minute per token |
 | `MAX_UPLOAD_MB` | `30` | Maximum file upload size in megabytes |
 | `GPS_FLAG_DISTANCE_MILES` | `0.5` | Distance threshold (miles) between a clock punch and the job site before flagging for review |
+| `MAPBOX_TOKEN` | *(empty)* | Mapbox access token for address geocoding. Required for "Geocode" buttons on jobs/estimates. |
+| `VAPID_PRIVATE_KEY` | *(empty)* | VAPID private key (PEM) for Web Push notifications. Use `\n` escape sequences in `.env`. |
+| `VAPID_PUBLIC_KEY` | *(empty)* | VAPID public key (base64url) for Web Push. Shared with browsers for subscription. |
+| `VAPID_CLAIMS_EMAIL` | `admin@example.com` | Contact email included in VAPID claims. |
+| `QBO_CLIENT_ID` | *(empty)* | QuickBooks Online OAuth2 client ID. See `QBO_SETUP_GUIDE.md`. |
+| `QBO_CLIENT_SECRET` | *(empty)* | QuickBooks Online OAuth2 client secret. |
+| `QBO_REDIRECT_URI` | *(empty)* | OAuth2 callback URL (e.g., `https://yourdomain.com/admin/qbo/callback`). |
+| `QBO_ENVIRONMENT` | `sandbox` | `sandbox` or `production` — determines QBO API base URL. |
+| `QBO_ENCRYPTION_KEY` | *(empty)* | Fernet key for encrypting QBO tokens at rest. Generate with `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 
 ---
 
@@ -299,28 +336,38 @@ The CFO Dashboard (`/admin/finance`) provides a real-time financial health view 
 ```
 Best-Decision-Business-Tools/
 │
-├── app.py                  # Flask app, auth system, middleware, shared routes, blueprint registration
+├── app.py                  # Flask app, auth system, CSRF, middleware, shared routes, blueprint registration
 ├── config.py               # Paths, environment variables, directory creation
-├── database.py             # SQLite schema, migrations, all CRUD functions (~3200 lines)
+├── database.py             # SQLite schema, migrations, all CRUD functions
 ├── gunicorn.conf.py        # Gunicorn config: 2 workers, 300s timeout, task queue startup
 ├── task_queue.py           # Background worker: DB polling, file-lock GPU exclusivity, receipt/estimate processing
 ├── transcriber.py          # Whisper model loader and transcription
 ├── pdf_generator.py        # Receipt PDF generation, EXIF orientation fix, thumbnail creation
+├── qbo_crypto.py           # Fernet encryption for QBO OAuth tokens at rest
+├── qbo_service.py          # QBO API service: token refresh, customer/estimate/invoice push
 ├── requirements.txt        # Python dependencies
+├── QBO_SETUP_GUIDE.md      # QuickBooks Online integration setup guide
 ├── bdb-tools.service       # systemd unit file for production
 ├── .env                    # Environment variables (not committed)
 │
 ├── routes/
+│   ├── _shared.py          # Shared blueprint helpers: lazy import, feature gates, safe_latin1
 │   ├── admin.py            # Dashboard, tokens, users, employees, jobs, categories, shift types,
-│   │                       #   message snippets, common tasks, guide, finance dashboard
+│   │                       #   message snippets, common tasks, guide
 │   ├── estimates.py        # Estimates/projects CRUD, line items, reports (PDF/XLSX/scope PDF),
 │   │                       #   field capture, my-estimates, job tasks, products/services catalog
+│   ├── customers.py        # Customer CRUD, contact management
+│   ├── invoices.py         # Invoice CRUD, line items, PDF generation
+│   ├── finance.py          # CFO Dashboard, finance targets
 │   ├── time_admin.py       # Time entries, manual entries, export, payroll reports, audit log
 │   ├── timekeeper.py       # Employee clock in/out API, timekeeper page, help page
 │   ├── receipts.py         # Receipt capture page, upload API with file validation
 │   ├── receipt_admin.py    # Receipt browsing, detail view, downloads, deletion
 │   ├── scheduling.py       # Schedule CRUD API, scheduler dashboard, employee schedule view
-│   └── job_photos.py       # Photo capture, upload API, admin browsing, ZIP/PDF downloads
+│   ├── job_photos.py       # Photo capture, upload API, admin browsing, ZIP/PDF downloads
+│   ├── task_templates.py   # Task template CRUD, task completion history
+│   ├── notifications.py    # Push notifications: subscriptions, bell API, notify helpers
+│   └── qbo.py              # QuickBooks Online OAuth2 connect/disconnect, push routes
 │
 ├── templates/
 │   ├── _footer.html        # Shared footer
@@ -329,16 +376,21 @@ Best-Decision-Business-Tools/
 │   ├── company_admin_login.html
 │   ├── admin/              # 25+ admin panel templates
 │   │   ├── _nav.html       # Two-tier navigation (main tabs + sub-nav)
+│   │   ├── _token_selector.html    # Reusable company selector partial
 │   │   ├── dashboard.html  # Stat cards, active entries, schedule, payroll, job costs
 │   │   ├── finance_dashboard.html  # CFO Dashboard: KPI cards, health gauges, WIP tracking
 │   │   ├── estimates.html          # Estimates/projects list with status badges and cost columns
 │   │   ├── estimate_detail.html    # Full estimate editor: line items, costs, reports, approval
+│   │   ├── invoices.html           # Invoice list and management
+│   │   ├── invoice_detail.html     # Invoice editor with line items
+│   │   ├── customers.html          # Customer list and management
 │   │   ├── products_services.html  # Product/service catalog management
 │   │   ├── message_snippets.html   # Reusable message snippet management
 │   │   ├── shift_types.html        # Custom shift type management
 │   │   ├── guide.html      # Context-aware admin guide (BDB vs company)
 │   │   └── ...             # time_entries, employees, jobs, receipts, schedules, etc.
 │   ├── employee/           # Employee-facing templates
+│   │   ├── _notif_bell.html # Push notification bell partial
 │   │   ├── timekeeper.html # Clock in/out interface
 │   │   ├── help.html       # Comprehensive help with all tools documented
 │   │   └── my_schedule.html
@@ -348,7 +400,11 @@ Best-Decision-Business-Tools/
 │   └── errors/             # 404, invalid token
 │
 ├── static/
-│   ├── css/style.css       # Unified design system (single file, ~1700 lines)
+│   ├── css/style.css       # Unified design system (single file)
+│   ├── js/admin.js         # Admin panel JavaScript (sort, drag-drop, etc.)
+│   ├── js/timekeeper.js    # Employee timekeeper JavaScript
+│   ├── js/notifications.js # Push notification utilities (BDBNotify)
+│   ├── sw.js               # Service worker for push notifications
 │   └── logos/              # Company logos (auto-resized on upload, max 800px)
 │
 ├── instance/
@@ -478,7 +534,7 @@ sudo systemctl restart bdb-tools
 | GET | `/api/categories?token=X` | Token | List active expense categories |
 | GET | `/api/common-tasks?token=X` | Token | List active common tasks |
 | GET | `/api/check-username?username=X` | Login | Check if username is available |
-| GET | `/api/geocode?address=X` | Login | Geocode an address via Nominatim |
+| GET | `/api/geocode?address=X` | Login | Geocode an address via Mapbox |
 | GET | `/api/estimate/geocode` | Token | Geocode address for estimate job |
 
 ### Admin Routes — Time & Payroll
@@ -597,32 +653,81 @@ sudo systemctl restart bdb-tools
 | GET | `/tasks` | Session | Employee task checklist |
 | POST | `/api/tasks/check` | Session | Toggle task completion (JSON) |
 
+### Admin Routes — Customers
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/admin/customers` | Admin | Customer list |
+| GET | `/admin/customers/<id>` | Admin | Customer detail |
+| POST | `/admin/customers/create` | Admin | Create customer |
+| POST | `/admin/customers/<id>/update` | Admin | Update customer |
+
+### Admin Routes — Invoices
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/admin/invoices` | Admin | Invoice list |
+| GET | `/admin/invoices/<id>` | Admin | Invoice detail with line items |
+| POST | `/admin/invoices/create` | Admin | Create invoice |
+| POST | `/admin/invoices/<id>/update` | Admin | Update invoice |
+| POST | `/admin/invoices/<id>/delete` | Admin | Delete invoice |
+| POST | `/admin/invoices/<id>/items/create` | Admin | Add line item |
+| POST | `/admin/invoices/items/<item_id>/update` | Admin | Update line item |
+| POST | `/admin/invoices/items/<item_id>/delete` | Admin | Delete line item |
+
+### Push Notification APIs
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/push/vapid-public-key` | None | Get VAPID public key for push subscription |
+| POST | `/api/push/subscribe` | Session/Login | Register push subscription |
+| POST | `/api/push/unsubscribe` | Session/Login | Remove push subscription |
+| GET | `/api/notifications/unread` | Session/Login | Get unread notification count and list |
+| POST | `/api/notifications/mark-read` | Session/Login | Mark notifications as read |
+| GET/POST | `/api/notifications/prefs` | Session | Get/update employee notification preferences |
+
+### QuickBooks Online Routes
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/admin/qbo/connect` | Admin | Start QBO OAuth2 authorization flow |
+| GET | `/admin/qbo/callback` | Admin | OAuth2 callback — exchanges code for tokens |
+| POST | `/admin/qbo/disconnect` | Admin | Revoke QBO tokens and disconnect |
+| POST | `/admin/qbo/push-estimate/<id>` | Admin | Push estimate to QBO |
+| POST | `/admin/qbo/push-invoice/<id>` | Admin | Push invoice to QBO |
+
 ---
 
 ## Database Schema
 
-18 tables with token-based multi-tenant isolation:
+27+ tables with token-based multi-tenant isolation:
 
 ```
 tokens ─────┬── users
              ├── employees ──── time_entries ──── audit_log
+             │              └── notification_prefs
              ├── jobs ─────────┬── time_entries
              │                 ├── schedules ──── job_tasks
              │                 ├── job_photos
              │                 ├── submissions
-             │                 └── estimates ──── estimate_items
+             │                 ├── estimates ──── estimate_items
+             │                 └── invoices ──── invoice_items
+             ├── customers ────── estimates, invoices
              ├── categories ───── submissions (via submission_categories)
              ├── common_tasks
              ├── shift_types
              ├── products_services
-             └── message_snippets
+             ├── message_snippets
+             ├── notifications
+             ├── push_subscriptions
+             └── qbo_connections
 ```
 
 | Table | Purpose | Key Columns |
 |---|---|---|
-| `tokens` | Company tenants | token, company_name, logo_file, labor_burden_pct, income_target_pct, monthly_overhead, cash_on_hand, color_scheme, task_retention_days, is_active |
+| `tokens` | Company tenants | token, company_name, logo_file, labor_burden_pct, income_target_pct, monthly_overhead, cash_on_hand, color_scheme, task_retention_days, feature_push_notify, is_active |
 | `users` | Admin panel users | username, password_hash, role, token (NULL = BDB user) |
-| `employees` | Company workers | name, employee_id, token, username, hourly_wage, receipt_access, estimate_access |
+| `employees` | Company workers | name, employee_id, token, username, hourly_wage, receipt_access, estimate_access, task_uncheck_access |
 | `jobs` | Job sites | job_name, job_address, latitude, longitude, token |
 | `categories` | Expense categories | name, token, sort_order, account_code |
 | `common_tasks` | Schedule note presets | name, token, sort_order |
@@ -640,8 +745,15 @@ tokens ─────┬── users
 | `audit_log` | Change history | time_entry_id, action, field_changed, old_value, new_value, changed_by, reason |
 | `task_templates` | Named task template definitions | token, name, task_retention_days |
 | `task_template_items` | Tasks within a template | template_id, description, sort_order |
-| `task_completions` | Employee task completion records | token, job_id, employee_id, shift_date, task_source, task_ref_id, task_description |
+| `task_completions` | Employee task completion records | token, job_id, employee_id, shift_date, task_source, task_ref_id, task_description, reset_by_employee_id, reset_at |
 | `job_task_template_links` | Job ↔ task template associations | job_id, template_id, token |
+| `customers` | Customer contacts | customer_name, company_name, phone, email, token, qbo_customer_id |
+| `invoices` | Invoice records | token, customer_id, estimate_id, invoice_number, status, total, due_date, qbo_invoice_id |
+| `invoice_items` | Invoice line items | invoice_id, description, quantity, unit_price, billed_amount |
+| `notifications` | Push notification log | token, recipient_type, recipient_id, category, title, body, url, is_read |
+| `push_subscriptions` | Web Push subscription endpoints | token, recipient_type, recipient_id, endpoint, p256dh, auth |
+| `notification_prefs` | Employee notification preferences | employee_id, token, push_enabled, cat_job_updates, cat_shift_remind, cat_schedule, cat_chat |
+| `qbo_connections` | QuickBooks Online OAuth tokens | token, realm_id, access_token (encrypted), refresh_token (encrypted), token_expires_at, default_item_id |
 
 For full schema details including column types, indexes, and constraints, see [ARCHITECTURE.md](ARCHITECTURE.md#database-schema).
 
@@ -850,7 +962,8 @@ For urgent production issues, contact the system administrator directly.
 - [fpdf2](https://py-pdf.github.io/fpdf2/) — PDF generation
 - [Pillow](https://pillow.readthedocs.io/) — Image processing
 - [Leaflet](https://leafletjs.com/) — Interactive maps in the admin panel
-- [OpenStreetMap](https://www.openstreetmap.org/) — Map tiles and geocoding via Nominatim
+- [OpenStreetMap](https://www.openstreetmap.org/) — Map tiles
+- [Mapbox](https://www.mapbox.com/) — Address geocoding
 
 **Design:**
 - Color system inspired by [Tailwind CSS](https://tailwindcss.com/) color palette

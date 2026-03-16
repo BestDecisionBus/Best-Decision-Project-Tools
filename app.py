@@ -686,6 +686,20 @@ def api_check_username():
 
 
 # ---------------------------------------------------------------------------
+# Legal pages (required by Intuit for QBO integration)
+# ---------------------------------------------------------------------------
+
+@app.route("/legal/eula")
+def legal_eula():
+    return render_template("legal/eula.html")
+
+
+@app.route("/legal/privacy")
+def legal_privacy():
+    return render_template("legal/privacy.html")
+
+
+# ---------------------------------------------------------------------------
 # Error Handlers
 # ---------------------------------------------------------------------------
 

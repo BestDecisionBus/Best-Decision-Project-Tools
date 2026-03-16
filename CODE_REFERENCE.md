@@ -75,6 +75,25 @@ def toggle_item(item_id):
     conn.close()
 ```
 
+### Generic CRUD Helpers (private, inside database.py)
+```python
+# Fetch all rows for a token — replaces repetitive get_Xs_by_token functions
+rows = _get_all_by_token("items", token_str, active_only=True)
+# Custom order: _get_all_by_token("items", token_str, order="name ASC")
+
+# Fetch single row by ID
+item = _get_by_id("items", item_id)
+
+# Toggle is_active and return the updated row
+row = _toggle_active_returning("items", item_id)
+
+# Deactivate all rows for a token (CSV "replace" import mode)
+_bulk_deactivate("items", token_str)
+
+# Max sort_order for appending
+next_sort = _get_max_sort_order("items", token_str) + 1
+```
+
 ### Delete with cascade safety check
 ```python
 def delete_item(item_id):
@@ -128,19 +147,14 @@ conn.execute("CREATE INDEX IF NOT EXISTS idx_new_table_token ON new_table(token)
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import current_user, login_required
 import database
-
-items_bp = Blueprint('items', __name__)
-
-def _helpers():
-    import app as _app
-    return _app
+from routes._shared import helpers as _helpers
 
 
 @items_bp.route("/admin/items")
 @login_required
 def admin_items():
-    _app = _helpers()
-    tokens = _app._get_tokens_for_user()
+    h = _helpers()
+    tokens = h._get_tokens_for_user()
     if not current_user.is_bdb:
         token_str = current_user.token
     else:
@@ -156,9 +170,9 @@ def admin_items():
 @items_bp.route("/admin/items/create", methods=["POST"])
 @login_required
 def admin_item_create():
-    _app = _helpers()
+    h = _helpers()
     token_str = request.form.get("token", "")
-    _app._verify_token_access(token_str)
+    h._verify_token_access(token_str)
     name = request.form.get("name", "").strip()
     if not name:
         flash("Name is required.", "error")
@@ -311,8 +325,8 @@ def api_my_resource():
         return jsonify({"error": "Invalid token"}), 403
 
     # Rate limiting
-    _app = _helpers()
-    if _app._is_rate_limited(token_str, _app._rate_limits, config.RATE_LIMIT, 1):
+    h = _helpers()
+    if h._is_rate_limited(token_str, h._rate_limits, config.RATE_LIMIT, 1):
         return jsonify({"error": "Rate limit exceeded"}), 429
 
     # Process request
@@ -323,6 +337,8 @@ def api_my_resource():
     result_id = database.create_something(data, token_str)
     return jsonify({"id": result_id, "status": "ok"})
 ```
+
+> **CSRF note:** Flask-WTF CSRF protection is enabled globally. The auto-injected fetch interceptor adds `X-CSRFToken` to all non-GET fetch requests automatically. No manual token handling needed.
 
 ---
 
@@ -350,22 +366,8 @@ def api_my_resource():
         {% endfor %}
         {% endwith %}
 
-        {# BDB company selector #}
-        {% if current_user.is_bdb %}
-            {% if tokens|length > 1 %}
-            <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
-                <label for="token-select">Company</label>
-                <select id="token-select" onchange="window.location.href='?token=' + this.value">
-                    {% for t in tokens %}
-                    <option value="{{ t.token }}"
-                        {% if selected_token and selected_token.token == t.token %}selected{% endif %}>
-                        {{ t.company_name }}
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-            {% endif %}
-        {% endif %}
+        {# Company selector (auto-resolves token dict, handles scheduling.py edge case) #}
+        {% include 'admin/_token_selector.html' %}
 
         <h2>Page Title</h2>
 
@@ -435,6 +437,8 @@ def api_my_resource():
 ---
 
 ## JavaScript — Fetch POST (JSON)
+
+The auto-injected CSRF fetch interceptor adds `X-CSRFToken` to all non-GET requests. No manual token handling needed:
 
 ```javascript
 async function saveData(payload) {
@@ -675,4 +679,79 @@ journalctl -u bdpt --since "1h ago"  # last hour
 # After code changes
 sudo systemctl restart bdpt
 python3 -c "import app; print('OK')"  # verify before restart
+```
+
+---
+
+## Shared Helpers (`routes/_shared.py`)
+
+```python
+from routes._shared import helpers, gate_employee_feature, gate_admin_feature, safe_latin1
+
+# Lazy app import (preferred over per-blueprint _helpers())
+h = helpers()
+tokens = h._get_tokens_for_user()
+
+# Feature gates for before_request hooks
+@my_bp.before_request
+def check_feature():
+    return gate_employee_feature("feature_receipts")
+
+@admin_bp.before_request
+def check_admin_feature():
+    return gate_admin_feature("feature_receipts", "Receipt Capture")
+
+# Safe latin-1 for FPDF output
+safe_text = safe_latin1("Unicode → text")
+```
+
+---
+
+## Push Notifications
+
+```python
+from routes.notifications import notify_admins, notify_employee, notify_clocked_in_employees
+
+# Notify all company admins
+notify_admins(token_str, "receipt", "New Receipt", "Receipt submitted by John", "/admin/receipts")
+
+# Notify a specific employee
+notify_employee(token_str, employee_id, "schedule", "Schedule Update", "Your shift changed", "/schedule")
+
+# Notify all employees clocked into a job
+notify_clocked_in_employees(token_str, job_id, "job_update", "Job Update", "New photo added")
+```
+
+Notification bell template includes:
+```html
+{# Employee pages — requires token, employee in context #}
+{% include 'employee/_notif_bell.html' %}
+```
+
+---
+
+## QuickBooks Online — Push Estimate/Invoice
+
+```python
+import qbo_service
+
+# Push estimate to QBO (creates or updates via sparse update)
+qbo_id = qbo_service.push_estimate_to_qbo(token_str, estimate_id)
+
+# Push invoice to QBO
+qbo_id = qbo_service.push_invoice_to_qbo(token_str, invoice_id)
+
+# Ensure customer exists in QBO (creates if needed, handles duplicates)
+qbo_customer_id = qbo_service.ensure_customer_in_qbo(token_str, customer_id)
+```
+
+OAuth token encryption:
+```python
+import qbo_crypto
+
+# Encrypt before storing in DB
+encrypted = qbo_crypto.encrypt(plaintext_token)
+
+# Decrypt when making API calls
+plaintext = qbo_crypto.decrypt(encrypted_token)
 ```

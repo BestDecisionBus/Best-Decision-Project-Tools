@@ -12,13 +12,9 @@ Every route module follows the same structure:
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session
 from flask_login import current_user, login_required
 import database
+from routes._shared import helpers as _helpers
 
 my_bp = Blueprint('my_module', __name__)
-
-# Lazy import to avoid circular imports with app.py
-def _helpers():
-    import app as _app
-    return _app
 
 @my_bp.route("/admin/my-page")
 @login_required
@@ -27,6 +23,8 @@ def my_page():
     tokens = _app._get_tokens_for_user()
     ...
 ```
+
+The shared `helpers()` function in `routes/_shared.py` handles the lazy import to avoid circular imports. Older blueprints may still use a local `def _helpers()` — both work identically.
 
 Register in `app.py`:
 ```python
@@ -66,6 +64,32 @@ rows = conn.execute(
     (token_str,)
 ).fetchall()
 ```
+
+### Generic CRUD Helpers
+
+`database.py` provides private generic helpers for common patterns. Use these when adding new tenant-scoped CRUD tables to reduce boilerplate:
+
+```python
+# Fetch all rows for a token (with optional active-only filter)
+rows = _get_all_by_token("items", token_str, active_only=True)
+
+# Fetch single row by ID
+item = _get_by_id("items", item_id)
+
+# Toggle is_active flag
+_toggle_active("items", item_id)
+
+# Toggle and return the updated row
+row = _toggle_active_returning("items", item_id)
+
+# Deactivate all rows for a token (used in CSV "replace" import mode)
+_bulk_deactivate("items", token_str)
+
+# Get the current max sort_order (for appending new items)
+next_sort = _get_max_sort_order("items", token_str) + 1
+```
+
+These are **private** helpers — use them inside `database.py` functions, not from routes.
 
 ---
 
@@ -119,32 +143,18 @@ def my_tool():
 
 ## Multi-Company Selector (BDB Admin)
 
-Standard pattern for pages where BDB admins can switch between companies:
+Use the shared `_token_selector.html` partial. It auto-resolves the token dict (handles scheduling.py reversed unpacking), shows an "All Companies" option for BDB users, and displays a static company name for company-scoped admins:
 
-**Template:**
 ```html
-{% if current_user.is_bdb %}
-    {% if tokens|length > 1 %}
-    <div class="form-group" style="max-width: 300px; margin-bottom: 24px;">
-        <label for="token-select">Company</label>
-        <select id="token-select" onchange="window.location.href='?token=' + this.value">
-            {% for t in tokens %}
-            <option value="{{ t.token }}"
-                {% if selected_token and selected_token.token == t.token %}selected{% endif %}>
-                {{ t.company_name }}
-            </option>
-            {% endfor %}
-        </select>
-    </div>
-    {% endif %}
-{% else %}
-    {% if selected_token %}
-    <p style="font-size: 14px; color: var(--gray-500); margin-bottom: 16px;">
-        Company: <strong>{{ selected_token.company_name }}</strong>
-    </p>
-    {% endif %}
-{% endif %}
+{% include 'admin/_token_selector.html' %}
 ```
+
+To disable the "All Companies" option:
+```html
+{% with show_all=false %}{% include 'admin/_token_selector.html' %}{% endwith %}
+```
+
+The partial expects `tokens` and either `selected_token` (dict) or `token_data` (dict) in the template context.
 
 ---
 
@@ -391,7 +401,7 @@ body.scheme-green { --blue: #16a34a; --blue-dark: #15803d; --blue-tint: #f0fdf4;
 
 ## Geocoding
 
-Uses Nominatim (OpenStreetMap) via the `/api/geocode` endpoint:
+Uses Mapbox via the `/api/geocode` endpoint. Requires `MAPBOX_TOKEN` in `.env`:
 
 ```javascript
 fetch(`/api/geocode?address=${encodeURIComponent(address)}`)
@@ -404,4 +414,91 @@ fetch(`/api/geocode?address=${encodeURIComponent(address)}`)
   });
 ```
 
-Do not call Nominatim directly from templates — route the request through the backend endpoint to respect rate limiting and avoid CORS issues.
+Do not call Mapbox directly from templates — route the request through the backend endpoint to respect rate limiting and avoid CORS issues. The backend helper `_geocode_address(address)` in `app.py` returns `(result_dict, status_code)`.
+
+---
+
+## CSRF Protection
+
+Flask-WTF `CSRFProtect` is enabled globally. CSRF tokens are auto-injected by `app.py`'s `inject_csrf_tokens()` after-request handler:
+
+1. A `<meta name="csrf-token">` tag is injected into `<head>`
+2. A hidden `<input name="csrf_token">` is injected into every `method="POST"` form
+3. A `fetch()` interceptor script is injected before `</body>` — it auto-adds `X-CSRFToken` to all non-GET fetch requests
+
+**You do not need to manually add CSRF tokens to forms or fetch calls.** They are handled automatically.
+
+For AJAX/fetch POST requests, the interceptor reads the meta tag automatically. If you need the token manually:
+```javascript
+var token = document.querySelector('meta[name="csrf-token"]').content;
+```
+
+---
+
+## Shared Helpers (`routes/_shared.py`)
+
+Common helpers used across blueprints:
+
+```python
+from routes._shared import helpers, gate_employee_feature, gate_admin_feature, safe_latin1
+
+# Lazy app import (replaces per-blueprint _helpers() functions)
+_app = helpers()
+
+# Feature gate for employee-facing before_request hooks
+# Returns redirect Response if disabled, None to continue
+result = gate_employee_feature("feature_receipts")
+
+# Feature gate for admin before_request hooks
+result = gate_admin_feature("feature_receipts", "Receipt Capture")
+
+# Safe latin-1 encoding for FPDF Helvetica font
+text = safe_latin1("some unicode → text")
+```
+
+---
+
+## Push Notifications
+
+Notifications are feature-gated per company (`tokens.feature_push_notify`), window-gated (configurable quiet hours), and employee-pref-gated.
+
+**Sending from routes or task_queue:**
+```python
+from routes.notifications import notify_admins, notify_employee
+
+# Notify all admins for a company
+notify_admins(token_str, "receipt", "New Receipt", "Employee submitted a receipt", "/admin/receipts")
+
+# Notify a specific employee
+notify_employee(token_str, employee_id, "schedule", "Schedule Updated", "Your shift was changed", "/schedule")
+```
+
+**Including the notification bell in templates:**
+```html
+{# Employee pages #}
+{% include 'employee/_notif_bell.html' %}
+
+{# Admin pages — handled by _nav.html automatically #}
+```
+
+---
+
+## QuickBooks Online Integration
+
+QBO integration is optional — enabled per company when OAuth2 credentials are configured.
+
+**Pushing estimates/invoices to QBO:**
+```python
+import qbo_service
+
+# Push or update an estimate in QBO
+qbo_id = qbo_service.push_estimate_to_qbo(token_str, estimate_id)
+
+# Push or update an invoice in QBO
+qbo_id = qbo_service.push_invoice_to_qbo(token_str, invoice_id)
+
+# Ensure a customer exists in QBO (creates if needed)
+qbo_customer_id = qbo_service.ensure_customer_in_qbo(token_str, customer_id)
+```
+
+OAuth tokens are encrypted at rest using Fernet (`qbo_crypto.py`). Tokens auto-refresh on 401.

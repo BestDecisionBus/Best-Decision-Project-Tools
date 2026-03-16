@@ -24,7 +24,9 @@ Browser
         └── Worker 2: Flask app + background thread (task_queue)
                 │
                 ├── Flask routing (blueprints)
-                │     ├── Security headers (after_request)
+                │     ├── CSRF validation (Flask-WTF, all POST/PUT/DELETE)
+                │     ├── Security headers (after_request: CSP, HSTS, X-Frame-Options)
+                │     ├── CSRF auto-injection (after_request: meta tag, hidden inputs, fetch interceptor)
                 │     ├── Rate limiting (in-process, per token)
                 │     ├── Auth check (Flask-Login or session)
                 │     └── Route handler → database.py → SQLite
@@ -43,16 +45,18 @@ Browser
 | Concern | Implementation |
 |---|---|
 | Flask app creation | `app = Flask(__name__)` with session/cookie config |
+| CSRF protection | `flask_wtf.CSRFProtect` + auto-injection of tokens into forms/fetch |
 | Auth system | `flask_login.LoginManager` + custom `User(UserMixin)` class |
 | Role decorators | `@admin_required`, `@bdb_required`, `@scheduler_allowed` |
 | Rate limiting | In-process `defaultdict(list)` per token, sliding window |
 | Template filters | `fmt_time`, `fmt_date`, `time12`, `weekday`, `monthday` |
-| Security headers | `@after_request` — CSP, X-Frame-Options, X-Content-Type-Options |
-| Shared helpers | `_get_tokens_for_user()`, `_verify_token_access()` |
-| PWA support | `/c/<token>/manifest.json`, `apple-touch-icon` routes |
-| Blueprint registration | 9 blueprints registered at module bottom |
+| Security headers | `@after_request` — CSP, HSTS, X-Frame-Options, X-Content-Type-Options |
+| CSRF auto-injection | `@after_request` — injects meta tag, hidden inputs, fetch interceptor |
+| Shared helpers | `_get_tokens_for_user()`, `_verify_token_access()`, `_geocode_address()`, `_check_token_api_access()` |
+| PWA support | `/c/<token>/manifest.json`, `apple-touch-icon`, `/sw.js` routes |
+| Blueprint registration | 14 blueprints registered at module bottom |
 
-**Blueprint registration order** (`app.py` lines 603–611):
+**Blueprint registration order** (`app.py`):
 ```python
 app.register_blueprint(admin_bp)
 app.register_blueprint(timekeeper_bp)
@@ -63,6 +67,11 @@ app.register_blueprint(scheduling_bp)
 app.register_blueprint(job_photos_bp)
 app.register_blueprint(estimates_bp)
 app.register_blueprint(finance_bp)
+app.register_blueprint(customers_bp)
+app.register_blueprint(task_templates_bp)
+app.register_blueprint(invoices_bp)
+app.register_blueprint(notifications_bp)
+app.register_blueprint(qbo_bp)
 ```
 
 ---
@@ -79,15 +88,19 @@ app.register_blueprint(finance_bp)
 | `scheduling_bp` | `routes/scheduling.py` | `/` | Schedule CRUD, scheduler dashboard, employee view |
 | `job_photos_bp` | `routes/job_photos.py` | `/` | Photo capture, upload API, admin browsing, downloads |
 | `estimates_bp` | `routes/estimates.py` | `/` | Field estimate capture, estimate/project admin, reports, job tasks, products/services |
-| `finance_bp` | `routes/admin.py` | `/admin` | CFO Dashboard, finance targets |
+| `finance_bp` | `routes/finance.py` | `/admin` | CFO Dashboard, finance targets |
+| `customers_bp` | `routes/customers.py` | `/admin` | Customer CRUD, contact management |
 | `task_templates_bp` | `routes/task_templates.py` | `/admin` | Task template CRUD, task completion history |
+| `invoices_bp` | `routes/invoices.py` | `/admin` | Invoice CRUD, line items, PDF generation |
+| `notifications_bp` | `routes/notifications.py` | `/api` | Push subscriptions, notification bell, employee prefs |
+| `qbo_bp` | `routes/qbo.py` | `/admin` | QuickBooks Online OAuth2, estimate/invoice push |
 
-**Lazy import pattern** — all blueprints import `app` lazily to avoid circular imports:
+**Lazy import pattern** — blueprints use `routes/_shared.py` for the lazy import:
 ```python
-def _helpers():
-    import app as _app
-    return _app
+from routes._shared import helpers as _helpers
 ```
+
+`_shared.py` also provides `gate_employee_feature()`, `gate_admin_feature()`, and `safe_latin1()` helpers. Older blueprints may still use a local `def _helpers()` — both patterns work identically.
 
 ---
 
@@ -153,7 +166,7 @@ Every tenant-scoped table has a `token TEXT NOT NULL` column referencing `tokens
 
 **Schema migrations:** `_add_column_if_missing(conn, table, column, definition)` is called in `init_db()` on every startup. It is idempotent — safe to run repeatedly. No migration framework is used.
 
-### All 22 tables
+### All tables
 
 | Table | Tenant-scoped | Purpose |
 |---|---|---|
@@ -179,6 +192,13 @@ Every tenant-scoped table has a `token TEXT NOT NULL` column referencing `tokens
 | `task_template_items` | Yes (via template) | Individual task items within a template |
 | `task_completions` | Yes | Per-employee per-shift task completion records — purged after `task_retention_days` |
 | `job_task_template_links` | Yes (via job) | Many-to-many link between jobs and task templates |
+| `customers` | Yes | Customer contacts linked to estimates and invoices |
+| `invoices` | Yes | Invoice records with customer, status, and QBO sync |
+| `invoice_items` | Yes (via invoice) | Invoice line items |
+| `notifications` | Yes | Push notification log (admin + employee) |
+| `push_subscriptions` | Yes | Web Push endpoint registrations |
+| `notification_prefs` | Yes | Per-employee notification category preferences |
+| `qbo_connections` | Yes | QuickBooks Online OAuth tokens (encrypted) per company |
 
 ### Key `tokens` columns (beyond CREATE TABLE)
 
@@ -188,6 +208,9 @@ Added via `_add_column_if_missing`:
 |---|---|---|
 | `color_scheme` | TEXT DEFAULT 'blue' | Company brand color: blue, green, teal, purple, orange, red |
 | `task_retention_days` | INTEGER DEFAULT 30 | Days to keep task completion records before purge |
+| `feature_push_notify` | INTEGER DEFAULT 0 | Enable push notifications for this company |
+| `notify_window_start` | TEXT DEFAULT '06:00' | Push notification quiet hours start |
+| `notify_window_end` | TEXT DEFAULT '21:00' | Push notification quiet hours end |
 
 ### Key `employees` columns (beyond CREATE TABLE)
 
@@ -196,6 +219,7 @@ Added via `_add_column_if_missing`:
 | Column | Type | Purpose |
 |---|---|---|
 | `tasks_access` | INTEGER DEFAULT 1 | Grants access to the Task Checklist employee tool |
+| `task_uncheck_access` | INTEGER DEFAULT 0 | Allows employee to uncheck (reset) completed tasks |
 
 ### Key `jobs` columns (beyond CREATE TABLE)
 
@@ -282,15 +306,19 @@ All file paths are defined in `config.py` and created on import:
 | Mechanism | Implementation |
 |---|---|
 | HTTPS | Cloudflare Tunnel (TLS termination externally) |
+| CSRF protection | Flask-WTF `CSRFProtect` — auto-injected tokens in forms + fetch interceptor |
 | Session encryption | `SECRET_KEY` from `.env` |
 | Password hashing | `werkzeug.security.generate_password_hash` (pbkdf2) |
+| Token encryption | Fernet (`qbo_crypto.py`) for QBO OAuth tokens at rest |
 | Rate limiting | Sliding-window in-process, per token, `config.RATE_LIMIT` req/min |
+| API auth checks | `_check_token_api_access()` verifies admin or employee session on shared APIs |
 | File validation | Magic byte check before saving uploads (JPEG, PNG, WebP, audio formats) |
 | Max upload size | `app.config["MAX_CONTENT_LENGTH"]` = `MAX_UPLOAD_MB` × 1024² |
-| Content Security Policy | `after_request` header; `img-src 'self' data: blob:` for camera/thumbnails |
+| Content Security Policy | `after_request` header; includes `worker-src 'self'` for service worker |
+| HSTS | `Strict-Transport-Security: max-age=31536000; includeSubDomains` |
 | X-Frame-Options | `DENY` — prevents clickjacking |
 | X-Content-Type-Options | `nosniff` |
-| Session cookie flags | `HttpOnly=True`, `SameSite=Lax` |
+| Session cookie flags | `HttpOnly=True`, `SameSite=Lax`, `Secure=True` |
 | Audit trail | Every time-entry field change logged to `audit_log` with old/new values |
 
 ---
@@ -302,6 +330,7 @@ BDB Tools supports "Add to Home Screen" on iOS and Android:
 - `/c/<token>/manifest.json` — dynamically generated per-company manifest with company name as app name
 - `apple-touch-icon.png` routes — served from `static/icons/`
 - Three manifests in `static/`: `manifest-admin.json`, `manifest-scheduler.json`, `manifest-timekeeper.json`
+- `/sw.js` — service worker for push notifications (served from root with no-cache headers)
 
 ---
 
@@ -402,3 +431,78 @@ The `--blue-tint` variable (lightest tint of the brand color) is used for zebra 
 
 - **With clock-out:** `status="completed"`, `total_hours` calculated, all clock-out fields set
 - **Without clock-out:** `status="active"`, `total_hours=NULL`, clock-out fields `NULL` — entry appears as an active punch the employee can clock out of normally via the Timekeeper
+
+---
+
+## CSRF Protection
+
+Flask-WTF `CSRFProtect` is enabled globally in `app.py`. An `inject_csrf_tokens()` after-request handler auto-injects CSRF tokens into all HTML responses:
+
+1. **Meta tag** — `<meta name="csrf-token" content="...">` injected into `<head>`
+2. **Hidden inputs** — `<input type="hidden" name="csrf_token" value="...">` injected into every `method="POST"` form (matched via regex)
+3. **Fetch interceptor** — A `<script>` injected before `</body>` that monkey-patches `window.fetch` to auto-add `X-CSRFToken` header on all non-GET requests
+
+This means no manual CSRF handling is needed in templates or JavaScript. The interceptor reads the meta tag and adds the header automatically.
+
+---
+
+## Push Notification System
+
+Web Push notifications are delivered via VAPID protocol + service worker (`static/sw.js`).
+
+**Architecture:**
+
+| Component | File | Purpose |
+|---|---|---|
+| Service worker | `static/sw.js` | Receives push events, shows OS notifications |
+| Client JS | `static/js/notifications.js` | `BDBNotify` utility — subscribes, polls bell, manages prefs |
+| Bell partial (employee) | `templates/employee/_notif_bell.html` | Notification bell icon with unread badge |
+| Bell (admin) | `templates/admin/_nav.html` | Admin notification bell integrated into nav |
+| Backend API | `routes/notifications.py` | Subscribe/unsubscribe, bell API, prefs API |
+| Notify helpers | `routes/notifications.py` | `notify_admins()`, `notify_employee()`, `notify_clocked_in_employees()` |
+| Push sender | `routes/notifications.py` | `send_push_notification()` via `pywebpush` |
+
+**Gating layers:**
+1. **Feature gate** — `tokens.feature_push_notify` must be enabled per company
+2. **Window gate** — notifications suppressed outside configurable quiet hours
+3. **Employee pref gate** — employees can opt out of specific categories
+
+**Notification categories:** `job_update`, `photo`, `task`, `shift_reminder`, `schedule`, `chat_message`
+
+---
+
+## QuickBooks Online Integration
+
+Optional per-company integration for syncing estimates, invoices, and customers to QBO.
+
+**Architecture:**
+
+| Component | File | Purpose |
+|---|---|---|
+| OAuth2 routes | `routes/qbo.py` | Connect, callback, disconnect, push endpoints |
+| API service | `qbo_service.py` | Token refresh, authenticated API calls, entity push |
+| Encryption | `qbo_crypto.py` | Fernet encrypt/decrypt for OAuth tokens at rest |
+| DB storage | `qbo_connections` table | Encrypted tokens, realm ID, default item ID |
+
+**OAuth2 flow:**
+1. Admin clicks "Connect to QuickBooks" → redirected to Intuit with state nonce
+2. User authorizes → callback receives auth code
+3. Code exchanged for access + refresh tokens → encrypted and stored
+4. Access token auto-refreshes when expiring within 5 minutes
+5. 401 responses trigger one automatic retry with fresh token
+
+**Push operations:**
+- `push_estimate_to_qbo()` — creates or sparse-updates QBO estimate with line items
+- `push_invoice_to_qbo()` — creates or sparse-updates QBO invoice
+- `ensure_customer_in_qbo()` — creates customer in QBO if not already synced (handles duplicate names)
+- `_ensure_default_item()` — creates or finds a "Services" item for line item references
+
+**Config vars:** `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_REDIRECT_URI`, `QBO_ENVIRONMENT`, `QBO_ENCRYPTION_KEY`
+
+---
+
+## Geocoding
+
+Address geocoding uses Mapbox via `_geocode_address()` in `app.py`. Requires `MAPBOX_TOKEN` in `.env`.
+
+Exposed as `/api/geocode?address=X` for the admin panel (job addresses, estimate addresses). The backend helper returns `(result_dict, status_code)` — templates should always use the API endpoint rather than calling Mapbox directly.
