@@ -134,7 +134,8 @@
                     <option value="{{ ps.name }}"
                             data-price="{{ '{:.2f}'.format(ps.unit_price or 0) }}"
                             data-cost="{{ '{:.2f}'.format(ps.unit_cost or 0) }}"
-                            data-item-type="{{ ps.item_type or 'product' }}">[{{ (ps.item_type or 'product')|capitalize }}] {{ ps.name }} (${{ '{:.2f}'.format(ps.unit_price or 0) }})</option>
+                            data-item-type="{{ ps.item_type or 'product' }}"
+                            data-description="{{ ps.description or '' }}">[{{ (ps.item_type or 'product')|capitalize }}] {{ ps.name }} (${{ '{:.2f}'.format(ps.unit_price or 0) }})</option>
                     {% endfor %}
                 </select>
                 <button type="button" class="btn btn-green btn-sm" onclick="addFromPS()">Add</button>
@@ -144,8 +145,11 @@
             <div id="li-cards">
                 {% for item in items %}
                 <div class="li-card" data-item-id="{{ item.id }}" style="background:var(--gray-50); border:1px solid var(--gray-200); border-radius:8px; padding:10px; margin-bottom:8px;">
+                    <input type="text" class="li-item-name" value="{{ item.item_name or '' }}" placeholder="Product / Service name"
+                           style="width:100%; padding:8px; font-size:14px; font-weight:600; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"
+                           onchange="saveItem(this)">
                     <input type="text" class="li-desc" value="{{ item.description }}" placeholder="Description"
-                           style="width:100%; padding:8px; font-size:14px; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"
+                           style="width:100%; padding:8px; font-size:13px; color:var(--gray-600); border:1px solid var(--gray-300); border-radius:6px; background:#fefce8; margin-top: 4px;"
                            onchange="saveItem(this)">
                     <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:4px; margin-bottom:2px;">
                         {% set itype = item.item_type or 'product' %}
@@ -508,19 +512,21 @@
         var taxable = card.querySelector('.li-taxable').checked;
         var itemTypeEl = card.querySelector('.li-item-type');
         var item_type = itemTypeEl ? itemTypeEl.value : 'product';
-        if (!desc) return;
+        var itemNameEl = card.querySelector('.li-item-name');
+        var item_name = itemNameEl ? itemNameEl.value : '';
+        if (!desc && !item_name) return;
 
         if (itemId) {
             fetch('/api/estimate/items/' + itemId + '/update', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, unit_cost: unit_cost, total: total, taxable: taxable, item_type: item_type})
+                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, unit_cost: unit_cost, total: total, taxable: taxable, item_type: item_type, item_name: item_name})
             });
         } else {
             fetch('/api/estimate/' + ESTIMATE_ID + '/items/create', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, unit_cost: unit_cost, total: total, taxable: taxable, item_type: item_type})
+                body: JSON.stringify({description: desc, quantity: qty, unit_price: price, unit_cost: unit_cost, total: total, taxable: taxable, item_type: item_type, item_name: item_name})
             }).then(function(r) { return r.json(); }).then(function(data) {
                 if (data.ok && data.item) card.setAttribute('data-item-id', String(data.item.id));
             });
@@ -539,7 +545,8 @@
     }
 
     // ---- Add blank line item ----
-    function addLineItem(desc, price, item_type, cost) {
+    // Note: desc/price/cost/itemName come from controlled P&S dropdown data attributes, not direct user input
+    function addLineItem(desc, price, item_type, cost, itemName) {
         var itype = (item_type === 'service') ? 'service' : 'product';
         var container = document.getElementById('li-cards');
         var card = document.createElement('div');
@@ -547,8 +554,11 @@
         card.setAttribute('data-item-id', '');
         card.style.cssText = 'background:var(--gray-50); border:1px solid var(--gray-200); border-radius:8px; padding:10px; margin-bottom:8px;';
         card.innerHTML =
+            '<input type="text" class="li-item-name" value="' + (itemName || '').replace(/"/g, '&quot;') + '" placeholder="Product / Service name"' +
+            ' style="width:100%;padding:8px;font-size:14px;font-weight:600;border:1px solid var(--gray-300);border-radius:6px;background:#fefce8;"' +
+            ' onchange="saveItem(this)">' +
             '<input type="text" class="li-desc" value="' + (desc || '').replace(/"/g, '&quot;') + '" placeholder="Description"' +
-            ' style="width:100%; padding:8px; font-size:14px; border:1px solid var(--gray-300); border-radius:6px; background:#fefce8;"' +
+            ' style="width:100%; padding:8px; font-size:13px; color:var(--gray-600); border:1px solid var(--gray-300); border-radius:6px; background:#fefce8; margin-top:4px;"' +
             ' onchange="saveItem(this)">' +
             '<div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:4px; margin-bottom:2px;">' +
             '<button type="button" class="li-type-btn" data-type="product" onclick="setItemType(this,\'product\')" style="font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid #2563eb;cursor:pointer;background:' + (itype==='product'?'#2563eb':'#e5e7eb') + ';color:' + (itype==='product'?'#fff':'#374151') + ';">Product</button>' +
@@ -604,10 +614,11 @@
         if (!sel || !sel.value) return;
         var opt = sel.options[sel.selectedIndex];
         var name = sel.value;
+        var desc = opt.getAttribute('data-description') || '';
         var price = opt.getAttribute('data-price') || '';
         var item_type = opt.getAttribute('data-item-type') || 'product';
         var cost = opt.getAttribute('data-cost') || '0';
-        addLineItem(name, price, item_type, cost);
+        addLineItem(desc, price, item_type, cost, name);
         // Auto-save the new card
         var cards = document.querySelectorAll('#li-cards .li-card');
         var lastCard = cards[cards.length - 1];

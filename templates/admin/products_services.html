@@ -33,6 +33,10 @@
                         <label for="ps-name">Name</label>
                         <input type="text" id="ps-name" name="name" placeholder="e.g. Framing lumber, Labor - install" required>
                     </div>
+                    <div class="form-group" style="flex: 2;">
+                        <label for="ps-desc">Description</label>
+                        <input type="text" id="ps-desc" name="description" placeholder="Default description for estimates">
+                    </div>
                     <div class="form-group" style="flex: 1;">
                         <label for="ps-price">Unit Price ($)</label>
                         <input type="number" id="ps-price" name="unit_price" value="0.00" step="0.01" min="0">
@@ -64,11 +68,26 @@
             </form>
         </div>
 
+        {% if qbo_connection %}
         <div class="meta-card" style="margin-bottom: 24px;">
-            <h3 style="margin-top: 0;">Import from CSV</h3>
+            <h3 style="margin-top: 0;">QuickBooks Item Mapping</h3>
             <p style="font-size: 13px; color: var(--gray-500); margin-bottom: 12px;">
-                <a href="{{ url_for('admin.admin_product_service_csv_sample') }}">Download sample CSV</a>
-                then upload your completed file below.
+                Sync your QuickBooks items and income accounts so each product/service maps to the correct account in QBO.
+            </p>
+            <form method="POST" action="{{ url_for('qbo.qbo_sync_items') }}" style="display: inline;">
+                <button type="submit" class="btn btn-blue">Sync QBO Items &amp; Accounts</button>
+            </form>
+            {% if qbo_items or qbo_accounts %}
+            <span style="font-size: 13px; color: var(--gray-500); margin-left: 12px;">{{ qbo_items|length }} items, {{ qbo_accounts|length }} accounts cached</span>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Import from CSV / Excel</h3>
+            <p style="font-size: 13px; color: var(--gray-500); margin-bottom: 12px;">
+                <a href="{{ url_for('admin.admin_product_service_csv_sample', token=selected_token.token) }}">Download sample XLSX</a>
+                (includes QBO income accounts list) then upload your completed file below.
             </p>
             <form method="POST" action="{{ url_for('admin.admin_product_service_csv_import') }}"
                   enctype="multipart/form-data">
@@ -87,8 +106,8 @@
                     </div>
                     <div style="display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;">
                         <div class="form-group" style="flex: 1;">
-                            <label for="ps-csv-file">CSV File</label>
-                            <input type="file" id="ps-csv-file" name="csv_file" accept=".csv" required>
+                            <label for="ps-csv-file">CSV or Excel File</label>
+                            <input type="file" id="ps-csv-file" name="csv_file" accept=".csv,.xlsx" required>
                         </div>
                         <div><button type="submit" class="btn btn-blue">Import</button></div>
                     </div>
@@ -103,10 +122,13 @@
                 <thead>
                     <tr>
                         <th>Name</th>
+                        <th>Description</th>
                         <th>Unit Price</th>
                         <th>Unit Cost</th>
                         <th>Type</th>
                         <th>Taxable</th>
+                        {% if qbo_connection %}<th>QBO Item</th>{% endif %}
+                        {% if qbo_connection %}<th>Income Account</th>{% endif %}
                         <th>Sort Order</th>
                         <th>Status</th>
                         <th data-no-sort>Actions</th>
@@ -119,6 +141,11 @@
                             <span id="psname-display-{{ p.id }}">{{ p.name }}</span>
                             <input type="text" id="psname-input-{{ p.id }}" value="{{ p.name }}"
                                    style="display: none; width: 100%;">
+                        </td>
+                        <td>
+                            <span id="psdesc-display-{{ p.id }}" style="font-size: 13px; color: var(--gray-600);">{{ p.description or '' }}</span>
+                            <input type="text" id="psdesc-input-{{ p.id }}" value="{{ p.description or '' }}"
+                                   style="display: none; width: 100%;" placeholder="Default estimate description">
                         </td>
                         <td>
                             <span id="psprice-display-{{ p.id }}">${{ '{:.2f}'.format(p.unit_price or 0) }}</span>
@@ -156,6 +183,58 @@
                                 <input type="checkbox" id="pstaxable-cb-{{ p.id }}" {% if p.taxable %}checked{% endif %}> Taxable
                             </label>
                         </td>
+                        {% if qbo_connection %}
+                        <td>
+                            <span id="psqbo-display-{{ p.id }}">
+                                {% if p.qbo_item_id %}
+                                    {% set matched_qbo = [] %}
+                                    {% for qi in qbo_items %}
+                                        {% if qi.qbo_id == p.qbo_item_id %}
+                                            {% if matched_qbo.append(qi) %}{% endif %}
+                                        {% endif %}
+                                    {% endfor %}
+                                    {% if matched_qbo %}
+                                    <span class="badge badge-active">{{ matched_qbo[0].name }}</span>
+                                    {% else %}
+                                    <span class="badge badge-active">ID: {{ p.qbo_item_id }}</span>
+                                    {% endif %}
+                                {% else %}
+                                <span style="color: var(--gray-400); font-size: 13px;">Unmapped</span>
+                                {% endif %}
+                            </span>
+                            <select id="psqbo-input-{{ p.id }}" style="display: none; min-width: 140px;">
+                                <option value="">-- None --</option>
+                                {% for qi in qbo_items %}
+                                <option value="{{ qi.qbo_id }}" {% if p.qbo_item_id == qi.qbo_id %}selected{% endif %}>{{ qi.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td>
+                            <span id="psacct-display-{{ p.id }}">
+                                {% if p.qbo_income_account_id %}
+                                    {% set matched_acct = [] %}
+                                    {% for qa in qbo_accounts %}
+                                        {% if qa.qbo_id == p.qbo_income_account_id %}
+                                            {% if matched_acct.append(qa) %}{% endif %}
+                                        {% endif %}
+                                    {% endfor %}
+                                    {% if matched_acct %}
+                                    <span class="badge badge-active">{{ matched_acct[0].name }}</span>
+                                    {% else %}
+                                    <span class="badge badge-active">ID: {{ p.qbo_income_account_id }}</span>
+                                    {% endif %}
+                                {% else %}
+                                <span style="color: var(--gray-400); font-size: 13px;">Default</span>
+                                {% endif %}
+                            </span>
+                            <select id="psacct-input-{{ p.id }}" style="display: none; min-width: 140px;">
+                                <option value="">-- Default --</option>
+                                {% for qa in qbo_accounts %}
+                                <option value="{{ qa.qbo_id }}" {% if p.qbo_income_account_id == qa.qbo_id %}selected{% endif %}>{{ qa.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        {% endif %}
                         <td>
                             <input type="number" id="pssort-input-{{ p.id }}" value="{{ p.sort_order }}"
                                    class="sort-input" onchange="saveSortOrder(this)"
@@ -197,6 +276,8 @@
     function togglePsEdit(id) {
         var nameDisplay = document.getElementById('psname-display-' + id);
         var nameInput = document.getElementById('psname-input-' + id);
+        var descDisplay = document.getElementById('psdesc-display-' + id);
+        var descInput = document.getElementById('psdesc-input-' + id);
         var priceDisplay = document.getElementById('psprice-display-' + id);
         var priceInput = document.getElementById('psprice-input-' + id);
         var costDisplay = document.getElementById('pscost-display-' + id);
@@ -207,9 +288,15 @@
         var taxableInput = document.getElementById('pstaxable-input-' + id);
         var editBtn = document.getElementById('psedit-btn-' + id);
         var saveBtn = document.getElementById('pssave-btn-' + id);
+        var qboDisplay = document.getElementById('psqbo-display-' + id);
+        var qboInput = document.getElementById('psqbo-input-' + id);
+        var acctDisplay = document.getElementById('psacct-display-' + id);
+        var acctInput = document.getElementById('psacct-input-' + id);
         var editing = nameInput.style.display === 'none';
         nameDisplay.style.display = editing ? 'none' : '';
         nameInput.style.display = editing ? '' : 'none';
+        descDisplay.style.display = editing ? 'none' : '';
+        descInput.style.display = editing ? '' : 'none';
         priceDisplay.style.display = editing ? 'none' : '';
         priceInput.style.display = editing ? '' : 'none';
         costDisplay.style.display = editing ? 'none' : '';
@@ -218,21 +305,39 @@
         typeInput.style.display = editing ? '' : 'none';
         taxableDisplay.style.display = editing ? 'none' : '';
         taxableInput.style.display = editing ? 'inline-flex' : 'none';
+        if (qboDisplay && qboInput) {
+            qboDisplay.style.display = editing ? 'none' : '';
+            qboInput.style.display = editing ? '' : 'none';
+        }
+        if (acctDisplay && acctInput) {
+            acctDisplay.style.display = editing ? 'none' : '';
+            acctInput.style.display = editing ? '' : 'none';
+        }
         editBtn.style.display = editing ? 'none' : '';
         saveBtn.style.display = editing ? '' : 'none';
     }
 
     function savePs(id) {
         var name = document.getElementById('psname-input-' + id).value;
+        var description = document.getElementById('psdesc-input-' + id).value;
         var unit_price = document.getElementById('psprice-input-' + id).value;
         var unit_cost = document.getElementById('pscost-input-' + id).value;
         var item_type = document.getElementById('pstype-input-' + id).value;
         var taxable = document.getElementById('pstaxable-cb-' + id).checked ? 1 : 0;
         var sort_order = document.getElementById('pssort-input-' + id).value;
+        var payload = {name: name, description: description, unit_price: unit_price, unit_cost: unit_cost, item_type: item_type, taxable: taxable, sort_order: sort_order};
+        var qboInput = document.getElementById('psqbo-input-' + id);
+        if (qboInput) {
+            payload.qbo_item_id = qboInput.value;
+        }
+        var acctInput = document.getElementById('psacct-input-' + id);
+        if (acctInput) {
+            payload.qbo_income_account_id = acctInput.value;
+        }
         fetch('/admin/products-services/' + id + '/update', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({name: name, unit_price: unit_price, unit_cost: unit_cost, item_type: item_type, taxable: taxable, sort_order: sort_order})
+            body: JSON.stringify(payload)
         }).then(function(resp) {
             if (resp.ok) { window._guardBypass = true; window.location.reload(); }
             else { alert('Error saving product/service.'); }

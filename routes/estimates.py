@@ -455,9 +455,11 @@ def api_employee_item_create(estimate_id):
     if item_type not in ("product", "service"):
         item_type = "product"
 
+    qbo_item_id = data.get("qbo_item_id", "")
+    item_name = (data.get("item_name") or "").strip()
     item = database.create_estimate_item(
         estimate_id, est["token"], description, quantity, unit_price, total, taxable, 0, item_type,
-        unit_cost=unit_cost
+        unit_cost=unit_cost, qbo_item_id=qbo_item_id, item_name=item_name
     )
     return jsonify({"ok": True, "item": item})
 
@@ -490,6 +492,8 @@ def api_employee_item_update(item_id):
         val = data["item_type"]
         if val in ("product", "service"):
             updates["item_type"] = val
+    if "item_name" in data:
+        updates["item_name"] = (data["item_name"] or "").strip()
 
     # Always recompute total from qty × unit_price server-side
     qty = updates.get("quantity", item["quantity"] or 0)
@@ -1293,8 +1297,9 @@ def admin_estimate_item_create(estimate_id):
 
     data = request.get_json() if request.is_json else request.form
     description = (data.get("description") or "").strip()
-    if not description:
-        return jsonify({"error": "Description is required"}), 400
+    item_name = (data.get("item_name") or "").strip()
+    if not description and not item_name:
+        return jsonify({"error": "Description or item name is required"}), 400
 
     try:
         quantity = float(data.get("quantity", 1))
@@ -1313,9 +1318,10 @@ def admin_estimate_item_create(estimate_id):
     if item_type not in ("product", "service"):
         item_type = "product"
 
+    qbo_item_id = data.get("qbo_item_id", "")
     item = database.create_estimate_item(
         estimate_id, est["token"], description, quantity, unit_price, total, taxable, sort_order, item_type,
-        unit_cost=unit_cost
+        unit_cost=unit_cost, qbo_item_id=qbo_item_id, item_name=item_name
     )
     return jsonify({"ok": True, "item": item})
 
@@ -1355,6 +1361,8 @@ def admin_estimate_item_update(item_id):
         val = data.get("item_type")
         if val in ("product", "service"):
             updates["item_type"] = val
+    if "item_name" in data:
+        updates["item_name"] = (data["item_name"] or "").strip()
 
     if updates:
         database.update_estimate_item(item_id, **updates)
@@ -1404,8 +1412,9 @@ def admin_estimate_item_save_product(estimate_id):
     item_type = data.get("item_type", "product")
     if item_type not in ("product", "service"):
         item_type = "product"
+    description = (data.get("description") or "").strip()
 
-    ps = database.create_product_service(name, unit_price, est["token"], unit_cost=unit_cost, item_type=item_type)
+    ps = database.create_product_service(name, unit_price, est["token"], unit_cost=unit_cost, item_type=item_type, description=description)
     return jsonify({"ok": True, "product": ps})
 
 

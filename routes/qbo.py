@@ -170,6 +170,31 @@ def qbo_disconnect():
 
 
 # ---------------------------------------------------------------------------
+# Sync QBO Items
+# ---------------------------------------------------------------------------
+
+@qbo_bp.route("/admin/qbo/sync-items", methods=["POST"])
+@login_required
+def qbo_sync_items():
+    token_str = _require_admin_with_token()
+
+    conn = database.get_qbo_connection(token_str)
+    if not conn:
+        flash("QuickBooks is not connected for this company.", "error")
+        return redirect(url_for("admin.admin_products_services", token=token_str))
+
+    try:
+        count = qbo_service.fetch_qbo_items(token_str)
+        matched = database.auto_match_qbo_items(token_str)
+        acct_count = qbo_service.fetch_qbo_accounts(token_str)
+        flash(f"Synced {count} items and {acct_count} accounts from QuickBooks. Auto-matched {matched} to your Products & Services.", "success")
+    except Exception as e:
+        flash(f"Failed to sync QBO items: {e}", "error")
+
+    return redirect(url_for("admin.admin_products_services", token=token_str))
+
+
+# ---------------------------------------------------------------------------
 # Push estimate
 # ---------------------------------------------------------------------------
 

@@ -745,6 +745,44 @@ def init_db():
     _add_column_if_missing(conn, "customers",  "qbo_customer_id",  "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "customers",  "qbo_synced_at",    "TEXT DEFAULT ''")
 
+    # QBO item mapping — products_services, estimate_items, invoice_items
+    _add_column_if_missing(conn, "products_services", "qbo_item_id", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "products_services", "qbo_income_account_id", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "products_services", "description", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "estimate_items",    "qbo_item_id", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "estimate_items",    "item_name",   "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "invoice_items",     "qbo_item_id", "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "invoice_items",     "item_name",   "TEXT DEFAULT ''")
+
+    # QBO items cache (pulled from QBO for mapping)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS qbo_items (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            token     TEXT NOT NULL,
+            qbo_id    TEXT NOT NULL,
+            name      TEXT NOT NULL DEFAULT '',
+            type      TEXT NOT NULL DEFAULT '',
+            active    INTEGER DEFAULT 1,
+            synced_at TEXT NOT NULL DEFAULT ''
+        )
+    """)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_qbo_items_token_qbo_id ON qbo_items(token, qbo_id)"
+    )
+
+    # QBO accounts cache (pulled from QBO for income account assignment)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS qbo_accounts (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            token     TEXT NOT NULL,
+            qbo_id    TEXT NOT NULL,
+            name      TEXT NOT NULL DEFAULT '',
+            acct_type TEXT NOT NULL DEFAULT '',
+            synced_at TEXT NOT NULL DEFAULT '',
+            UNIQUE(token, qbo_id)
+        )
+    """)
+
     _add_column_if_missing(conn, "tokens", "feature_push_notify",       "INTEGER DEFAULT 0")
     _add_column_if_missing(conn, "tokens", "notify_window_start",       "TEXT DEFAULT '06:00'")
     _add_column_if_missing(conn, "tokens", "notify_window_end",         "TEXT DEFAULT '21:00'")
@@ -3413,14 +3451,15 @@ def get_estimate_items(estimate_id):
 
 
 def create_estimate_item(estimate_id, token_str, description, quantity, unit_price,
-                         total, taxable=0, sort_order=0, item_type='product', unit_cost=0):
+                         total, taxable=0, sort_order=0, item_type='product', unit_cost=0,
+                         qbo_item_id="", item_name=""):
     conn = get_db()
     now = datetime.now().isoformat()
     cur = conn.execute(
         """INSERT INTO estimate_items
-           (estimate_id, token, description, quantity, unit_price, unit_cost, total, taxable, sort_order, item_type, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (estimate_id, token_str, description, quantity, unit_price, unit_cost, total, taxable, sort_order, item_type, now),
+           (estimate_id, token, description, quantity, unit_price, unit_cost, total, taxable, sort_order, item_type, created_at, qbo_item_id, item_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (estimate_id, token_str, description, quantity, unit_price, unit_cost, total, taxable, sort_order, item_type, now, qbo_item_id, item_name),
     )
     item_id = cur.lastrowid
     conn.commit()
@@ -3431,7 +3470,7 @@ def create_estimate_item(estimate_id, token_str, description, quantity, unit_pri
 
 def update_estimate_item(item_id, **kwargs):
     conn = get_db()
-    allowed = {"description", "quantity", "unit_price", "unit_cost", "total", "taxable", "sort_order", "item_type"}
+    allowed = {"description", "quantity", "unit_price", "unit_cost", "total", "taxable", "sort_order", "item_type", "qbo_item_id", "item_name"}
     sets = []
     params = []
     for k, v in kwargs.items():
@@ -3514,12 +3553,12 @@ def get_product_service(ps_id):
     return _get_by_id("products_services", ps_id)
 
 
-def create_product_service(name, unit_price, token_str, sort_order=0, unit_cost=0, item_type='product', taxable=0):
+def create_product_service(name, unit_price, token_str, sort_order=0, unit_cost=0, item_type='product', taxable=0, description=""):
     conn = get_db()
     now = datetime.now().isoformat()
     cur = conn.execute(
-        "INSERT INTO products_services (name, unit_price, unit_cost, item_type, taxable, token, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (name, unit_price, unit_cost, item_type, taxable, token_str, sort_order, now),
+        "INSERT INTO products_services (name, unit_price, unit_cost, item_type, taxable, token, sort_order, description, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (name, unit_price, unit_cost, item_type, taxable, token_str, sort_order, description, now),
     )
     ps_id = cur.lastrowid
     conn.commit()
@@ -3530,7 +3569,7 @@ def create_product_service(name, unit_price, token_str, sort_order=0, unit_cost=
 
 def update_product_service(ps_id, **kwargs):
     conn = get_db()
-    allowed = {"name", "unit_price", "unit_cost", "sort_order", "item_type", "taxable"}
+    allowed = {"name", "unit_price", "unit_cost", "sort_order", "item_type", "taxable", "qbo_item_id", "qbo_income_account_id", "description"}
     sets = []
     params = []
     for k, v in kwargs.items():
@@ -4604,17 +4643,17 @@ def get_invoice_items(invoice_id):
 
 def create_invoice_item(invoice_id, token_str, description, quantity=1, unit_price=0,
                         original_total=0, billed_pct=100, billed_amount=None, sort_order=0,
-                        estimate_item_id=None):
+                        estimate_item_id=None, qbo_item_id=""):
     if billed_amount is None:
         billed_amount = round(original_total * billed_pct / 100, 2)
     conn = get_db()
     cur = conn.execute(
         """INSERT INTO invoice_items
            (invoice_id, token, estimate_item_id, description, quantity, unit_price,
-            original_total, billed_pct, billed_amount, sort_order)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            original_total, billed_pct, billed_amount, sort_order, qbo_item_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (invoice_id, token_str, estimate_item_id, description, quantity, unit_price,
-         original_total, billed_pct, billed_amount, sort_order),
+         original_total, billed_pct, billed_amount, sort_order, qbo_item_id),
     )
     item_id = cur.lastrowid
     _recompute_invoice_amount_due(conn, invoice_id, token_str)
@@ -4633,7 +4672,7 @@ def update_invoice_item(item_id, **kwargs):
     item = dict(row)
 
     allowed = {"description", "quantity", "unit_price", "original_total",
-               "billed_pct", "billed_amount", "sort_order"}
+               "billed_pct", "billed_amount", "sort_order", "qbo_item_id"}
     updates = {k: v for k, v in kwargs.items() if k in allowed}
 
     # Keep billed_pct and billed_amount in sync
@@ -4708,11 +4747,11 @@ def sync_estimate_items_to_invoice(invoice_id, estimate_id, token_str):
         conn.execute(
             """INSERT INTO invoice_items
                (invoice_id, token, estimate_item_id, description,
-                quantity, unit_price, original_total, billed_pct, billed_amount, sort_order)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                quantity, unit_price, original_total, billed_pct, billed_amount, sort_order, qbo_item_id, item_name)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (invoice_id, token_str, item["id"], item["description"],
              item["quantity"] or 1, item["unit_price"] or 0,
-             orig, 100.0, orig, next_sort),
+             orig, 100.0, orig, next_sort, item.get("qbo_item_id", ""), item.get("item_name", "")),
         )
         next_sort += 1
         added += 1
@@ -5066,6 +5105,125 @@ def update_qbo_default_item(token_str, item_id):
 def delete_qbo_connection(token_str):
     conn = get_db()
     conn.execute("DELETE FROM qbo_connections WHERE token = ?", (token_str,))
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# QuickBooks Online — QBO Items cache & mapping
+# ---------------------------------------------------------------------------
+
+def upsert_qbo_item(token_str, qbo_id, name, item_type="", active=1):
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        """INSERT INTO qbo_items (token, qbo_id, name, type, active, synced_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(token, qbo_id) DO UPDATE SET
+               name = excluded.name, type = excluded.type,
+               active = excluded.active, synced_at = excluded.synced_at""",
+        (token_str, str(qbo_id), name, item_type, active, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_qbo_items(token_str, active_only=True):
+    conn = get_db()
+    if active_only:
+        rows = conn.execute(
+            "SELECT * FROM qbo_items WHERE token = ? AND active = 1 ORDER BY name", (token_str,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM qbo_items WHERE token = ? ORDER BY name", (token_str,)
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def clear_qbo_items(token_str):
+    conn = get_db()
+    conn.execute("DELETE FROM qbo_items WHERE token = ?", (token_str,))
+    conn.commit()
+    conn.close()
+
+
+def auto_match_qbo_items(token_str):
+    """Match local P&S to QBO items by name (case-insensitive). Returns count matched."""
+    conn = get_db()
+    ps_rows = conn.execute(
+        "SELECT id, name FROM products_services WHERE token = ? AND (qbo_item_id IS NULL OR qbo_item_id = '')",
+        (token_str,),
+    ).fetchall()
+    qbo_rows = conn.execute(
+        "SELECT qbo_id, name FROM qbo_items WHERE token = ? AND active = 1", (token_str,)
+    ).fetchall()
+    # Build lookup: lowercase name → qbo_id
+    qbo_map = {}
+    for r in qbo_rows:
+        qbo_map[r["name"].strip().lower()] = r["qbo_id"]
+    matched = 0
+    for ps in ps_rows:
+        qbo_id = qbo_map.get(ps["name"].strip().lower())
+        if qbo_id:
+            conn.execute(
+                "UPDATE products_services SET qbo_item_id = ? WHERE id = ?",
+                (qbo_id, ps["id"]),
+            )
+            matched += 1
+    conn.commit()
+    conn.close()
+    return matched
+
+
+def update_product_service_qbo_mapping(ps_id, qbo_item_id):
+    conn = get_db()
+    conn.execute(
+        "UPDATE products_services SET qbo_item_id = ? WHERE id = ?",
+        (qbo_item_id or "", ps_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# QuickBooks Online — QBO Accounts cache
+# ---------------------------------------------------------------------------
+
+def upsert_qbo_account(token_str, qbo_id, name, acct_type):
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        """INSERT INTO qbo_accounts (token, qbo_id, name, acct_type, synced_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(token, qbo_id) DO UPDATE SET
+               name = excluded.name, acct_type = excluded.acct_type,
+               synced_at = excluded.synced_at""",
+        (token_str, str(qbo_id), name, acct_type, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_qbo_accounts(token_str, acct_type="Income"):
+    conn = get_db()
+    if acct_type:
+        rows = conn.execute(
+            "SELECT * FROM qbo_accounts WHERE token = ? AND acct_type = ? ORDER BY name",
+            (token_str, acct_type),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM qbo_accounts WHERE token = ? ORDER BY name", (token_str,)
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def clear_qbo_accounts(token_str):
+    conn = get_db()
+    conn.execute("DELETE FROM qbo_accounts WHERE token = ?", (token_str,))
     conn.commit()
     conn.close()
 

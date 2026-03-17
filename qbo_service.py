@@ -198,6 +198,163 @@ def _ensure_default_item(token_str):
 
 
 # ---------------------------------------------------------------------------
+# Fetch QBO items into local cache
+# ---------------------------------------------------------------------------
+
+def fetch_qbo_items(token_str):
+    """Pull all active items from QBO into the local qbo_items cache. Returns count."""
+    database.clear_qbo_items(token_str)
+    start_pos = 1
+    total = 0
+    while True:
+        resp = _qbo_api_call(
+            token_str, "GET",
+            f"query?query=SELECT * FROM Item WHERE Active = true STARTPOSITION {start_pos} MAXRESULTS 1000",
+        )
+        if resp.status_code != 200:
+            log.error("QBO item fetch failed: %s %s", resp.status_code, resp.text[:200])
+            break
+        items = resp.json().get("QueryResponse", {}).get("Item", [])
+        if not items:
+            break
+        for item in items:
+            database.upsert_qbo_item(
+                token_str,
+                qbo_id=str(item["Id"]),
+                name=item.get("Name", ""),
+                item_type=item.get("Type", ""),
+                active=1,
+            )
+            total += 1
+        if len(items) < 1000:
+            break
+        start_pos += 1000
+    return total
+
+
+# ---------------------------------------------------------------------------
+# Ensure a local P&S item exists in QBO (auto-create if needed)
+# ---------------------------------------------------------------------------
+
+def fetch_qbo_accounts(token_str):
+    """Pull Income/COGS/Expense accounts from QBO into local cache. Returns count."""
+    database.clear_qbo_accounts(token_str)
+    total = 0
+    for acct_type in ("Income", "Cost of Goods Sold", "Expense"):
+        safe_type = acct_type.replace("'", "\\'")
+        start_pos = 1
+        while True:
+            resp = _qbo_api_call(
+                token_str, "GET",
+                f"query?query=SELECT * FROM Account WHERE AccountType = '{safe_type}' STARTPOSITION {start_pos} MAXRESULTS 1000",
+            )
+            if resp.status_code != 200:
+                log.error("QBO account fetch failed for %s: %s %s", acct_type, resp.status_code, resp.text[:200])
+                break
+            accounts = resp.json().get("QueryResponse", {}).get("Account", [])
+            if not accounts:
+                break
+            for acct in accounts:
+                database.upsert_qbo_account(
+                    token_str,
+                    qbo_id=str(acct["Id"]),
+                    name=acct.get("Name", ""),
+                    acct_type=acct.get("AccountType", ""),
+                )
+                total += 1
+            if len(accounts) < 1000:
+                break
+            start_pos += 1000
+    return total
+
+
+def _find_income_account(token_str):
+    """Find an Income account in QBO to use as IncomeAccountRef for new items."""
+    resp = _qbo_api_call(
+        token_str, "GET",
+        "query?query=SELECT * FROM Account WHERE AccountType = 'Income' MAXRESULTS 1",
+    )
+    if resp.status_code == 200:
+        accounts = resp.json().get("QueryResponse", {}).get("Account", [])
+        if accounts:
+            return {"value": str(accounts[0]["Id"]), "name": accounts[0].get("Name", "")}
+    return None
+
+
+def ensure_item_in_qbo(token_str, ps_name, ps_type="Service", income_account_id=None):
+    """Find or create a QBO item matching the local P&S name. Returns QBO item ID string.
+
+    If income_account_id is provided, it is used as the IncomeAccountRef when creating
+    a new item. Otherwise falls back to auto-discovering the first Income account.
+    """
+    # Query QBO for existing item with this name
+    safe_name = ps_name.replace("'", "\\'")
+    resp = _qbo_api_call(
+        token_str, "GET",
+        f"query?query=SELECT * FROM Item WHERE Name = '{safe_name}' MAXRESULTS 1",
+    )
+    if resp.status_code == 200:
+        items = resp.json().get("QueryResponse", {}).get("Item", [])
+        if items:
+            return str(items[0]["Id"])
+
+    # Determine income account ref
+    if income_account_id:
+        income_acct = {"value": income_account_id}
+    else:
+        income_acct = _find_income_account(token_str)
+    if not income_acct:
+        log.error("No Income account found in QBO — cannot create item '%s'", ps_name)
+        return None
+
+    # Create it — map local type to QBO type
+    qbo_type = "Service" if ps_type.lower() == "service" else "NonInventory"
+    payload = {
+        "Name": ps_name[:100],
+        "Type": qbo_type,
+        "IncomeAccountRef": income_acct,
+    }
+    if qbo_type == "NonInventory":
+        # NonInventory items also need an ExpenseAccountRef
+        exp_resp = _qbo_api_call(
+            token_str, "GET",
+            "query?query=SELECT * FROM Account WHERE AccountType = 'Cost of Goods Sold' MAXRESULTS 1",
+        )
+        if exp_resp.status_code == 200:
+            exp_accounts = exp_resp.json().get("QueryResponse", {}).get("Account", [])
+            if exp_accounts:
+                payload["ExpenseAccountRef"] = {"value": str(exp_accounts[0]["Id"]), "name": exp_accounts[0].get("Name", "")}
+            else:
+                # Fallback: try Expense type
+                exp_resp2 = _qbo_api_call(
+                    token_str, "GET",
+                    "query?query=SELECT * FROM Account WHERE AccountType = 'Expense' MAXRESULTS 1",
+                )
+                if exp_resp2.status_code == 200:
+                    exp_accounts2 = exp_resp2.json().get("QueryResponse", {}).get("Account", [])
+                    if exp_accounts2:
+                        payload["ExpenseAccountRef"] = {"value": str(exp_accounts2[0]["Id"]), "name": exp_accounts2[0].get("Name", "")}
+
+    resp = _qbo_api_call(token_str, "POST", "item", payload)
+    if resp.status_code in (200, 201):
+        return str(resp.json()["Item"]["Id"])
+
+    # If creation failed with duplicate, look it up
+    if resp.status_code == 400 and "Duplicate" in resp.text:
+        resp2 = _qbo_api_call(
+            token_str, "GET",
+            f"query?query=SELECT * FROM Item WHERE Name = '{safe_name}' MAXRESULTS 1",
+        )
+        if resp2.status_code == 200:
+            items = resp2.json().get("QueryResponse", {}).get("Item", [])
+            if items:
+                return str(items[0]["Id"])
+
+    log.error("Failed to create QBO item '%s': %s %s", ps_name, resp.status_code, resp.text[:200])
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Customer sync
 # ---------------------------------------------------------------------------
 
@@ -270,17 +427,37 @@ def push_estimate_to_qbo(token_str, estimate_id):
     if est.get("customer_id"):
         qbo_customer_id = ensure_customer_in_qbo(token_str, est["customer_id"])
 
-    # Build QBO line items
+    # Build QBO line items — auto-create QBO items as needed
     lines = []
     for i, item in enumerate(items):
         line_amount = round(float(item.get("total", 0) or 0), 2)
+        item_ref = item.get("qbo_item_id") or ""
+
+        # If no QBO item mapped, auto-find/create one based on item_name (or description as fallback)
+        ps_lookup_name = (item.get("item_name") or item.get("description") or "").strip()
+        if not item_ref and ps_lookup_name:
+            item_type = item.get("item_type", "product")
+            # Look up matching P&S to get assigned income account
+            income_acct_id = None
+            ps_list = database.get_products_services_by_token(token_str, active_only=False)
+            for ps in ps_list:
+                if ps["name"].strip().lower() == ps_lookup_name.lower():
+                    income_acct_id = ps.get("qbo_income_account_id") or None
+                    break
+            qbo_id = ensure_item_in_qbo(token_str, ps_lookup_name, item_type, income_account_id=income_acct_id)
+            if qbo_id:
+                item_ref = qbo_id
+                # Store it back so future pushes reuse this mapping
+                database.update_estimate_item(item["id"], qbo_item_id=qbo_id)
+
+        item_ref = item_ref or default_item_id
         line = {
             "LineNum": i + 1,
             "Amount": line_amount,
             "DetailType": "SalesItemLineDetail",
             "Description": item.get("description", "")[:4000],
             "SalesItemLineDetail": {
-                "ItemRef": {"value": default_item_id},
+                "ItemRef": {"value": item_ref},
                 "Qty": float(item.get("quantity", 1) or 1),
                 "UnitPrice": round(float(item.get("unit_price", 0) or 0), 2),
             },
@@ -319,6 +496,13 @@ def push_estimate_to_qbo(token_str, estimate_id):
         payload["SyncToken"] = est.get("qbo_sync_token", "0")
         payload["sparse"] = True
         resp = _qbo_api_call(token_str, "POST", "estimate", payload)
+        # If update fails (deleted in QBO), retry as new create
+        if resp.status_code not in (200, 201):
+            log.warning("QBO estimate update failed (may be deleted in QBO), retrying as new: %s", resp.status_code)
+            payload.pop("Id", None)
+            payload.pop("SyncToken", None)
+            payload.pop("sparse", None)
+            resp = _qbo_api_call(token_str, "POST", "estimate", payload)
     else:
         resp = _qbo_api_call(token_str, "POST", "estimate", payload)
 
@@ -355,17 +539,35 @@ def push_invoice_to_qbo(token_str, invoice_id):
     if inv.get("customer_id"):
         qbo_customer_id = ensure_customer_in_qbo(token_str, inv["customer_id"])
 
-    # Build QBO line items
+    # Build QBO line items — auto-create QBO items as needed
     lines = []
     for i, item in enumerate(items):
         line_amount = round(float(item.get("billed_amount", 0) or 0), 2)
+        item_ref = item.get("qbo_item_id") or ""
+
+        # If no QBO item mapped, auto-find/create one based on item_name (or description as fallback)
+        ps_lookup_name = (item.get("item_name") or item.get("description") or "").strip()
+        if not item_ref and ps_lookup_name:
+            # Look up matching P&S to get assigned income account
+            income_acct_id = None
+            ps_list = database.get_products_services_by_token(token_str, active_only=False)
+            for ps in ps_list:
+                if ps["name"].strip().lower() == ps_lookup_name.lower():
+                    income_acct_id = ps.get("qbo_income_account_id") or None
+                    break
+            qbo_id = ensure_item_in_qbo(token_str, ps_lookup_name, "Service", income_account_id=income_acct_id)
+            if qbo_id:
+                item_ref = qbo_id
+                database.update_invoice_item(item["id"], qbo_item_id=qbo_id)
+
+        item_ref = item_ref or default_item_id
         line = {
             "LineNum": i + 1,
             "Amount": line_amount,
             "DetailType": "SalesItemLineDetail",
             "Description": item.get("description", "")[:4000],
             "SalesItemLineDetail": {
-                "ItemRef": {"value": default_item_id},
+                "ItemRef": {"value": item_ref},
                 "Qty": float(item.get("quantity", 1) or 1),
                 "UnitPrice": round(float(item.get("unit_price", 0) or 0), 2),
             },
@@ -403,6 +605,13 @@ def push_invoice_to_qbo(token_str, invoice_id):
         payload["SyncToken"] = inv.get("qbo_sync_token", "0")
         payload["sparse"] = True
         resp = _qbo_api_call(token_str, "POST", "invoice", payload)
+        # If update fails (deleted in QBO), retry as new create
+        if resp.status_code not in (200, 201):
+            log.warning("QBO invoice update failed (may be deleted in QBO), retrying as new: %s", resp.status_code)
+            payload.pop("Id", None)
+            payload.pop("SyncToken", None)
+            payload.pop("sparse", None)
+            resp = _qbo_api_call(token_str, "POST", "invoice", payload)
     else:
         resp = _qbo_api_call(token_str, "POST", "invoice", payload)
 

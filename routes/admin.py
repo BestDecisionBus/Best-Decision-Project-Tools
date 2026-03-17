@@ -859,9 +859,13 @@ def admin_products_services():
     tokens = h._get_tokens_for_user()
     token_str, selected_token = h._get_selected_token(tokens)
     products = database.get_products_services_by_token(token_str) if token_str else []
+    qbo_connection = database.get_qbo_connection(token_str) if token_str else None
+    qbo_items = database.get_qbo_items(token_str) if token_str else []
+    qbo_accounts = database.get_qbo_accounts(token_str, acct_type="Income") if token_str else []
     return render_template(
         "admin/products_services.html",
         tokens=tokens, selected_token=selected_token, products=products,
+        qbo_connection=qbo_connection, qbo_items=qbo_items, qbo_accounts=qbo_accounts,
     )
 
 
@@ -893,7 +897,8 @@ def admin_product_service_create():
         if item_type not in ("product", "service"):
             item_type = "product"
         taxable = 1 if request.form.get("taxable") else 0
-        database.create_product_service(name, unit_price, token_str, sort_order_int, unit_cost, item_type, taxable)
+        description = request.form.get("description", "").strip()
+        database.create_product_service(name, unit_price, token_str, sort_order_int, unit_cost, item_type, taxable, description)
         flash(f"Product/service '{name}' created.", "success")
     return redirect(url_for("admin.admin_products_services", token=token_str))
 
@@ -1294,10 +1299,98 @@ def admin_message_snippet_csv_import():
 @admin_bp.route("/admin/products-services/csv-sample")
 @login_required
 def admin_product_service_csv_sample():
-    content = "name,unit_price,unit_cost,item_type,taxable\nPlywood (sheet),45.00,30.00,product,0\nConsultation,150.00,0.00,service,0\nNails (box),8.00,4.00,product,1\n"
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    h = _helpers()
+    token_str = request.args.get("token", "").strip()
+    if token_str:
+        h._verify_token_access(token_str)
+
+    wb = Workbook()
+
+    # --- Sheet 1: Import Template ---
+    ws = wb.active
+    ws.title = "Products & Services"
+    headers = ["name", "description", "unit_price", "unit_cost", "item_type", "taxable", "income_account"]
+    header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    thin_border = Border(
+        bottom=Side(style="thin", color="CCCCCC"),
+        right=Side(style="thin", color="CCCCCC"),
+    )
+    for col, h_text in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h_text)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+    sample_rows = [
+        ("Plywood (sheet)", "4x8 CDX plywood sheet", 45.00, 30.00, "product", 0, "Materials Income"),
+        ("Consultation", "Initial project consultation", 150.00, 0.00, "service", 0, "Services"),
+        ("Nails (box)", "16d framing nails - 5lb box", 8.00, 4.00, "product", 1, ""),
+    ]
+    for r, row_data in enumerate(sample_rows, 2):
+        for c, val in enumerate(row_data, 1):
+            cell = ws.cell(row=r, column=c, value=val)
+            cell.border = thin_border
+    ws.column_dimensions["A"].width = 22
+    ws.column_dimensions["B"].width = 35
+    ws.column_dimensions["C"].width = 12
+    ws.column_dimensions["D"].width = 12
+    ws.column_dimensions["E"].width = 12
+    ws.column_dimensions["F"].width = 10
+    ws.column_dimensions["G"].width = 25
+
+    # --- Sheet 2: QBO Income Accounts ---
+    ws2 = wb.create_sheet("QBO Income Accounts")
+    acct_headers = ["Account Name", "QBO ID", "Type"]
+    for col, h_text in enumerate(acct_headers, 1):
+        cell = ws2.cell(row=1, column=col, value=h_text)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    if token_str:
+        accts = database.get_qbo_accounts(token_str, acct_type="Income")
+    else:
+        accts = []
+    if accts:
+        for r, acct in enumerate(accts, 2):
+            ws2.cell(row=r, column=1, value=acct["name"])
+            ws2.cell(row=r, column=2, value=acct["qbo_id"])
+            ws2.cell(row=r, column=3, value=acct["acct_type"])
+    else:
+        ws2.cell(row=2, column=1, value="No accounts synced yet — click 'Sync QBO Items & Accounts' first")
+        ws2.merge_cells("A2:C2")
+        ws2.cell(row=2, column=1).font = Font(italic=True, color="888888")
+
+    ws2.column_dimensions["A"].width = 35
+    ws2.column_dimensions["B"].width = 15
+    ws2.column_dimensions["C"].width = 15
+
+    # Add dropdown data validation on income_account column (G) referencing Sheet 2
+    if accts:
+        last_acct_row = len(accts) + 1  # +1 for header row
+        dv = DataValidation(
+            type="list",
+            formula1=f"'QBO Income Accounts'!$A$2:$A${last_acct_row}",
+            allow_blank=True,
+        )
+        dv.error = "Pick an account from the QBO Income Accounts sheet, or leave blank for default."
+        dv.errorTitle = "Invalid Account"
+        dv.prompt = "Select a QBO income account"
+        dv.promptTitle = "Income Account"
+        ws.add_data_validation(dv)
+        dv.add("G2:G1048576")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
     return Response(
-        content, mimetype="text/csv",
-        headers={"Content-Disposition": "attachment; filename=products_services_sample.csv"},
+        buf.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=products_services_sample.xlsx"},
     )
 
 
@@ -1309,19 +1402,39 @@ def admin_product_service_csv_import():
     h._verify_token_access(token_str)
     mode = request.form.get("import_mode", "append")
     file = request.files.get("csv_file")
-    if not file or not file.filename.lower().endswith(".csv"):
-        flash("Please upload a .csv file.", "error")
+    if not file:
+        flash("Please upload a file.", "error")
+        return redirect(url_for("admin.admin_products_services", token=token_str))
+    fname = file.filename.lower()
+    if not (fname.endswith(".csv") or fname.endswith(".xlsx")):
+        flash("Please upload a .csv or .xlsx file.", "error")
         return redirect(url_for("admin.admin_products_services", token=token_str))
     raw = file.stream.read()
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = raw.decode("cp1252")
-    reader = csv.DictReader(io.StringIO(text))
+    if fname.endswith(".xlsx"):
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+        ws = wb.worksheets[0]
+        rows_iter = ws.iter_rows(values_only=True)
+        header_row = next(rows_iter, None)
+        if not header_row:
+            flash("Empty spreadsheet.", "error")
+            return redirect(url_for("admin.admin_products_services", token=token_str))
+        headers = [str(h).strip().lower() if h else "" for h in header_row]
+        reader = [dict(zip(headers, [str(c) if c is not None else "" for c in r])) for r in rows_iter]
+        wb.close()
+    else:
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("cp1252")
+        reader = csv.DictReader(io.StringIO(text))
     if mode == "replace":
         database.bulk_deactivate_products_services(token_str)
     next_sort = (database.get_max_sort_order_products_services(token_str) + 1) if mode == "append" else 1
-    imported = skipped = 0
+    # Build account lookup dict once (avoids N+1 queries inside the loop)
+    _accts = database.get_qbo_accounts(token_str, acct_type="Income")
+    acct_id_by_name = {a["name"].strip().lower(): a["qbo_id"] for a in _accts}
+    imported = skipped = unmatched_accounts = 0
     for row in reader:
         name = (row.get("name") or "").strip()
         if not name:
@@ -1339,7 +1452,16 @@ def admin_product_service_csv_import():
         if item_type not in ("product", "service"):
             item_type = "product"
         taxable = _parse_taxable(row.get("taxable"))
-        database.create_product_service(name, unit_price, token_str, next_sort, unit_cost, item_type, taxable)
+        description = (row.get("description") or "").strip()
+        ps = database.create_product_service(name, unit_price, token_str, next_sort, unit_cost, item_type, taxable, description)
+        # Link income account by name if provided
+        income_account_name = (row.get("income_account") or "").strip()
+        if income_account_name and ps:
+            qbo_id = acct_id_by_name.get(income_account_name.lower())
+            if qbo_id:
+                database.update_product_service(ps["id"], qbo_income_account_id=qbo_id)
+            else:
+                unmatched_accounts += 1
         next_sort += 1
         imported += 1
     msg = f"Imported {imported} product{'s' if imported != 1 else ''}/service{'s' if imported != 1 else ''}."
@@ -1347,6 +1469,8 @@ def admin_product_service_csv_import():
         msg += f" Skipped {skipped} blank row{'s' if skipped != 1 else ''}."
     if mode == "replace":
         msg += " Existing items deactivated."
+    if unmatched_accounts:
+        msg += f" {unmatched_accounts} income account{'s' if unmatched_accounts != 1 else ''} not matched — sync QBO accounts first or check spelling."
     flash(msg, "success")
     return redirect(url_for("admin.admin_products_services", token=token_str))
 
