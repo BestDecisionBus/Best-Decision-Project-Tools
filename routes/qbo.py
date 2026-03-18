@@ -198,6 +198,23 @@ def qbo_sync_items():
 # Push estimate
 # ---------------------------------------------------------------------------
 
+@qbo_bp.route("/admin/qbo/sync-expense-categories", methods=["POST"])
+@login_required
+def qbo_sync_expense_categories():
+    token_str = _require_admin_with_token()
+    conn = database.get_qbo_connection(token_str)
+    if not conn:
+        flash("QuickBooks is not connected.", "error")
+        return redirect(url_for("admin.admin_categories", token=token_str))
+    try:
+        qbo_service.fetch_qbo_accounts(token_str)
+        created = qbo_service.sync_qbo_expense_categories(token_str)
+        flash(f"Synced QBO expense accounts. {created} new categories created.", "success")
+    except Exception as e:
+        flash(f"Failed to sync QBO expense categories: {e}", "error")
+    return redirect(url_for("admin.admin_categories", token=token_str))
+
+
 @qbo_bp.route("/admin/qbo/push-estimate/<int:estimate_id>", methods=["POST"])
 @login_required
 def qbo_push_estimate(estimate_id):
@@ -254,3 +271,43 @@ def qbo_push_invoice(invoice_id):
         flash(f"QuickBooks sync failed: {e}", "error")
 
     return redirect(url_for("invoices.admin_invoice_detail", invoice_id=invoice_id))
+
+
+# ---------------------------------------------------------------------------
+# Push receipt expense
+# ---------------------------------------------------------------------------
+
+@qbo_bp.route("/admin/qbo/push-receipt/<int:submission_id>", methods=["POST"])
+@login_required
+def qbo_push_receipt(submission_id):
+    h = _helpers()
+    if not current_user.is_admin:
+        abort(403)
+
+    sub = database.get_submission(submission_id)
+    if not sub:
+        abort(404)
+    h._verify_token_access(sub["token"])
+
+    conn = database.get_qbo_connection(sub["token"])
+    if not conn:
+        flash("QuickBooks is not connected for this company.", "error")
+        return redirect(url_for("receipt_admin.receipt_detail", submission_id=submission_id))
+
+    payment_account_id = request.form.get("payment_account_id", "").strip()
+    payment_account_type = request.form.get("payment_account_type", "").strip()
+
+    try:
+        qbo_id = qbo_service.push_receipt_to_qbo(
+            sub["token"], submission_id, payment_account_id,
+            payment_account_type=payment_account_type,
+        )
+        action = "Updated" if sub.get("qbo_purchase_id") else "Sent"
+        flash(f"{action} expense in QuickBooks (QBO ID: {qbo_id}).", "success")
+        # Auto-mark as processed once synced to QBO
+        if not sub.get("processed"):
+            database.toggle_processed(submission_id)
+    except Exception as e:
+        flash(f"QuickBooks sync failed: {e}", "error")
+
+    return redirect(url_for("receipt_admin.receipt_detail", submission_id=submission_id))

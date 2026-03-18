@@ -1,8 +1,10 @@
 """QuickBooks Online API service — token refresh, customer/estimate/invoice push."""
 
 import base64
+import json as _json
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import requests
 
@@ -120,6 +122,78 @@ def _qbo_api_call(token_str, method, endpoint, payload=None):
         log.error("QBO error on %s %s — intuit_tid: %s — %s", method, endpoint, tid, resp.text[:300])
 
     return resp
+
+
+# ---------------------------------------------------------------------------
+# Upload file attachment to QBO entity
+# ---------------------------------------------------------------------------
+
+def _qbo_upload_attachment(token_str, entity_type, entity_id, file_path, filename, mime_type="image/jpeg"):
+    """Upload a file attachment to QBO linked to an entity (e.g. Purchase).
+
+    Uses QBO Upload API: POST /v3/company/{realm_id}/upload with multipart/form-data.
+    Returns the QBO Attachable ID string, or None on failure.
+    """
+    file_path = Path(file_path)
+    if not file_path.exists():
+        log.warning("Attachment file not found: %s", file_path)
+        return None
+
+    conn = _refresh_if_needed(token_str)
+    realm_id = conn["realm_id"]
+    access_token = qbo_crypto.decrypt(conn["access_token"])
+
+    url = f"{_base_url()}/v3/company/{realm_id}/upload"
+
+    metadata = {
+        "AttachableRef": [
+            {
+                "EntityRef": {
+                    "type": entity_type,
+                    "value": str(entity_id),
+                },
+                "IncludeOnSend": False,
+            }
+        ],
+        "FileName": filename,
+        "ContentType": mime_type,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+    }
+
+    def _do_upload():
+        with open(file_path, "rb") as f:
+            files = {
+                "file_metadata_0": ("metadata.json", _json.dumps(metadata), "application/json"),
+                "file_content_0": (filename, f, mime_type),
+            }
+            return requests.post(url, headers=headers, files=files, timeout=60)
+
+    resp = _do_upload()
+
+    # Retry once on 401 (token may have expired)
+    if resp.status_code == 401:
+        conn = _refresh_if_needed(token_str)
+        access_token = qbo_crypto.decrypt(conn["access_token"])
+        headers["Authorization"] = f"Bearer {access_token}"
+        resp = _do_upload()
+
+    tid = resp.headers.get("intuit_tid", "")
+    if tid:
+        log.info("QBO upload attachment → %s (intuit_tid: %s)", resp.status_code, tid)
+
+    if resp.status_code in (200, 201):
+        data = resp.json()
+        attachable = data.get("AttachableResponse", [{}])[0].get("Attachable", {})
+        attachable_id = attachable.get("Id")
+        log.info("QBO attachment created: ID=%s for %s/%s", attachable_id, entity_type, entity_id)
+        return attachable_id
+
+    log.error("QBO attachment upload failed: %s %s", resp.status_code, resp.text[:300])
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +340,31 @@ def fetch_qbo_accounts(token_str):
                 break
             start_pos += 1000
     return total
+
+
+def sync_qbo_expense_categories(token_str):
+    """Create categories from cached Expense + COGS accounts. Returns count of newly created."""
+    accounts = (
+        database.get_qbo_accounts(token_str, acct_type="Expense")
+        + database.get_qbo_accounts(token_str, acct_type="Cost of Goods Sold")
+    )
+    existing = database.get_categories_by_token(token_str)
+    existing_qbo_ids = {c.get("qbo_account_id") for c in existing if c.get("qbo_account_id")}
+    existing_names = {c["name"].strip().lower() for c in existing}
+
+    created = 0
+    for acct in accounts:
+        qbo_id = acct["qbo_id"]
+        name = acct["name"].strip()
+        if qbo_id in existing_qbo_ids:
+            continue
+        if name.lower() in existing_names:
+            continue
+        new_id = database.create_category(name, token_str, sort_order=0, account_code="")
+        if new_id:
+            database.update_category_qbo_account(new_id, qbo_id)
+        created += 1
+    return created
 
 
 def _find_income_account(token_str):
@@ -626,3 +725,300 @@ def push_invoice_to_qbo(token_str, invoice_id):
     error_msg = f"{resp.status_code}: {resp.text[:300]}"
     database.set_invoice_qbo_error(invoice_id, error_msg)
     raise RuntimeError(f"QBO invoice push failed — {error_msg}")
+
+
+# ---------------------------------------------------------------------------
+# Vendor sync (for receipt expense push)
+# ---------------------------------------------------------------------------
+
+def ensure_vendor_in_qbo(token_str, vendor_name, submission_id=None):
+    """Find or create a QBO Vendor by display name. Returns QBO vendor ID string."""
+    if not vendor_name or not vendor_name.strip():
+        return None
+
+    display_name = vendor_name.strip()[:500]
+    safe_name = display_name.replace("'", "\\'")
+
+    # Search QBO for existing vendor
+    resp = _qbo_api_call(
+        token_str, "GET",
+        f"query?query=SELECT * FROM Vendor WHERE DisplayName = '{safe_name}' MAXRESULTS 1",
+    )
+    if resp.status_code == 200:
+        vendors = resp.json().get("QueryResponse", {}).get("Vendor", [])
+        if vendors:
+            qbo_id = str(vendors[0]["Id"])
+            if submission_id:
+                database.update_submission_qbo_vendor(submission_id, qbo_id)
+            return qbo_id
+
+    # Create new vendor
+    payload = {"DisplayName": display_name}
+    resp = _qbo_api_call(token_str, "POST", "vendor", payload)
+    if resp.status_code in (200, 201):
+        qbo_id = str(resp.json()["Vendor"]["Id"])
+        if submission_id:
+            database.update_submission_qbo_vendor(submission_id, qbo_id)
+        return qbo_id
+
+    # Handle duplicate
+    if resp.status_code == 400 and "Duplicate" in resp.text:
+        resp2 = _qbo_api_call(
+            token_str, "GET",
+            f"query?query=SELECT * FROM Vendor WHERE DisplayName = '{safe_name}' MAXRESULTS 1",
+        )
+        if resp2.status_code == 200:
+            vendors = resp2.json().get("QueryResponse", {}).get("Vendor", [])
+            if vendors:
+                qbo_id = str(vendors[0]["Id"])
+                if submission_id:
+                    database.update_submission_qbo_vendor(submission_id, qbo_id)
+                return qbo_id
+
+    log.error("Failed to find/create QBO Vendor '%s': %s %s",
+              vendor_name, resp.status_code, resp.text[:200])
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Fetch Bank / Credit Card accounts (for receipt payment account dropdown)
+# ---------------------------------------------------------------------------
+
+def fetch_qbo_bank_accounts(token_str):
+    """Query QBO for Bank + Credit Card accounts. Returns list of dicts."""
+    accounts = []
+    for acct_type in ("Bank", "Credit Card"):
+        safe_type = acct_type.replace("'", "\\'")
+        resp = _qbo_api_call(
+            token_str, "GET",
+            f"query?query=SELECT * FROM Account WHERE AccountType = '{safe_type}' AND Active = true MAXRESULTS 100",
+        )
+        if resp.status_code == 200:
+            for a in resp.json().get("QueryResponse", {}).get("Account", []):
+                accounts.append({
+                    "id": str(a["Id"]),
+                    "name": a.get("Name", ""),
+                    "type": acct_type,
+                })
+    return accounts
+
+
+def find_qbo_customer_by_name(token_str, display_name):
+    """Query QBO for a Customer with an exact DisplayName match.
+    Returns the QBO customer ID string if found, else None.
+    Does NOT create a customer if none is found.
+    """
+    if not display_name or not display_name.strip():
+        return None
+    safe_name = display_name.strip().replace("'", "\\'")
+    resp = _qbo_api_call(
+        token_str, "GET",
+        f"query?query=SELECT * FROM Customer WHERE DisplayName = '{safe_name}' MAXRESULTS 1",
+    )
+    if resp.status_code == 200:
+        customers = resp.json().get("QueryResponse", {}).get("Customer", [])
+        if customers:
+            return str(customers[0]["Id"])
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Push receipt to QBO as Purchase (expense)
+# ---------------------------------------------------------------------------
+
+def push_receipt_to_qbo(token_str, submission_id, payment_account_id,
+                        payment_account_type=""):
+    """Push a receipt submission to QBO as a Purchase (expense). Returns QBO Purchase ID."""
+    sub = database.get_submission(submission_id)
+    if not sub:
+        raise ValueError("Submission not found")
+    if sub["token"] != token_str:
+        raise ValueError("Token mismatch")
+
+    # Validate payment amount
+    payment_amount = float(sub.get("payment_amount", 0) or 0)
+    if payment_amount <= 0:
+        raise ValueError("Payment amount is required before pushing to QuickBooks.")
+
+    categories = database.get_submission_categories(submission_id)
+    category_sum = round(sum(float(c.get("amount", 0) or 0) for c in categories), 2)
+    if abs(payment_amount - category_sum) > 0.01:
+        raise ValueError(
+            f"Payment amount (${payment_amount:.2f}) does not match "
+            f"category total (${category_sum:.2f}). Please correct before syncing."
+        )
+
+    if not payment_account_id:
+        raise ValueError("Please select a payment account (Bank or Credit Card).")
+
+    # Find or create QBO vendor
+    qbo_vendor_id = sub.get("qbo_vendor_id") or None
+    if not qbo_vendor_id and sub.get("vendor"):
+        qbo_vendor_id = ensure_vendor_in_qbo(token_str, sub["vendor"], submission_id)
+
+    # Pre-fetch all category details and fallback expense account (avoid N+1)
+    cat_ids = [c["category_id"] for c in categories]
+    cat_lookup = {}
+    for cid in cat_ids:
+        cat_lookup[cid] = database.get_category(cid)
+    fallback_expense_accts = database.get_qbo_accounts(token_str, acct_type="Expense")
+    fallback_ref = {"value": fallback_expense_accts[0]["qbo_id"]} if fallback_expense_accts else None
+
+    # Build line items from submission_categories
+    lines = []
+    for i, cat_row in enumerate(categories):
+        line_amount = round(float(cat_row.get("amount", 0) or 0), 2)
+
+        full_cat = cat_lookup.get(cat_row["category_id"])
+        account_ref = None
+        if full_cat and full_cat.get("qbo_account_id"):
+            account_ref = {"value": full_cat["qbo_account_id"]}
+        elif fallback_ref:
+            account_ref = fallback_ref
+
+        if not account_ref:
+            raise ValueError(
+                f"Category '{cat_row.get('category_name', '')}' has no QBO expense account mapped. "
+                "Map categories to QBO accounts on the Categories page, then sync QBO items & accounts."
+            )
+
+        line = {
+            "LineNum": i + 1,
+            "Amount": line_amount,
+            "DetailType": "AccountBasedExpenseLineDetail",
+            "Description": cat_row.get("category_name", "")[:4000],
+            "AccountBasedExpenseLineDetail": {
+                "AccountRef": account_ref,
+            },
+        }
+        lines.append(line)
+
+    if not lines:
+        raise ValueError("Receipt has no category line items to push.")
+
+    # Determine payment type from the selected account
+    if payment_account_type == "Credit Card":
+        payment_type = "CreditCard"
+    elif payment_account_type:
+        payment_type = "Cash"
+    else:
+        # Fallback: query QBO if type not passed by caller
+        payment_type = "Cash"
+        for ba in fetch_qbo_bank_accounts(token_str):
+            if ba["id"] == payment_account_id:
+                payment_type = "CreditCard" if ba["type"] == "Credit Card" else "Cash"
+                break
+
+    payload = {
+        "PaymentType": payment_type,
+        "AccountRef": {"value": payment_account_id},
+        "Line": lines,
+    }
+
+    # Add vendor reference
+    if qbo_vendor_id:
+        payload["EntityRef"] = {"value": qbo_vendor_id, "type": "Vendor"}
+
+    # Transaction date: prefer receipt_date, fall back to submission timestamp
+    receipt_date = sub.get("receipt_date") or ""
+    if receipt_date:
+        payload["TxnDate"] = receipt_date[:10]
+    elif sub.get("timestamp"):
+        try:
+            payload["TxnDate"] = sub["timestamp"][:10]
+        except Exception:
+            pass
+
+    # Fetch job once for CustomerRef + PrivateNote
+    job = None
+    if sub.get("job_id"):
+        job = database.get_job(sub["job_id"])
+
+    # Map job's customer to QBO CustomerRef (for job costing)
+    qbo_customer_id = None
+    if job and job.get("customer_id"):
+        # Path A: Job has a local customer — sync that customer to QBO
+        try:
+            qbo_customer_id = ensure_customer_in_qbo(token_str, job["customer_id"])
+        except Exception:
+            log.warning("Could not sync customer for receipt %s", submission_id, exc_info=True)
+    elif job and not job.get("customer_id"):
+        # Path B: Job has no local customer — try to match job name to QBO customer
+        if job.get("qbo_customer_id"):
+            qbo_customer_id = job["qbo_customer_id"]
+        else:
+            try:
+                matched_id = find_qbo_customer_by_name(token_str, job.get("job_name", ""))
+                if matched_id:
+                    qbo_customer_id = matched_id
+                    database.update_job_qbo_customer(job["id"], matched_id)
+                    log.info("Matched job '%s' (id=%s) to QBO customer %s by name",
+                             job.get("job_name"), job["id"], matched_id)
+                else:
+                    log.debug("No QBO customer found matching job name '%s'",
+                              job.get("job_name", ""))
+            except Exception:
+                log.warning("QBO customer name lookup failed for job '%s'",
+                            job.get("job_name", ""), exc_info=True)
+    if qbo_customer_id:
+        payload["CustomerRef"] = {"value": qbo_customer_id}
+
+    # Build PrivateNote: job name + transcription
+    memo_parts = []
+    if job:
+        memo_parts.append(f"Job: {job.get('job_name', '')}")
+    if sub.get("transcription"):
+        memo_parts.append(sub["transcription"])
+    if memo_parts:
+        payload["PrivateNote"] = "\n".join(memo_parts)[:4000]
+
+    # Save the payment account choice
+    database.update_submission_qbo_payment_account(submission_id, payment_account_id)
+
+    # Update or create?
+    existing_qbo_id = sub.get("qbo_purchase_id")
+    if existing_qbo_id:
+        payload["Id"] = existing_qbo_id
+        payload["SyncToken"] = sub.get("qbo_sync_token", "0")
+        payload["sparse"] = True
+        resp = _qbo_api_call(token_str, "POST", "purchase", payload)
+        if resp.status_code not in (200, 201):
+            log.warning("QBO purchase update failed, retrying as new: %s", resp.status_code)
+            payload.pop("Id", None)
+            payload.pop("SyncToken", None)
+            payload.pop("sparse", None)
+            resp = _qbo_api_call(token_str, "POST", "purchase", payload)
+    else:
+        resp = _qbo_api_call(token_str, "POST", "purchase", payload)
+
+    if resp.status_code in (200, 201):
+        data = resp.json()["Purchase"]
+        qbo_id = str(data["Id"])
+        sync_token = str(data["SyncToken"])
+        database.update_submission_qbo_sync(submission_id, qbo_id, sync_token)
+        database.clear_submission_qbo_error(submission_id)
+
+        # Upload receipt image as attachment (non-blocking — failure does not roll back)
+        if sub.get("image_file"):
+            try:
+                image_path = config.RECEIPTS_DIR / sub["token"] / sub["month_folder"] / sub["image_file"]
+                ext = sub["image_file"].rsplit(".", 1)[-1].lower() if "." in sub["image_file"] else "jpeg"
+                mime_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+                mime_type = mime_map.get(ext, "image/jpeg")
+                _qbo_upload_attachment(
+                    token_str,
+                    entity_type="Purchase",
+                    entity_id=qbo_id,
+                    file_path=image_path,
+                    filename=sub["image_file"],
+                    mime_type=mime_type,
+                )
+            except Exception:
+                log.warning("Failed to upload receipt image to QBO for submission %s",
+                            submission_id, exc_info=True)
+
+        return qbo_id
+
+    error_msg = f"{resp.status_code}: {resp.text[:300]}"
+    database.set_submission_qbo_error(submission_id, error_msg)
+    raise RuntimeError(f"QBO expense push failed — {error_msg}")

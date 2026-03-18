@@ -646,7 +646,7 @@ def api_categories():
         return jsonify({"error": "Not authorized"}), 403
     if not access:
         return jsonify([])
-    cats = database.get_categories_by_token(token_str, active_only=True)
+    cats = database.get_categories_for_capture(token_str)
     return jsonify([{"id": c["id"], "name": c["name"]} for c in cats])
 
 

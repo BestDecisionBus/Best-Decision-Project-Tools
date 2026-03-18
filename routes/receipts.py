@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -151,6 +152,8 @@ def api_upload():
     job_id = request.form.get("job_id") or None
     category_1_id = request.form.get("category_1_id") or None
     category_2_id = request.form.get("category_2_id") or None
+    receipt_date = request.form.get("receipt_date", "").strip() or None
+    vendor = request.form.get("vendor", "").strip() or None
 
     # Coerce to int if provided
     if job_id is not None:
@@ -169,6 +172,10 @@ def api_upload():
         except (ValueError, TypeError):
             category_2_id = None
 
+    # Validate receipt_date format if provided
+    if receipt_date and not re.match(r'^\d{4}-\d{2}-\d{2}$', receipt_date):
+        receipt_date = None
+
     # Create DB record (status='processing' -- background worker picks it up)
     submitted_ip = request.remote_addr or ""
     submission_id = database.create_submission(
@@ -180,6 +187,8 @@ def api_upload():
         job_id=job_id,
         category_1_id=category_1_id,
         category_2_id=category_2_id,
+        receipt_date=receipt_date,
+        vendor=vendor,
     )
 
     # Notify admins

@@ -505,3 +505,8 @@ function saveSortOrder(input) {
         setTimeout(function() { input.style.borderColor = ''; }, 800);
     });
 }
+
+function autoGrow(el) {
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+}

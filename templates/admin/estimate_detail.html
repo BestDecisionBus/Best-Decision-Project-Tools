@@ -832,11 +832,6 @@
         return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
     }
 
-    function autoGrow(el) {
-        el.style.height = 'auto';
-        el.style.height = el.scrollHeight + 'px';
-    }
-
     function calcRow(el) {
         var group = el.closest('.li-group');
         var qty = parseFloat(group.querySelector('.li-qty').value) || 0;

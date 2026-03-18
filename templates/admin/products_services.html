@@ -28,43 +28,44 @@
             <h3 style="margin-top: 0;">Add Product / Service</h3>
             <form method="POST" action="{{ url_for('admin.admin_product_service_create') }}">
                 <input type="hidden" name="token" value="{{ selected_token.token }}">
-                <div class="form-row">
-                    <div class="form-group" style="flex: 2;">
-                        <label for="ps-name">Name</label>
-                        <input type="text" id="ps-name" name="name" placeholder="e.g. Framing lumber, Labor - install" required>
-                    </div>
-                    <div class="form-group" style="flex: 2;">
-                        <label for="ps-desc">Description</label>
-                        <input type="text" id="ps-desc" name="description" placeholder="Default description for estimates">
-                    </div>
-                    <div class="form-group" style="flex: 1;">
-                        <label for="ps-price">Unit Price ($)</label>
-                        <input type="number" id="ps-price" name="unit_price" value="0.00" step="0.01" min="0">
-                    </div>
-                    <div class="form-group" style="flex: 1;">
-                        <label for="ps-cost">Unit Cost ($)</label>
-                        <input type="number" id="ps-cost" name="unit_cost" value="0.00" step="0.01" min="0" placeholder="0.00">
-                    </div>
-                    <div class="form-group" style="flex: 1;">
-                        <label for="ps-type">Type</label>
-                        <select id="ps-type" name="item_type">
-                            <option value="product">Product</option>
-                            <option value="service">Service</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="flex: 1;">
-                        <label for="ps-sort">Sort Order</label>
-                        <input type="number" id="ps-sort" name="sort_order" value="0" step="1">
-                    </div>
-                    <div class="form-group" style="flex: 0 0 auto; align-self: flex-end; padding-bottom: 8px;">
-                        <label style="font-weight: normal; display: flex; align-items: center; gap: 6px; text-transform: none; text-align: left; font-size: 14px; color: var(--gray-800);">
-                            <input type="checkbox" name="taxable" value="1"> Taxable
-                        </label>
-                    </div>
-                    <div class="form-group" style="align-self: flex-end;">
-                        <button type="submit" class="btn btn-green">Add</button>
-                    </div>
-                </div>
+                <input type="hidden" id="ps-add-type" name="item_type" value="product">
+                <table class="admin-table" style="margin-bottom: 4px; width: 100%;">
+                    <colgroup>
+                        <col style="width: 45%;">
+                        <col style="width: 130px;">
+                        <col style="width: 120px;">
+                        <col style="width: 40px;">
+                        <col style="width: 80px;">
+                        <col style="width: 80px;">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>Product / Service</th>
+                            <th style="text-align: right;">Unit Price</th>
+                            <th style="text-align: right;">Cost</th>
+                            <th style="text-align: center;">Tax</th>
+                            <th style="text-align: center;">Sort</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr style="vertical-align: top;">
+                            <td>
+                                <input type="text" name="name" placeholder="e.g. Framing lumber, Labor - install" required style="width:100%; padding:4px 6px; font-size:13px; font-weight:600; border:1px solid var(--gray-300); border-radius:4px; background:#fefce8;">
+                                <div style="margin-top: 3px;">
+                                    <button type="button" id="ps-add-btn-product" class="li-type-btn" onclick="setPsAddType('product')" style="font-size:10px; padding:1px 6px; border-radius:3px; border:1px solid #2563eb; cursor:pointer; background:#2563eb; color:#fff;">Product</button>
+                                    <button type="button" id="ps-add-btn-service" class="li-type-btn" onclick="setPsAddType('service')" style="font-size:10px; padding:1px 6px; border-radius:3px; border:1px solid #7c3aed; cursor:pointer; background:#e5e7eb; color:#374151;">Service</button>
+                                </div>
+                            </td>
+                            <td style="padding-top:8px;"><input type="text" inputmode="decimal" name="unit_price" value="0.00" placeholder="0.00" style="width:100%; padding:4px 6px; font-size:13px; text-align:right; border:1px solid var(--gray-300); border-radius:4px; background:#fefce8;" onfocus="this.select()"></td>
+                            <td style="padding-top:8px;"><input type="text" inputmode="decimal" name="unit_cost" value="0.00" placeholder="0.00" style="width:100%; padding:4px 6px; font-size:13px; text-align:right; border:1px solid var(--gray-300); border-radius:4px; background:#fff7ed;" onfocus="this.select()"></td>
+                            <td style="text-align:center; padding:8px 4px 0;"><input type="checkbox" name="taxable" value="1"></td>
+                            <td style="padding-top:8px;"><input type="number" name="sort_order" value="0" step="1" style="width:100%; padding:4px 6px; font-size:13px; text-align:center; border:1px solid var(--gray-300); border-radius:4px; background:#fefce8;"></td>
+                            <td style="padding-top:8px;"><button type="submit" class="btn btn-green btn-sm" style="padding: 4px 12px;">Add</button></td>
+                        </tr>
+                    </tbody>
+                </table>
+                <textarea name="description" rows="1" placeholder="Description" style="width:100%; padding:2px 6px; font-size:11px; color:var(--gray-600); border:1px solid var(--gray-300); border-radius:4px; background:#fefce8; resize:vertical; min-height:22px; line-height:1.3;" oninput="autoGrow(this)"></textarea>
             </form>
         </div>
 
@@ -315,6 +316,19 @@
         }
         editBtn.style.display = editing ? 'none' : '';
         saveBtn.style.display = editing ? '' : 'none';
+    }
+
+    function setPsAddType(type) {
+        document.getElementById('ps-add-type').value = type;
+        var prodBtn = document.getElementById('ps-add-btn-product');
+        var servBtn = document.getElementById('ps-add-btn-service');
+        if (type === 'product') {
+            prodBtn.style.background = '#2563eb'; prodBtn.style.color = '#fff';
+            servBtn.style.background = '#e5e7eb'; servBtn.style.color = '#374151';
+        } else {
+            servBtn.style.background = '#7c3aed'; servBtn.style.color = '#fff';
+            prodBtn.style.background = '#e5e7eb'; prodBtn.style.color = '#374151';
+        }
     }
 
     function savePs(id) {

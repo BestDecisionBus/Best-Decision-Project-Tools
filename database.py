@@ -458,6 +458,7 @@ def init_db():
     _add_column_if_missing(conn, "categories", "account_code", "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "products_services", "taxable", "INTEGER DEFAULT 0")
     _add_column_if_missing(conn, "jobs",      "customer_id",        "INTEGER DEFAULT NULL")
+    _add_column_if_missing(conn, "jobs",      "qbo_customer_id",    "TEXT DEFAULT ''")
     _add_column_if_missing(conn, "estimates", "customer_id",        "INTEGER DEFAULT NULL")
     # Phase 1 — Current Job Tasks feature
     _add_column_if_missing(conn, "estimates", "project_name",       "TEXT DEFAULT ''")
@@ -465,6 +466,17 @@ def init_db():
     _add_column_if_missing(conn, "jobs",      "sort_order",         "INTEGER DEFAULT 0")
     _add_column_if_missing(conn, "tokens",    "task_retention_days","INTEGER DEFAULT 90")
     _add_column_if_missing(conn, "tokens",    "color_scheme",       "TEXT DEFAULT 'blue'")
+    # QBO receipt/expense sync
+    _add_column_if_missing(conn, "submissions", "payment_amount",          "REAL DEFAULT 0")
+    _add_column_if_missing(conn, "submissions", "qbo_purchase_id",         "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "submissions", "qbo_sync_token",          "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "submissions", "qbo_synced_at",           "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "submissions", "qbo_sync_error",          "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "submissions", "qbo_vendor_id",           "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "submissions", "qbo_payment_account_id",  "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "submissions", "receipt_date",            "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "categories",  "qbo_account_id",          "TEXT DEFAULT ''")
+    _add_column_if_missing(conn, "categories",  "exclude_from_capture",    "INTEGER DEFAULT 0")
     _add_column_if_missing(conn, "tokens",    "feature_timekeeper", "INTEGER DEFAULT 1")
     _add_column_if_missing(conn, "tokens",    "feature_receipts",   "INTEGER DEFAULT 1")
     _add_column_if_missing(conn, "tokens",    "feature_photos",     "INTEGER DEFAULT 1")
@@ -1537,12 +1549,14 @@ def get_category(cat_id):
 def create_category(name, token_str, sort_order=0, account_code=""):
     conn = get_db()
     now = datetime.now().isoformat()
-    conn.execute(
+    cur = conn.execute(
         "INSERT INTO categories (name, token, sort_order, account_code, created_at) VALUES (?, ?, ?, ?, ?)",
         (name, token_str, sort_order, account_code or "", now),
     )
+    new_id = cur.lastrowid
     conn.commit()
     conn.close()
+    return new_id
 
 
 def update_category(cat_id, name, sort_order=None, account_code=None):
@@ -1563,6 +1577,22 @@ def update_category(cat_id, name, sort_order=None, account_code=None):
 
 def toggle_category(cat_id):
     _toggle_active("categories", cat_id)
+
+
+def toggle_category_capture_exclude(cat_id):
+    """Toggle the exclude_from_capture flag."""
+    return _toggle_active_returning("categories", cat_id, column="exclude_from_capture")
+
+
+def get_categories_for_capture(token_str):
+    """Get active categories not excluded from employee capture."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM categories WHERE token = ? AND is_active = 1 AND exclude_from_capture = 0 ORDER BY sort_order ASC, name ASC",
+        (token_str,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def bulk_deactivate_categories(token_str):
@@ -2716,7 +2746,8 @@ def get_overall_labor_stats(token_str):
 # ---------------------------------------------------------------------------
 
 def create_submission(token, company_name, image_file, audio_file, submitted_ip,
-                      job_id=None, category_1_id=None, category_2_id=None):
+                      job_id=None, category_1_id=None, category_2_id=None,
+                      receipt_date=None, vendor=None):
     now = datetime.now()
     timestamp = now.isoformat()
     month_folder = now.strftime("%Y-%m")
@@ -2724,10 +2755,12 @@ def create_submission(token, company_name, image_file, audio_file, submitted_ip,
     cursor = conn.execute(
         """INSERT INTO submissions
            (token, company_name, timestamp, month_folder, image_file, audio_file,
-            submitted_ip, job_id, category_1_id, category_2_id, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing')""",
+            submitted_ip, job_id, category_1_id, category_2_id, status,
+            receipt_date, vendor)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?)""",
         (token, company_name, timestamp, month_folder, image_file, audio_file,
-         submitted_ip, job_id, category_1_id, category_2_id),
+         submitted_ip, job_id, category_1_id, category_2_id,
+         receipt_date or "", vendor or ""),
     )
     submission_id = cursor.lastrowid
     conn.commit()
@@ -2887,6 +2920,13 @@ def set_submission_categories(submission_id, items):
 def update_submission_vendor(submission_id, vendor):
     conn = get_db()
     conn.execute("UPDATE submissions SET vendor = ? WHERE id = ?", (vendor, submission_id))
+    conn.commit()
+    conn.close()
+
+
+def update_submission_receipt_date(submission_id, receipt_date):
+    conn = get_db()
+    conn.execute("UPDATE submissions SET receipt_date = ? WHERE id = ?", (receipt_date or "", submission_id))
     conn.commit()
     conn.close()
 
@@ -5302,6 +5342,84 @@ def update_customer_qbo_sync(customer_id, qbo_customer_id):
     conn.execute(
         "UPDATE customers SET qbo_customer_id = ?, qbo_synced_at = ? WHERE id = ?",
         (str(qbo_customer_id), now, customer_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_job_qbo_customer(job_id, qbo_customer_id):
+    """Cache a discovered QBO customer ID on a job for future lookups."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE jobs SET qbo_customer_id = ? WHERE id = ?",
+        (str(qbo_customer_id), job_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# QBO receipt/expense sync helpers
+# ---------------------------------------------------------------------------
+
+def update_category_qbo_account(cat_id, qbo_account_id):
+    """Set the QBO expense account mapping for a category."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE categories SET qbo_account_id = ? WHERE id = ?",
+        (str(qbo_account_id) if qbo_account_id else "", cat_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_submission_payment_amount(submission_id, payment_amount):
+    conn = get_db()
+    conn.execute(
+        "UPDATE submissions SET payment_amount = ? WHERE id = ?",
+        (float(payment_amount or 0), submission_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_submission_qbo_sync(submission_id, qbo_purchase_id, qbo_sync_token):
+    conn = get_db()
+    now = datetime.now().isoformat()
+    conn.execute(
+        """UPDATE submissions
+           SET qbo_purchase_id = ?, qbo_synced_at = ?,
+               qbo_sync_error = '', qbo_sync_token = ?
+           WHERE id = ?""",
+        (str(qbo_purchase_id), now, str(qbo_sync_token), submission_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def set_submission_qbo_error(submission_id, error_msg):
+    _set_qbo_sync_error("submissions", submission_id, error_msg)
+
+
+def clear_submission_qbo_error(submission_id):
+    _clear_qbo_sync_error("submissions", submission_id)
+
+
+def update_submission_qbo_vendor(submission_id, qbo_vendor_id):
+    conn = get_db()
+    conn.execute(
+        "UPDATE submissions SET qbo_vendor_id = ? WHERE id = ?",
+        (str(qbo_vendor_id), submission_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_submission_qbo_payment_account(submission_id, qbo_payment_account_id):
+    conn = get_db()
+    conn.execute(
+        "UPDATE submissions SET qbo_payment_account_id = ? WHERE id = ?",
+        (str(qbo_payment_account_id) if qbo_payment_account_id else "", submission_id),
     )
     conn.commit()
     conn.close()

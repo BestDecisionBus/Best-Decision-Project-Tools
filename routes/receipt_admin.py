@@ -1,4 +1,6 @@
 import io
+import logging
+import re
 import zipfile
 from pathlib import Path
 
@@ -10,6 +12,9 @@ from flask_login import current_user, login_required
 
 import config
 import database
+import qbo_service
+
+log = logging.getLogger(__name__)
 
 from routes._shared import helpers as _helpers, gate_admin_feature
 
@@ -137,12 +142,23 @@ def receipt_detail(submission_id):
     all_categories = database.get_categories_by_token(sub["token"], active_only=True)
     all_jobs = database.get_jobs_by_token(sub["token"], active_only=True)
 
+    # QBO data for expense push
+    qbo_connection = database.get_qbo_connection(sub["token"])
+    qbo_bank_accounts = []
+    if qbo_connection:
+        try:
+            qbo_bank_accounts = qbo_service.fetch_qbo_bank_accounts(sub["token"])
+        except Exception:
+            log.warning("Failed to fetch QBO bank accounts for receipt %s", submission_id, exc_info=True)
+
     return render_template(
         "admin/receipt_detail.html",
         sub=sub,
         sub_categories=sub_categories,
         all_categories=all_categories,
         all_jobs=all_jobs,
+        qbo_connection=qbo_connection,
+        qbo_bank_accounts=qbo_bank_accounts,
     )
 
 
@@ -160,10 +176,18 @@ def receipt_update(submission_id):
     vendor = data.get("vendor", "")
     categories = data.get("categories", [])
     job_id = data.get("job_id")
+    payment_amount = data.get("payment_amount", None)
+    receipt_date = data.get("receipt_date", None)
 
     database.update_submission_vendor(submission_id, vendor)
     database.set_submission_categories(submission_id, categories)
     database.update_submission_job(submission_id, job_id)
+    if payment_amount is not None:
+        database.update_submission_payment_amount(submission_id, payment_amount)
+    if receipt_date is not None:
+        if receipt_date and not re.match(r'^\d{4}-\d{2}-\d{2}$', receipt_date):
+            receipt_date = ""
+        database.update_submission_receipt_date(submission_id, receipt_date)
 
     return jsonify({"ok": True})
 
@@ -181,6 +205,12 @@ def receipt_toggle_processed(submission_id):
 
     h = _helpers()
     h._verify_token_access(sub["token"])
+
+    if sub.get("qbo_purchase_id"):
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"error": "Cannot toggle — receipt is synced to QuickBooks."}), 400
+        flash("Cannot toggle — receipt is synced to QuickBooks.", "error")
+        return redirect(request.referrer or url_for("receipt_admin.receipt_dashboard"))
 
     new_val = database.toggle_processed(submission_id)
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":

@@ -71,6 +71,16 @@
                 <input type="hidden" id="job-select" value="">
             </div>
             <div class="form-group">
+                <label>Receipt Date</label>
+                <input type="date" id="receipt-date" value=""
+                       style="width: 100%; padding: 10px 12px; font-size: 15px; border: 1px solid var(--gray-300); border-radius: 6px;">
+            </div>
+            <div class="form-group">
+                <label>Payee / Vendor (optional)</label>
+                <input type="text" id="receipt-vendor" placeholder="e.g. Home Depot, Lowe's"
+                       style="width: 100%; padding: 10px 12px; font-size: 15px; border: 1px solid var(--gray-300); border-radius: 6px;">
+            </div>
+            <div class="form-group">
                 <label>Category 1 (optional)</label>
                 <div class="ss-container" id="cat1-select-container">
                     <div class="ss-display" id="cat1-select-display" onclick="ss_toggle('cat1-select')">
@@ -209,7 +219,12 @@
                 ss_setOptions('cat2-select', opts, '-- None --');
             });
     }
+    function todayStr() {
+        var d = new Date();
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
     loadDropdowns();
+    document.getElementById('receipt-date').value = todayStr();
 
     // Step 1: Photo
     function onPhotoSelected(input) {
@@ -339,6 +354,10 @@
         if (jobId) formData.append('job_id', jobId);
         if (cat1Id) formData.append('category_1_id', cat1Id);
         if (cat2Id) formData.append('category_2_id', cat2Id);
+        var receiptDate = document.getElementById('receipt-date').value;
+        if (receiptDate) formData.append('receipt_date', receiptDate);
+        var vendor = document.getElementById('receipt-vendor').value.trim();
+        if (vendor) formData.append('vendor', vendor);
 
         fetch('/api/upload', {method: 'POST', body: formData})
             .then(function(resp) {
@@ -375,6 +394,8 @@
         ss_reset('job-select');
         ss_reset('cat1-select');
         ss_reset('cat2-select');
+        document.getElementById('receipt-date').value = todayStr();
+        document.getElementById('receipt-vendor').value = '';
     }
     </script>
 </body>

@@ -637,9 +637,17 @@ def admin_categories():
     tokens = h._get_tokens_for_user()
     token_str, selected_token = h._get_selected_token(tokens)
     categories = database.get_categories_by_token(token_str) if token_str else []
+    qbo_connection = database.get_qbo_connection(token_str) if token_str else None
+    qbo_expense_accounts = []
+    if qbo_connection and token_str:
+        qbo_expense_accounts = (
+            database.get_qbo_accounts(token_str, acct_type="Expense")
+            + database.get_qbo_accounts(token_str, acct_type="Cost of Goods Sold")
+        )
     return render_template(
         "admin/categories.html",
         tokens=tokens, selected_token=selected_token, categories=categories,
+        qbo_connection=qbo_connection, qbo_expense_accounts=qbo_expense_accounts,
     )
 
 
@@ -700,6 +708,33 @@ def admin_category_toggle(cat_id):
     database.toggle_category(cat_id)
     flash("Category status toggled.", "success")
     return redirect(url_for("admin.admin_categories", token=cat["token"] if cat else ""))
+
+
+@admin_bp.route("/admin/categories/<int:cat_id>/toggle-capture", methods=["POST"])
+@login_required
+def admin_category_toggle_capture(cat_id):
+    h = _helpers()
+    cat = database.get_category(cat_id)
+    if not cat:
+        abort(404)
+    h._verify_token_access(cat["token"])
+    database.toggle_category_capture_exclude(cat_id)
+    return jsonify({"success": True})
+
+
+@admin_bp.route("/admin/categories/<int:cat_id>/qbo-account", methods=["POST"])
+@login_required
+def admin_category_qbo_account(cat_id):
+    h = _helpers()
+    h._require_admin()
+    cat = database.get_category(cat_id)
+    if not cat:
+        abort(404)
+    h._verify_token_access(cat["token"])
+    data = request.get_json(force=True)
+    qbo_account_id = data.get("qbo_account_id", "")
+    database.update_category_qbo_account(cat_id, qbo_account_id)
+    return jsonify({"success": True})
 
 
 # ---------------------------------------------------------------------------

@@ -79,6 +79,18 @@
                 </div>
             </form>
         </div>
+        {% if qbo_connection %}
+        <div class="meta-card" style="margin-bottom: 24px;">
+            <h3 style="margin-top: 0;">Sync QBO Expense Categories</h3>
+            <p style="font-size: 13px; color: var(--gray-500); margin-bottom: 12px;">
+                Pull Expense and COGS accounts from QuickBooks and create them as categories with the QBO account pre-mapped.
+            </p>
+            <form method="POST" action="{{ url_for('qbo.qbo_sync_expense_categories') }}">
+                <input type="hidden" name="token" value="{{ selected_token.token }}">
+                <button type="submit" class="btn btn-blue">Sync QBO Expense Categories</button>
+            </form>
+        </div>
+        {% endif %}
         {% endif %}
 
         {% if categories %}
@@ -88,7 +100,11 @@
                     <tr>
                         <th>Name</th>
                         <th>Account Code</th>
+                        {% if qbo_connection %}
+                        <th>QBO Expense Account</th>
+                        {% endif %}
                         <th>Sort Order</th>
+                        <th>Exclude from Capture</th>
                         <th>Status</th>
                         <th data-no-sort>Actions</th>
                     </tr>
@@ -106,10 +122,28 @@
                             <input type="text" id="cataccount-input-{{ cat.id }}" value="{{ cat.account_code or '' }}"
                                    style="display: none; width: 100%;">
                         </td>
+                        {% if qbo_connection %}
+                        <td>
+                            <select onchange="saveQboAccount({{ cat.id }}, this.value)"
+                                    style="width: 100%; padding: 4px 8px; font-size: 13px; border: 1px solid var(--gray-300); border-radius: 4px;">
+                                <option value="">-- Not mapped --</option>
+                                {% for acct in qbo_expense_accounts %}
+                                <option value="{{ acct.qbo_id }}" {{ 'selected' if cat.qbo_account_id == acct.qbo_id else '' }}>
+                                    {{ acct.name }} ({{ acct.acct_type }})
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        {% endif %}
                         <td>
                             <input type="number" id="catsort-input-{{ cat.id }}" value="{{ cat.sort_order }}"
                                    class="sort-input" onchange="saveSortOrder(this)"
                                    data-endpoint="/admin/categories/{{ cat.id }}/sort">
+                        </td>
+                        <td style="text-align: center;">
+                            <input type="checkbox" {{ 'checked' if cat.exclude_from_capture else '' }}
+                                   onchange="toggleCaptureExclude({{ cat.id }})"
+                                   title="Hide from employee receipt capture dropdown">
                         </td>
                         <td>
                             {% if cat.is_active %}
@@ -158,6 +192,29 @@
         accountInput.style.display = editing ? '' : 'none';
         editBtn.style.display = editing ? 'none' : '';
         saveBtn.style.display = editing ? '' : 'none';
+    }
+
+    function toggleCaptureExclude(catId) {
+        fetch('/admin/categories/' + catId + '/toggle-capture', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}
+        }).then(function(resp) {
+            if (!resp.ok) alert('Error toggling capture exclusion.');
+        }).catch(function() {
+            alert('Error toggling capture exclusion.');
+        });
+    }
+
+    function saveQboAccount(catId, qboAccountId) {
+        fetch('/admin/categories/' + catId + '/qbo-account', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+            body: JSON.stringify({qbo_account_id: qboAccountId})
+        }).then(function(resp) {
+            if (!resp.ok) alert('Error saving QBO account mapping.');
+        }).catch(function() {
+            alert('Error saving QBO account mapping.');
+        });
     }
 
     function saveCategory(id) {

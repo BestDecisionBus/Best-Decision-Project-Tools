@@ -45,6 +45,12 @@
                 <p><strong>IP:</strong> {{ sub.submitted_ip or '—' }}</p>
 
                 <div style="margin-top: 8px;">
+                    <label style="font-size: 13px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 4px;">Receipt Date</label>
+                    <input type="date" id="receipt-date" value="{{ sub.receipt_date or (sub.timestamp[:10] if sub.timestamp else '') }}"
+                           style="width: 100%; padding: 8px 12px; font-size: 14px; border: 1px solid var(--gray-300); border-radius: 6px;">
+                </div>
+
+                <div style="margin-top: 8px;">
                     <label style="font-size: 13px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 4px;">Job</label>
                     <select id="receipt-job" style="width: 100%; padding: 8px 12px; font-size: 14px; border: 1px solid var(--gray-300); border-radius: 6px;">
                         <option value="">-- No job --</option>
@@ -57,9 +63,13 @@
                 <div class="processed-toggle">
                     <label>
                         <input type="checkbox" class="processed-checkbox" data-id="{{ sub.id }}"
-                               {{ 'checked' if sub.processed else '' }}>
+                               {{ 'checked' if sub.processed else '' }}
+                               {{ 'disabled' if sub.qbo_purchase_id else '' }}>
                         <strong>Processed</strong>
                     </label>
+                    {% if sub.qbo_purchase_id %}
+                    <span style="font-size: 12px; color: var(--gray-500); margin-left: 8px;">Locked — synced to QuickBooks</span>
+                    {% endif %}
                 </div>
 
                 {# ---- Vendor ---- #}
@@ -120,11 +130,63 @@
                     </div>
                 </div>
 
+                {# ---- Payment Amount ---- #}
+                <div style="margin-top: 16px;">
+                    <label style="font-size: 13px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 4px;">
+                        Payment Amount
+                        <span id="payment-match-icon" style="margin-left: 6px; font-size: 14px;"></span>
+                    </label>
+                    <input type="number" id="receipt-payment-amount"
+                           value="{{ '%.2f'|format(sub.payment_amount or 0) }}"
+                           min="0" step="0.01" placeholder="0.00"
+                           style="width: 100%; padding: 8px 12px; font-size: 14px; border: 1px solid var(--gray-300); border-radius: 6px; text-align: right;">
+                    <p id="payment-match-msg" style="font-size: 12px; margin: 4px 0 0; display: none;"></p>
+                </div>
+
                 {# ---- Save button ---- #}
                 <div style="margin-top: 16px; display: flex; align-items: center; gap: 12px;">
                     <button type="button" id="save-receipt-btn" onclick="saveReceipt()" class="btn btn-green">Save Changes</button>
                     <span id="save-status" style="font-size: 13px; color: var(--gray-500);"></span>
                 </div>
+
+                {# ---- QBO Push ---- #}
+                {% if qbo_connection %}
+                <div style="margin-top: 20px; padding: 14px; border: 1px solid var(--blue); border-radius: 8px; background: var(--blue-tint);">
+                    <label style="font-size: 13px; font-weight: 600; color: var(--gray-700); display: block; margin-bottom: 8px;">QuickBooks Expense Sync</label>
+                    <form method="POST" action="{{ url_for('qbo.qbo_push_receipt', submission_id=sub.id) }}" id="qbo-push-form"
+                          onsubmit="return validateQboPush()">
+                        <div style="margin-bottom: 10px;">
+                            <label style="font-size: 12px; color: var(--gray-500); display: block; margin-bottom: 4px;">Payment Account (Bank / Credit Card)</label>
+                            <select name="payment_account_id" id="qbo-payment-account"
+                                    style="width: 100%; padding: 8px 12px; font-size: 14px; border: 1px solid var(--gray-300); border-radius: 6px;"
+                                    onchange="document.getElementById('qbo-payment-type').value = this.selectedOptions[0] ? this.selectedOptions[0].dataset.type || '' : ''">
+                                <option value="">-- Select account --</option>
+                                {% for acct in qbo_bank_accounts %}
+                                <option value="{{ acct.id }}" data-type="{{ acct.type }}" {{ 'selected' if sub.qbo_payment_account_id == acct.id else '' }}>
+                                    {{ acct.name }} ({{ acct.type }})
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <input type="hidden" name="payment_account_type" id="qbo-payment-type" value="">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                            <button type="submit" class="btn btn-blue btn-sm" id="qbo-push-btn">
+                                {% if sub.qbo_purchase_id %}Update in QuickBooks{% else %}Send to QuickBooks{% endif %}
+                            </button>
+                            {% if sub.qbo_synced_at %}
+                            <span style="font-size: 11px; color: var(--gray-400);" title="Last synced {{ sub.qbo_synced_at }}">
+                                Synced {{ sub.qbo_synced_at[:10] }}
+                            </span>
+                            {% endif %}
+                            {% if sub.qbo_sync_error %}
+                            <span style="font-size: 11px; color: var(--red); font-weight: 600;" title="{{ sub.qbo_sync_error }}">
+                                QBO error — hover for details
+                            </span>
+                            {% endif %}
+                        </div>
+                    </form>
+                </div>
+                {% endif %}
 
                 <h3 style="margin-top: 20px;">Transcription</h3>
                 <div class="transcription">
@@ -156,40 +218,71 @@
     <script src="/static/js/admin.js?v={{ cache_bust }}"></script>
     <script>
     (function () {
-        // All categories available for this company (used to build dropdowns)
         var ALL_CATS = [
             {% for cat in all_categories %}
             { id: {{ cat.id }}, name: {{ cat.name|tojson }} }{{ "," if not loop.last else "" }}
             {% endfor %}
         ];
 
-        function buildCatSelect(selectedId) {
-            var html = '';
+        function buildCatOptions(selectedId) {
+            var opts = [];
             ALL_CATS.forEach(function (c) {
-                html += '<option value="' + c.id + '"' + (c.id === selectedId ? ' selected' : '') + '>' + c.name + '</option>';
+                var opt = document.createElement("option");
+                opt.value = c.id;
+                opt.textContent = c.name;
+                if (c.id === selectedId) opt.selected = true;
+                opts.push(opt);
             });
-            return '<select class="cat-select-inline" onchange="catChanged(this)" ' +
-                   'style="width: 100%; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 4px; font-size: 13px;">' +
-                   html + '</select>';
+            return opts;
         }
 
-        function calcCatTotal() {
+        function getCatTotal() {
             var total = 0;
             document.querySelectorAll("#cat-body .cat-amount").forEach(function (inp) {
                 total += parseFloat(inp.value) || 0;
             });
+            return Math.round(total * 100) / 100;
+        }
+
+        function calcCatTotal() {
+            var total = getCatTotal();
             document.getElementById("cat-total").textContent = "$" + total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+            checkPaymentMatch();
         }
         calcCatTotal();
 
-        // Recalculate on amount change
+        function checkPaymentMatch() {
+            var payInput = document.getElementById("receipt-payment-amount");
+            var icon = document.getElementById("payment-match-icon");
+            var msg = document.getElementById("payment-match-msg");
+            var payAmt = parseFloat(payInput.value) || 0;
+            var catTotal = getCatTotal();
+
+            if (payAmt <= 0 && catTotal <= 0) {
+                icon.textContent = "";
+                msg.style.display = "none";
+                return;
+            }
+            if (payAmt > 0 && Math.abs(payAmt - catTotal) < 0.01) {
+                icon.textContent = "\u2705";
+                icon.title = "Matches category total";
+                msg.style.display = "none";
+            } else {
+                icon.textContent = "\u26A0\uFE0F";
+                icon.title = "Does not match category total";
+                msg.style.display = "block";
+                msg.style.color = "var(--red)";
+                msg.textContent = "Payment amount ($" + payAmt.toFixed(2) + ") does not match category total ($" + catTotal.toFixed(2) + ")";
+            }
+        }
+
         document.getElementById("cat-body").addEventListener("input", calcCatTotal);
+        document.getElementById("receipt-payment-amount").addEventListener("input", checkPaymentMatch);
+        checkPaymentMatch();
 
         window.catChanged = function (sel) {
-            // Update data-cat-id on the row when dropdown changes
             var tr = sel.closest("tr");
             var newId = sel.value;
-            // Check for duplicates
             var existing = document.querySelectorAll('#cat-body tr');
             var dupeCount = 0;
             existing.forEach(function (row) {
@@ -199,7 +292,7 @@
             });
             if (dupeCount > 0) {
                 alert("That category is already assigned to another row.");
-                sel.value = tr.getAttribute("data-cat-id"); // revert
+                sel.value = tr.getAttribute("data-cat-id");
                 return;
             }
             tr.setAttribute("data-cat-id", newId);
@@ -210,7 +303,6 @@
             var catId = sel.value;
             if (!catId) return;
 
-            // Prevent duplicates
             var dupe = false;
             document.querySelectorAll("#cat-body tr .cat-select-inline").forEach(function (s) {
                 if (s.value === catId) dupe = true;
@@ -222,15 +314,39 @@
 
             var tr = document.createElement("tr");
             tr.setAttribute("data-cat-id", catId);
-            tr.innerHTML =
-                '<td style="padding: 4px 8px;">' + buildCatSelect(parseInt(catId)) + '</td>' +
-                '<td style="padding: 4px 8px; text-align: right;">' +
-                    '<input type="number" class="cat-amount" value="0.00" min="0" step="0.01" ' +
-                    'style="width: 100%; text-align: right; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 4px; font-size: 13px;">' +
-                '</td>' +
-                '<td style="text-align: center;">' +
-                    '<button type="button" onclick="removeCat(this)" style="background: none; border: none; color: var(--red); cursor: pointer; font-size: 16px; padding: 2px 6px;">&times;</button>' +
-                '</td>';
+
+            var tdCat = document.createElement("td");
+            tdCat.style.cssText = "padding: 4px 8px;";
+            var catSelect = document.createElement("select");
+            catSelect.className = "cat-select-inline";
+            catSelect.setAttribute("onchange", "catChanged(this)");
+            catSelect.style.cssText = "width: 100%; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 4px; font-size: 13px;";
+            buildCatOptions(parseInt(catId)).forEach(function (opt) { catSelect.appendChild(opt); });
+            tdCat.appendChild(catSelect);
+
+            var tdAmt = document.createElement("td");
+            tdAmt.style.cssText = "padding: 4px 8px; text-align: right;";
+            var amtInput = document.createElement("input");
+            amtInput.type = "number";
+            amtInput.className = "cat-amount";
+            amtInput.value = "0.00";
+            amtInput.min = "0";
+            amtInput.step = "0.01";
+            amtInput.style.cssText = "width: 100%; text-align: right; padding: 4px 8px; border: 1px solid var(--gray-300); border-radius: 4px; font-size: 13px;";
+            tdAmt.appendChild(amtInput);
+
+            var tdDel = document.createElement("td");
+            tdDel.style.cssText = "text-align: center;";
+            var delBtn = document.createElement("button");
+            delBtn.type = "button";
+            delBtn.setAttribute("onclick", "removeCat(this)");
+            delBtn.style.cssText = "background: none; border: none; color: var(--red); cursor: pointer; font-size: 16px; padding: 2px 6px;";
+            delBtn.textContent = "\u00D7";
+            tdDel.appendChild(delBtn);
+
+            tr.appendChild(tdCat);
+            tr.appendChild(tdAmt);
+            tr.appendChild(tdDel);
             document.getElementById("cat-body").appendChild(tr);
             sel.value = "";
             calcCatTotal();
@@ -245,6 +361,8 @@
             var vendor = document.getElementById("receipt-vendor").value.trim();
             var jobSel = document.getElementById("receipt-job");
             var jobId = jobSel.value ? parseInt(jobSel.value) : null;
+            var paymentAmount = parseFloat(document.getElementById("receipt-payment-amount").value) || 0;
+            var receiptDate = document.getElementById("receipt-date").value;
             var categories = [];
             document.querySelectorAll("#cat-body tr").forEach(function (tr) {
                 var catSel = tr.querySelector(".cat-select-inline");
@@ -266,7 +384,7 @@
                     "Content-Type": "application/json",
                     "X-Requested-With": "XMLHttpRequest"
                 },
-                body: JSON.stringify({ vendor: vendor, job_id: jobId, categories: categories })
+                body: JSON.stringify({ vendor: vendor, job_id: jobId, categories: categories, payment_amount: paymentAmount, receipt_date: receiptDate })
             })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -295,7 +413,37 @@
             });
         };
 
-        // Register for unsaved-changes guard
+        window.validateQboPush = function () {
+            var payAmt = parseFloat(document.getElementById("receipt-payment-amount").value) || 0;
+            var catTotal = getCatTotal();
+            var acctSel = document.getElementById("qbo-payment-account");
+
+            if (payAmt <= 0) {
+                alert("Please enter a Payment Amount before sending to QuickBooks.");
+                return false;
+            }
+            if (Math.abs(payAmt - catTotal) >= 0.01) {
+                alert("Payment amount ($" + payAmt.toFixed(2) + ") does not match category total ($" + catTotal.toFixed(2) + "). Please correct before syncing.");
+                return false;
+            }
+            if (acctSel && !acctSel.value) {
+                alert("Please select a payment account (Bank or Credit Card).");
+                return false;
+            }
+            // Ensure payment type hidden field is set
+            var selOpt = acctSel.selectedOptions[0];
+            document.getElementById("qbo-payment-type").value = selOpt ? selOpt.dataset.type || "" : "";
+            // Auto-save current state before pushing to QBO
+            saveReceipt(function (ok) {
+                if (ok) {
+                    document.getElementById("qbo-push-form").submit();
+                } else {
+                    alert("Could not save changes. Please retry.");
+                }
+            });
+            return false;
+        };
+
         window._saveBeforeLeave = function (cb) {
             window.saveReceipt(cb);
         };
