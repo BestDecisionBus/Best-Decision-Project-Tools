@@ -63,6 +63,7 @@ fi
 sync_to_target() {
     local TARGET="$1"
     local LABEL="$2"
+    local EXTRA_RSYNC_OPTS="${3:-}"
 
     if [ ! -d "$TARGET" ]; then
         log "ERROR: $LABEL - $TARGET directory missing (run setup-backup.sh)"
@@ -79,7 +80,7 @@ sync_to_target() {
 
     # Rsync entire app — deleted files moved to dated trash folder (30-day retention)
     rsync -a --delete --backup --backup-dir="$TARGET/deleted/$TODAY" \
-        --exclude='.git' --exclude='scripts/logs' \
+        --exclude='.git' --exclude='scripts/logs' $EXTRA_RSYNC_OPTS \
         "$APP_DIR/" "$TARGET/current/app/" >> "$LOG_FILE" 2>&1
 
     # Prune deleted files older than retention period
@@ -148,7 +149,7 @@ sync_to_truenas() {
     local TRUENAS_TARGET="$TRUENAS_MOUNT/BDBus_Apps/bdpt-backups"
     mkdir -p "$TRUENAS_TARGET" 2>> "$LOG_FILE"
 
-    sync_to_target "$TRUENAS_TARGET" "TrueNAS"
+    sync_to_target "$TRUENAS_TARGET" "TrueNAS" "--copy-links"
     local RESULT=$?
 
     # Unmount if we mounted it
