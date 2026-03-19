@@ -20,6 +20,7 @@ TRUENAS_MOUNT="/mnt/truenas-bdpt"
 TRUENAS_CREDS="/home/joemack/.smbcredentials-truenas"
 
 SNAPSHOT_RETAIN_DAYS=7
+DELETED_RETAIN_DAYS=30
 LOG_RETAIN_DAYS=30
 
 SNAP_DATE=$(date +%Y%m%d_%H%M%S)
@@ -71,12 +72,19 @@ sync_to_target() {
     log "Syncing to $LABEL..."
 
     # Create directory structure
+    local TODAY=$(date +%Y-%m-%d)
     mkdir -p "$TARGET/current/app/instance"
     mkdir -p "$TARGET/snapshots"
+    mkdir -p "$TARGET/deleted/$TODAY"
 
-    # Rsync entire app (code + venv + data, excluding .git and backup logs)
-    rsync -a --delete --exclude='.git' --exclude='scripts/logs' \
+    # Rsync entire app — deleted files moved to dated trash folder (30-day retention)
+    rsync -a --delete --backup --backup-dir="$TARGET/deleted/$TODAY" \
+        --exclude='.git' --exclude='scripts/logs' \
         "$APP_DIR/" "$TARGET/current/app/" >> "$LOG_FILE" 2>&1
+
+    # Prune deleted files older than retention period
+    find "$TARGET/deleted/" -mindepth 1 -maxdepth 1 -type d -mtime +$DELETED_RETAIN_DAYS \
+        -exec rm -rf {} \; 2>> "$LOG_FILE"
 
     # Copy safe DB snapshot over the rsync'd copy (atomic, no WAL corruption)
     if [ -f "$DB_SNAPSHOT" ]; then
@@ -92,7 +100,9 @@ sync_to_target() {
     TOTAL_SIZE=$(du -sh "$TARGET/current/" 2>/dev/null | cut -f1)
     local SNAP_COUNT
     SNAP_COUNT=$(find "$TARGET/snapshots/" -name "bdb_tools_*.db" 2>/dev/null | wc -l)
-    log "OK: $LABEL sync complete (current: $TOTAL_SIZE, snapshots: $SNAP_COUNT)"
+    local DELETED_SIZE
+    DELETED_SIZE=$(du -sh "$TARGET/deleted/" 2>/dev/null | cut -f1)
+    log "OK: $LABEL sync complete (current: $TOTAL_SIZE, snapshots: $SNAP_COUNT, deleted: ${DELETED_SIZE:-0})"
 
     return 0
 }
