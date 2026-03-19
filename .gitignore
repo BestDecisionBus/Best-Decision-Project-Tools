@@ -20,3 +20,4 @@ static/logos/*.svg
 dist/
 build/
 .eggs/
+scripts/logs/
