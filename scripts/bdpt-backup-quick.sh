@@ -36,19 +36,18 @@ if [ ! -d "$TARGET" ]; then
     exit 0
 fi
 
-# --- SQLite safe backup ---
+# --- Rsync entire app (code + venv + data, excluding .git, backup logs, and DB) ---
 mkdir -p "$TARGET/current/app/instance"
+rsync -a --exclude='.git' --exclude='scripts/logs' --exclude='instance/bdb_tools.db' --exclude='instance/bdb_tools.db-wal' --exclude='instance/bdb_tools.db-shm' \
+    "$APP_DIR/" "$TARGET/current/app/" 2>/dev/null || true
 
+# --- SQLite safe backup (AFTER rsync so it's not overwritten) ---
 sqlite3 "$DB_PATH" ".backup '$TARGET/current/app/instance/bdb_tools.db'"
 if [ $? -ne 0 ]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: sqlite3 .backup failed" >> "$LOG_FILE"
     notify_failure "SQLite .backup failed at $(date '+%Y-%m-%d %H:%M:%S'). Check quick-backup.log"
     exit 1
 fi
-
-# --- Rsync entire app (code + venv + data, excluding .git and backup logs) ---
-rsync -a --exclude='.git' --exclude='scripts/logs' \
-    "$APP_DIR/" "$TARGET/current/app/" 2>/dev/null || true
 
 # --- Log success (one line per run) ---
 DB_SIZE=$(du -sh "$TARGET/current/app/instance/bdb_tools.db" 2>/dev/null | cut -f1)
